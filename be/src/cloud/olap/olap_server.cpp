@@ -536,11 +536,13 @@ std::vector<TabletSharedPtr> StorageEngine::_generate_cloud_compaction_tasks(
     std::unordered_map<int64_t, std::vector<std::shared_ptr<CloudCumulativeCompaction>>>
             submitted_cumu_compactions;
     std::unordered_map<int64_t, std::shared_ptr<CloudBaseCompaction>> submitted_base_compactions;
+    std::unordered_map<int64_t, std::shared_ptr<CloudFullCompaction>> submitted_full_compactions;
     {
         std::lock_guard lock(_compaction_mtx);
         tablet_preparing_cumu_compaction = _tablet_preparing_cumu_compaction;
         submitted_cumu_compactions = _submitted_cumu_compactions;
         submitted_base_compactions = _submitted_base_compactions;
+        submitted_full_compactions = _submitted_full_compactions;
     }
 
     bool need_pick_tablet = true;
@@ -549,7 +551,7 @@ std::vector<TabletSharedPtr> StorageEngine::_generate_cloud_compaction_tasks(
     int num_cumu =
             std::accumulate(submitted_cumu_compactions.begin(), submitted_cumu_compactions.end(), 0,
                             [](int a, auto& b) { return a + b.second.size(); });
-    int num_base = submitted_base_compactions.size();
+    int num_base = submitted_base_compactions.size() + submitted_full_compactions.size();
     int n = thread_per_disk - num_cumu - num_base;
     if (compaction_type == CompactionType::BASE_COMPACTION) {
         // We need to reserve at least one thread for cumulative compaction,
@@ -568,8 +570,9 @@ std::vector<TabletSharedPtr> StorageEngine::_generate_cloud_compaction_tasks(
     // Return true for skipping compaction
     std::function<bool(Tablet*)> filter_out;
     if (compaction_type == CompactionType::BASE_COMPACTION) {
-        filter_out = [&submitted_base_compactions](Tablet* t) {
+        filter_out = [&submitted_base_compactions, &submitted_full_compactions](Tablet* t) {
             return !!submitted_base_compactions.count(t->tablet_id()) ||
+                   !!submitted_full_compactions.count(t->tablet_id()) ||
                    t->tablet_state() != TABLET_RUNNING;
         };
     } else if (config::enable_parallel_cumu_compaction) {

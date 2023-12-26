@@ -237,6 +237,7 @@ Status CloudCumulativeCompaction::modify_rowsets(const Merger::Statistics* merge
         // clang-format off
         _tablet->set_last_base_compaction_success_time(std::max(_tablet->last_base_compaction_success_time(), stats.last_base_compaction_time_ms()));
         _tablet->set_last_cumu_compaction_success_time(std::max(_tablet->last_cumu_compaction_success_time(), stats.last_cumu_compaction_time_ms()));
+        _tablet->set_last_full_compaction_success_time(std::max(_tablet->last_full_compaction_success_time(), stats.last_full_compaction_time_ms()));
         // clang-format on
         if (_tablet->cumulative_compaction_cnt() >= stats.cumulative_compaction_cnt()) {
             // This could happen while calling `sync_tablet_rowsets` during `commit_tablet_job`, or parallel cumu compactions which are

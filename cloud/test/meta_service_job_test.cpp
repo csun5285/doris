@@ -286,6 +286,58 @@ TEST(MetaServiceJobTest, StartCompactionArguments) {
     ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << res.status().msg();
 }
 
+TEST(MetaServiceJobTest, StartFullCompaction) {
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("get_instance_id::pred", [](void* p) { *((bool*)p) = true; });
+    sp->set_call_back("get_instance_id", [&](void* p) { *((std::string*)p) = instance_id; });
+    sp->enable_processing();
+
+    auto meta_service = get_meta_service();
+    constexpr int64_t table_id = 10001;
+    constexpr int64_t index_id = 10002;
+    constexpr int64_t partition_id = 10003;
+    constexpr int64_t tablet_id = 10004;
+    create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id, false);
+
+    StartTabletJobResponse res;
+    {
+        start_compaction_job(meta_service.get(), tablet_id, "compaction1", "ip:port", 0, 0,
+                             TabletCompactionJobPB::BASE, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+
+        start_compaction_job(meta_service.get(), tablet_id, "compaction2", "ip:port", 0, 0,
+                             TabletCompactionJobPB::CUMULATIVE, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+
+        start_compaction_job(meta_service.get(), tablet_id, "compaction3", "ip:port", 0, 0,
+                             TabletCompactionJobPB::BASE, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::JOB_TABLET_BUSY);
+
+        start_compaction_job(meta_service.get(), tablet_id, "compaction4", "ip:port", 0, 0,
+                             TabletCompactionJobPB::FULL, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+
+        start_compaction_job(meta_service.get(), tablet_id, "compaction5", "ip:port", 0, 0,
+                             TabletCompactionJobPB::BASE, res);
+        ASSERT_EQ(res.status().code(), MetaServiceCode::JOB_TABLET_BUSY);
+    }
+    {
+        start_compaction_job(meta_service.get(), tablet_id, "compaction6", "ip:port", 0, 0,
+                             TabletCompactionJobPB::FULL, res, {1, 20});
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+
+        start_compaction_job(meta_service.get(), tablet_id, "compaction7", "ip:port", 0, 0,
+                             TabletCompactionJobPB::CUMULATIVE, res, {18, 22});
+        ASSERT_EQ(res.status().code(), MetaServiceCode::JOB_TABLET_BUSY);
+
+        start_compaction_job(meta_service.get(), tablet_id, "compaction8", "ip:port", 0, 0,
+                             TabletCompactionJobPB::CUMULATIVE, res, {21, 26});
+        ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+    }
+}
+
 TEST(MetaServiceJobTest, StartSchemaChangeArguments) {
     auto sp = SyncPoint::get_instance();
     std::unique_ptr<int, std::function<void(int*)>> defer(

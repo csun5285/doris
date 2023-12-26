@@ -4,6 +4,7 @@
 
 #include "cloud/cloud_base_compaction.h"
 #include "cloud/cloud_cumulative_compaction.h"
+#include "cloud/cloud_full_compaction.h"
 #include "cloud/cloud_meta_mgr.h"
 #include "cloud/cloud_tablet_mgr.h"
 #include "cloud/olap/storage_engine.h"
@@ -819,6 +820,267 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         EXPECT_EQ(tablet->base_compaction_cnt(), 0);
         EXPECT_EQ(tablet->cumulative_compaction_cnt(), 4);
         EXPECT_EQ(tablet->cumulative_layer_point(), 11);
+        EXPECT_EQ(tablet->fetch_add_approximate_num_rowsets(0), 3);
+    }
+}
+
+TEST(CloudCompactionTest, full_compaction_schedule) {
+    StorageEngine storage_engine({});
+
+    // Launch base compaction pool to submit compaction
+    ThreadPoolBuilder("BaseCompactionTaskThreadPool")
+            .set_min_threads(2)
+            .set_max_threads(2)
+            .build(&storage_engine._base_compaction_thread_pool);
+
+    auto sp = SyncPoint::get_instance();
+    Defer defer {[sp] {
+        sp->clear_call_back("MetaServiceProxy::get_client");
+        sp->clear_call_back("CloudMetaMgr::prepare_tablet_job");
+        sp->clear_call_back("CloudCumulativeCompaction::execute_compact_impl");
+        sp->load_dependency({}); // Clear dependency
+    }};
+    sp->enable_processing();
+
+    // Create MockMetaService
+    auto mock_service = std::make_shared<MockMetaService>();
+    sp->set_call_back("MetaServiceProxy::get_client", [&mock_service](auto&& args) {
+        auto stub = try_any_cast<std::shared_ptr<selectdb::MetaService_Stub>*>(args[0]);
+        *stub = mock_service;
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
+
+    // Prepare tablet
+    constexpr int tablet_id = 10011;
+    {
+        auto& tablet_rowsets = mock_service->tablet_rowsets_map[tablet_id];
+        tablet_rowsets.add_rowset(create_rowset_pb({0, 1}));
+        tablet_rowsets.add_rowset(create_rowset_pb({2, 2}));
+        tablet_rowsets.add_rowset(create_rowset_pb({3, 3}));
+        auto& stats = tablet_rowsets.stats;
+        stats.set_base_compaction_cnt(0);
+        stats.set_cumulative_compaction_cnt(0);
+        stats.set_cumulative_point(2);
+    }
+
+    sp->set_call_back("CloudMetaMgr::prepare_tablet_job", [](auto&& args) {
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
+    sp->set_call_back("CloudFullCompaction::execute_compact_impl", [](auto&& args) {
+        ::sleep(1);
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
+
+    config::cumulative_compaction_min_deltas = 2;
+    config::enable_parallel_cumu_compaction = true;
+    TabletSharedPtr tablet;
+    auto st = cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
+    ASSERT_TRUE(st.ok()) << st;
+    // To meet the condition of not skipping in `get_topn_tablets_to_compact`
+    tablet->last_load_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                        std::chrono::system_clock::now().time_since_epoch())
+                                        .count();
+    // Submit full compaction on `tablet`
+    tablet->set_tablet_state(TabletState::TABLET_RUNNING);
+    st = storage_engine.submit_compaction_task(tablet, CompactionType::FULL_COMPACTION);
+    ASSERT_EQ(st, Status::OK());
+
+    // `tablet` should in candidate tablets for cumu compaction
+    auto candidate_tablets = storage_engine._generate_cloud_compaction_tasks(
+            CompactionType::CUMULATIVE_COMPACTION, false);
+    ASSERT_EQ(candidate_tablets.size(), 1);
+    ASSERT_EQ(candidate_tablets[0], tablet);
+
+    // `tablet` should not in candidate tablets for base compaction
+    candidate_tablets = storage_engine._generate_cloud_compaction_tasks(
+            CompactionType::BASE_COMPACTION, false);
+    ASSERT_EQ(candidate_tablets.size(), 0);
+
+    st = storage_engine.submit_compaction_task(tablet, CompactionType::FULL_COMPACTION);
+    ASSERT_TRUE(st.is<ALREADY_EXIST>());
+}
+
+TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
+    StorageEngine storage_engine({});
+
+    auto sp = SyncPoint::get_instance();
+    Defer defer {[sp] {
+        sp->clear_call_back("MetaServiceProxy::get_client");
+        sp->clear_call_back("CloudMetaMgr::prepare_tablet_job");
+        sp->clear_call_back("CloudMetaMgr::commit_tablet_job");
+    }};
+    sp->enable_processing();
+
+    // Create MockMetaService
+    auto mock_service = std::make_shared<MockMetaService>();
+    sp->set_call_back("MetaServiceProxy::get_client", [&mock_service](auto&& args) {
+        auto stub = try_any_cast<std::shared_ptr<selectdb::MetaService_Stub>*>(args[0]);
+        *stub = mock_service;
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
+
+    auto prepare_tablet = [&](int64_t tablet_id) {
+        auto& tablet_rowsets = mock_service->tablet_rowsets_map[tablet_id];
+        tablet_rowsets.add_rowset(create_rowset_pb({0, 1}));
+        tablet_rowsets.add_rowset(create_rowset_pb({2, 10}));
+        tablet_rowsets.add_rowset(create_rowset_pb({11, 20}));
+        tablet_rowsets.add_rowset(create_rowset_pb({21, 30}));
+        tablet_rowsets.add_rowset(create_rowset_pb({31, 32}));
+        tablet_rowsets.add_rowset(create_rowset_pb({33, 33}));
+        tablet_rowsets.add_rowset(create_rowset_pb({34, 34}));
+        auto& stats = tablet_rowsets.stats;
+        stats.set_base_compaction_cnt(1);
+        stats.set_cumulative_compaction_cnt(10);
+        stats.set_cumulative_point(31);
+    };
+
+    sp->set_call_back("CloudMetaMgr::prepare_tablet_job", [](auto&& args) {
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
+
+    config::cumulative_compaction_min_deltas = 2;
+    config::base_compaction_num_cumulative_deltas = 2;
+
+    selectdb::TabletStatsPB commit_job_stats;
+    sp->set_call_back("CloudMetaMgr::commit_tablet_job", [&](auto&& args) {
+        selectdb::FinishTabletJobResponse* res =
+                try_any_cast<selectdb::FinishTabletJobResponse*>(args[1]);
+        *res->mutable_stats() = commit_job_stats;
+        auto pair = try_any_cast<std::pair<Status, bool>*>(args.back());
+        pair->second = true;
+    });
+
+    {
+        // Simulate executing commit job and receiving response out of sequence:
+        //  commit cumu -> commit full -> full update cache -> cumu update cache
+        prepare_tablet(10011);
+        TabletSharedPtr tablet;
+        cloud::tablet_mgr()->get_tablet(10011, &tablet);
+        CloudCumulativeCompaction cumu(tablet);
+        auto st = cumu.prepare_compact();
+        ASSERT_EQ(st, Status::OK());
+        cumu._output_rowset = create_rowset({31, 34});
+
+        CloudFullCompaction full(tablet);
+        st = full.prepare_compact();
+        ASSERT_EQ(st, Status::OK());
+        full._output_rowset = create_rowset({2, 30});
+
+        // - Thread1: commit cumu
+        auto& tablet_rowsets = mock_service->tablet_rowsets_map[10011];
+        tablet_rowsets.add_rowset(create_rowset_pb({31, 34}));
+        auto& stats = tablet_rowsets.stats;
+        stats.set_cumulative_compaction_cnt(11);
+        auto cumu_stats = stats;
+
+        // - Thread2: commit full
+        tablet_rowsets.add_rowset(create_rowset_pb({2, 30}));
+        stats.set_base_compaction_cnt(2);
+        auto base_stats = stats;
+
+        // - Thread2: base update tablet cache
+        commit_job_stats = base_stats;
+        full.modify_rowsets(nullptr);
+
+        // - Thread1: cumu update tablet cache
+        commit_job_stats = cumu_stats;
+        cumu.modify_rowsets(nullptr);
+
+        Versions versions;
+        tablet->capture_consistent_versions({0, 34}, &versions);
+        ASSERT_EQ(versions.size(), 3);
+        EXPECT_EQ(versions[1], Version(2, 30));
+        EXPECT_EQ(versions[2], Version(31, 34));
+        EXPECT_EQ(tablet->base_compaction_cnt(), 2);
+        EXPECT_EQ(tablet->cumulative_compaction_cnt(), 11);
+        EXPECT_EQ(tablet->cumulative_layer_point(), 31);
+        EXPECT_EQ(tablet->fetch_add_approximate_num_rowsets(0), 3);
+    }
+    {
+        // Simulate executing commit job and receiving response out of sequence:
+        //  commit full -> commit cumu -> cumu update cache -> full update cache
+        prepare_tablet(10012);
+        TabletSharedPtr tablet;
+        cloud::tablet_mgr()->get_tablet(10012, &tablet);
+        CloudCumulativeCompaction cumu(tablet);
+        auto st = cumu.prepare_compact();
+        ASSERT_EQ(st, Status::OK());
+        cumu._output_rowset = create_rowset({31, 34});
+
+        CloudFullCompaction full(tablet);
+        st = full.prepare_compact();
+        ASSERT_EQ(st, Status::OK());
+        full._output_rowset = create_rowset({2, 30});
+
+        // - Thread1: commit base
+        auto& tablet_rowsets = mock_service->tablet_rowsets_map[10012];
+        tablet_rowsets.add_rowset(create_rowset_pb({2, 30}));
+        auto& stats = tablet_rowsets.stats;
+        stats.set_base_compaction_cnt(2);
+        auto base_stats = stats;
+
+        // - Thread2: commit cumu
+        tablet_rowsets.add_rowset(create_rowset_pb({31, 34}));
+        stats.set_cumulative_compaction_cnt(11);
+        auto cumu_stats = stats;
+
+        // - Thread2: cumu update tablet cache
+        commit_job_stats = cumu_stats;
+        cumu.modify_rowsets(nullptr);
+
+        // - Thread1: base update tablet cache
+        commit_job_stats = base_stats;
+        full.modify_rowsets(nullptr);
+
+        Versions versions;
+        tablet->capture_consistent_versions({0, 34}, &versions);
+        ASSERT_EQ(versions.size(), 3);
+        EXPECT_EQ(versions[1], Version(2, 30));
+        EXPECT_EQ(versions[2], Version(31, 34));
+        EXPECT_EQ(tablet->base_compaction_cnt(), 2);
+        EXPECT_EQ(tablet->cumulative_compaction_cnt(), 11);
+        EXPECT_EQ(tablet->cumulative_layer_point(), 31);
+        EXPECT_EQ(tablet->fetch_add_approximate_num_rowsets(0), 3);
+    }
+    {
+        // Simulate executing commit job and update tablet cache, suppose this BE is BE1:
+        //  BE1 prepare full -> BE2 commit cumu -> BE1 commit full -> BE1 full update cache
+        prepare_tablet(10013);
+        TabletSharedPtr tablet;
+        cloud::tablet_mgr()->get_tablet(10013, &tablet);
+        CloudFullCompaction full(tablet);
+        auto st = full.prepare_compact();
+        ASSERT_EQ(st, Status::OK());
+        full._output_rowset = create_rowset({2, 30});
+
+        // - BE2 commit cumu and update cumu point
+        auto& tablet_rowsets = mock_service->tablet_rowsets_map[10013];
+        tablet_rowsets.add_rowset(create_rowset_pb({31, 34}));
+        auto& stats = tablet_rowsets.stats;
+        stats.set_cumulative_compaction_cnt(11);
+        stats.set_cumulative_point(35);
+
+        // - BE1 commit base
+        tablet_rowsets.add_rowset(create_rowset_pb({2, 30}));
+        stats.set_base_compaction_cnt(2);
+
+        // - BE1 cumu update tablet cache
+        commit_job_stats = stats;
+        full.modify_rowsets(nullptr);
+        tablet->cloud_sync_rowsets();
+        Versions versions;
+        tablet->capture_consistent_versions({0, 34}, &versions);
+        ASSERT_EQ(versions.size(), 3);
+        EXPECT_EQ(versions[1], Version(2, 30));
+        EXPECT_EQ(versions[2], Version(31, 34));
+        EXPECT_EQ(tablet->base_compaction_cnt(), 2);
+        EXPECT_EQ(tablet->cumulative_compaction_cnt(), 11);
+        EXPECT_EQ(tablet->cumulative_layer_point(), 35);
         EXPECT_EQ(tablet->fetch_add_approximate_num_rowsets(0), 3);
     }
 }

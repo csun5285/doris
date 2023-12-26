@@ -135,10 +135,15 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         }), compactions.end());
         // clang-format on
         // Check conflict job
-        if (compaction.input_versions().empty()) {
+        if (compaction.type() == TabletCompactionJobPB::FULL) {
+            // Full compaction is generally used for data correctness repair
+            // for MOW table, so priority should be given to performing full
+            // compaction operations and canceling other types of compaction.
+            compactions.Clear();
+        } else if (compaction.input_versions().empty()) {
             // Unknown input version range, doesn't support parallel compaction of same type
             for (auto& c : compactions) {
-                if (c.type() != compaction.type()) continue;
+                if (c.type() != compaction.type() && c.type() != TabletCompactionJobPB::FULL) continue;
                 if (c.id() == compaction.id()) return; // Same job, return OK to keep idempotency
                 msg = fmt::format("compaction has already started, tablet_id={} job={}", tablet_id,
                                   proto_to_json(c));
@@ -155,7 +160,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
                        a.input_versions(1) < b.input_versions(0);
             };
             for (auto& c : compactions) {
-                if (c.type() != compaction.type()) continue;
+                if (c.type() != compaction.type() && c.type() != TabletCompactionJobPB::FULL) continue;
                 if (c.input_versions_size() > 0 && version_not_conflict(c, compaction)) continue;
                 if (c.id() == compaction.id()) return; // Same job, return OK to keep idempotency
                 msg = fmt::format("compaction has already started, tablet_id={} job={}", tablet_id,
@@ -165,7 +170,7 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
                 if (c.input_versions_size() == 0) return;
                 // Notify version ranges in started compaction to BE, so BE can retry other version range
                 for (auto& c : compactions) {
-                    if (c.type() == compaction.type()) {
+                    if (c.type() == compaction.type() || c.type() == TabletCompactionJobPB::FULL) {
                         // If there are multiple started compaction of same type, they all must has input version range
                         DCHECK_EQ(c.input_versions_size(), 2) << proto_to_json(c);
                         response->add_version_in_compaction(c.input_versions(0));
@@ -621,7 +626,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         // clang-format on
     } else if (compaction.type() == TabletCompactionJobPB::FULL) {
         // clang-format off
-        stats->set_full_compaction_cnt(stats->full_compaction_cnt() + 1);
+        stats->set_base_compaction_cnt(stats->base_compaction_cnt() + 1);
         if (compaction.output_cumulative_point() > stats->cumulative_point()) {
             // After supporting parallel cumu compaction, compaction with older cumu point may be committed after
             // new cumu point has been set, MUST NOT set cumu point back to old value
@@ -631,7 +636,7 @@ void process_compaction_job(MetaServiceCode& code, std::string& msg, std::string
         stats->set_data_size(stats->data_size() + (compaction.size_output_rowsets() - compaction.size_input_rowsets()));
         stats->set_num_rowsets(stats->num_rowsets() + (compaction.num_output_rowsets() - compaction.num_input_rowsets()));
         stats->set_num_segments(stats->num_segments() + (compaction.num_output_segments() - compaction.num_input_segments()));
-        stats->set_last_full_compaction_time_ms(now);
+        stats->set_last_full_compaction_time_ms(now * 1000);
         // clang-format on
     } else {
         msg = "invalid compaction type";
