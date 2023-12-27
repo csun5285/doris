@@ -16,102 +16,48 @@
 #
 
 github:
-  description: Apache Doris is an easy-to-use, high performance and unified analytics database. 
-  homepage: https://doris.apache.org
+  description: Apache Doris is an MPP-based interactive SQL data warehousing for reporting and analysis.
+  homepage: https://doris.apache.org/
   labels:
-    - real-time
-    - query-engine
+    - data-warehousing
+    - mpp
     - olap
-    - lakehouse
-    - etl
-    - elt
-    - sql
-    - snowflake
-    - redshift
-    - bigquery
-    - hive
+    - dbms
+    - apache
+    - doris
+    - database
+    - distributed-system
+    - big-data
     - iceberg
     - hudi
-    - delta-lake
-    - spark
+    - datalake
+    - hive
     - hadoop
-    - dbt
-    - database
+    - analytics
+    - tpch
+    - ssb
+    - vectorized
 
   enabled_merge_buttons:
     squash:  true
     merge:   false
     rebase:  false
   protected_branches:
-    master:
-      required_status_checks:
-        # if strict is true, means "Require branches to be up to date before merging".
-        strict: false
-        contexts:
-          - License Check
-          - Clang Formatter
-          - CheckStyle
-          - P0 Regression (Doris Regression)
-          - P1 Regression (Doris Regression)
-          - FE UT (Doris FE UT)
-          - BE UT (Doris BE UT)
-          - Build Broker
-          - Build Documents
-          - BE UT (Clang)
-          - ShellCheck
-          - clickbench (benchmark)
-          - BE UT (macOS)
-          - Build Third Party Libraries (Linux)
-          - Build Third Party Libraries (macOS)
-          - COMPILE (DORIS_COMPILE)
-          - Need_2_Approval
-
-      required_pull_request_reviews:
-        dismiss_stale_reviews: true
-        required_approving_review_count: 1
-    branch-1.1-lts:
-      required_status_checks:
-        # if strict is true, means "Require branches to be up to date before merging".
-        strict: false
-        contexts:
-          - License Check
-
-      required_pull_request_reviews:
-        dismiss_stale_reviews: true
-        required_approving_review_count: 1
-
-    branch-2.0:
+    selectdb-cloud-dev:
       required_status_checks:
       # if strict is true, means "Require branches to be up to date before merging".
         strict: false
         contexts:
-          - License Check
-          - Clang Formatter
           - CheckStyle
-          - Build Documents
-          - ShellCheck
-          - Need_2_Approval
-          - COMPILE (DORIS_COMPILE)
-          - P0 Regression (Doris Regression)
-          - FE UT (Doris FE UT)
-          - BE UT (Doris BE UT)
-          - clickbench-new (clickbench)
-        required_pull_request_reviews:
+          - MS UT (UT)
+          - FE UT (UT)
+          - CLOUT BE UT (UT)
+          - LOCAL BE UT (UT)
+
+      required_pull_request_reviews:
         dismiss_stale_reviews: true
         required_approving_review_count: 1
-
+  notifications:
+    pullrequests_status:  core@selectdb.com
   collaborators:
-    - LemonLiTree
-    - zy-kkk
-    - Yukang-Lian
-    - xiaokang
-    - TangSiyang2001
-    - platoneko
-    - Lchangliang
-    - freemandealer
-    - nanfeng1999
-    - gitccl
-
-notifications:
-    pullrequests_status:  commits@doris.apache.org
-
+    - gavinchou
