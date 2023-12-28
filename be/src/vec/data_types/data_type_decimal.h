@@ -85,7 +85,7 @@ constexpr size_t max_decimal_precision<Decimal64>() {
 }
 template <>
 constexpr size_t max_decimal_precision<Decimal128>() {
-    return 38;
+    return 27;
 }
 template <>
 constexpr size_t max_decimal_precision<Decimal128I>() {
