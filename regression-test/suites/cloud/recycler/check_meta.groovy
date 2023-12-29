@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-suite("check_meta") {
+suite("check_meta", "check_meta") {
     def token = "greedisgood9999"
     def instanceId = context.config.instanceId;
     def cloudUniqueId = context.config.cloudUniqueId;
@@ -23,11 +23,26 @@ suite("check_meta") {
     def errMsg = "OK"
     def status = 200
 
+    String jdbcUrl = context.config.jdbcUrl
+    String urlWithoutSchema = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3)
+    def jdbcUser = context.config.jdbcUser
+    def jdbcPassword = context.config.jdbcPassword
+
+    def sqlIp = urlWithoutSchema.substring(0, urlWithoutSchema.indexOf(":"))
+    def sqlPort
+    if (urlWithoutSchema.indexOf("/") >= 0) {
+        // e.g: jdbc:mysql://locahost:8080/?a=b
+        sqlPort = urlWithoutSchema.substring(urlWithoutSchema.indexOf(":") + 1, urlWithoutSchema.indexOf("/"))
+    } else {
+        // e.g: jdbc:mysql://locahost:8080
+        sqlPort = urlWithoutSchema.substring(urlWithoutSchema.indexOf(":") + 1)
+    }
+
     def checkMeta = {
         def metaCheckApi = { checkFunc ->
             httpTest {
                 endpoint context.config.recycleServiceHttpAddress
-                uri "/RecyclerService/http/check_meta?token=$token&instance_id=$instanceId&host=127.0.0.1&port=9742&user=root&password="
+                uri "/RecyclerService/http/check_meta?token=$token&instance_id=$instanceId&host=${sqlIp}&port=${sqlPort}&user=${jdbcUser}&password=${jdbcPassword}"
                 op "get"
                 check checkFunc
             }
@@ -51,6 +66,9 @@ suite("check_meta") {
         logger.info("status {}, errMsg {} start {} now {}", status, errMsg, start, now)
     } while(status != 200 && errMsg == "meta leak err" && (now - start < 3600 * 1000))
 
+    assertEquals(status, 200)
+    assertEquals(errMsg.trim(), "OK")
+
     List<List<Object>> dbRes = sql "show databases"
     for (dbRow : dbRes) {
         db = dbRow[0]
@@ -65,7 +83,7 @@ suite("check_meta") {
         for (tableRow : tableRes) {
             table = tableRow[0]
             logger.info("select count database: {}, table {}", db, table)
-            sql """ select count(*) from ${db}.${table} """
+            sql """ select count(*) from ${db}.`${table}` """
         }
     }
 }

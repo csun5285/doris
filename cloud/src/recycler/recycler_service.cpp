@@ -220,7 +220,7 @@ void check_meta(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instanc
                 const std::string& user, const std::string& password,
                 std::string& msg) {
     std::unique_ptr<MetaChecker> meta_checker = std::make_unique<MetaChecker>(txn_kv);
-    meta_checker->do_check(host, port, user, password, msg);
+    meta_checker->do_check(host, port, user, password, instance_id, msg);
 }
 
 void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,

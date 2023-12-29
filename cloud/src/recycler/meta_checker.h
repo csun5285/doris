@@ -30,13 +30,14 @@ public:
     explicit MetaChecker(std::shared_ptr<TxnKv> txn_kv);
     void do_check(const std::string& host, const std::string& port,
                   const std::string& user, const std::string& password,
-                  std::string& msg);
+                  const std::string& instance_id, std::string& msg);
     bool check_fe_meta_by_fdb(MYSQL* conn);
     bool check_fdb_by_fe_meta(MYSQL* conn);
 
 private:
     std::shared_ptr<TxnKv> txn_kv_;
     StatInfo stat_info_;
+    std::string instance_id_;
 };
 
 }

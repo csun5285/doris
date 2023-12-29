@@ -15,8 +15,6 @@
 
 namespace selectdb {
 
-std::string instance_id = "lw_instance_0";
-
 MetaChecker::MetaChecker(std::shared_ptr<TxnKv> txn_kv) : txn_kv_(std::move(txn_kv)) { }
 
 struct TabletInfo {
@@ -54,8 +52,8 @@ bool MetaChecker::check_fe_meta_by_fdb(MYSQL* conn) {
 
     std::string start_key;
     std::string end_key;
-    meta_tablet_idx_key({instance_id, 0}, &start_key);
-    meta_tablet_idx_key({instance_id, std::numeric_limits<int64_t>::max()}, &end_key);
+    meta_tablet_idx_key({instance_id_, 0}, &start_key);
+    meta_tablet_idx_key({instance_id_, std::numeric_limits<int64_t>::max()}, &end_key);
     std::vector<TabletIndexPB> tablet_indexes;
 
     std::unique_ptr<RangeGetIterator> it;
@@ -221,7 +219,7 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
         }
 
         std::string key, val;
-        meta_tablet_idx_key({instance_id, tablet_info.tablet_id}, &key);
+        meta_tablet_idx_key({instance_id_, tablet_info.tablet_id}, &key);
         err = txn->get(key, &val);
         if (err != TxnErrorCode::TXN_OK) {
             if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -284,7 +282,7 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
             return false;
         }
 
-        MetaTabletKeyInfo key_info1 {instance_id, tablet_info.table_id, tablet_info.index_id,
+        MetaTabletKeyInfo key_info1 {instance_id_, tablet_info.table_id, tablet_info.index_id,
                                      tablet_info.partition_id, tablet_info.tablet_id};
         std::string key, val;
         meta_tablet_key(key_info1, &key);
@@ -310,7 +308,7 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
         }
 
         std::string schema_key, schema_val;
-        meta_schema_key({instance_id, tablet_info.index_id, tablet_info.schema_version},
+        meta_schema_key({instance_id_, tablet_info.index_id, tablet_info.schema_version},
                         &schema_key);
         ValueBuf val_buf;
         err = selectdb::get(txn.get(), schema_key, &val_buf);
@@ -339,7 +337,7 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
         int64_t db_id = elem.second.db_id;
         int64_t table_id = elem.second.table_id;
         int64_t partition_id = elem.second.partition_id;
-        std::string ver_key = version_key({instance_id, db_id, table_id, partition_id});
+        std::string ver_key = version_key({instance_id_, db_id, table_id, partition_id});
         std::string ver_val;
         err = txn->get(ver_key, &ver_val);
         if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -373,9 +371,9 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
 
 void MetaChecker::do_check(const std::string& host, const std::string& port,
                            const std::string& user, const std::string& password,
-                           std::string& msg) {
+                           const std::string& instance_id, std::string& msg) {
     LOG(INFO) << "meta check begin";
-
+    instance_id_ = instance_id;
     MYSQL *conn;
     conn = mysql_init(NULL);
     if (!conn) {
