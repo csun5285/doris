@@ -612,7 +612,9 @@ public class Auth implements Writable {
                 mysqlUserName, toDropMysqlUserId);
         LOG.info(reason);
         int retryTime = 0;
-        while (true) {
+        // if notify ms failed, at least wait 5 mins, default 1 day
+        int maxRetryTimes = Config.drop_user_notify_ms_max_times > 300 ? Config.drop_user_notify_ms_max_times : 300;
+        while (retryTime < maxRetryTimes) {
             try {
                 Env.getCurrentInternalCatalog().dropStage(StagePB.StageType.INTERNAL,
                         mysqlUserName, toDropMysqlUserId, null, reason, true);
@@ -627,6 +629,10 @@ public class Auth implements Writable {
             } catch (InterruptedException e) {
                 LOG.info("InterruptedException: ", e);
             }
+        }
+        if (retryTime >= Config.drop_user_notify_ms_max_times) {
+            LOG.warn("drop user failed, tried {} times, but still failed, plz check",
+                    Config.drop_user_notify_ms_max_times);
         }
     }
 

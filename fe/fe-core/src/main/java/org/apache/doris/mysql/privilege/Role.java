@@ -517,7 +517,6 @@ public class Role implements Writable, GsonPostProcessable {
             } else if (type == ResourceTypeEnum.STAGE) {
                 savedPrivs.or(PrivBitSet.of(Privilege.STAGE_USAGE_PRIV));
             }
-            LOG.info("compatible with stock data, savedPrivs {} , wanted {}", savedPrivs, wanted);
         }
         return Privilege.satisfy(savedPrivs, wanted);
     }

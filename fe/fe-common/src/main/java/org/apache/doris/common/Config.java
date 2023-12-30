@@ -2381,6 +2381,9 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static boolean enable_collect_internal_query_profile = false;
 
+    @ConfField
+    public static int drop_user_notify_ms_max_times = 86400;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================
