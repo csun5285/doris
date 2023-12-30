@@ -941,7 +941,7 @@ public class ConnectContext {
 
         // get all available cluster of the user
         for (String cloudClusterName : cloudClusterNames) {
-            if (Env.getCurrentEnv().getAuth().checkCloudPriv(ConnectContext.get().getCurrentUserIdentity(),
+            if (Env.getCurrentEnv().getAuth().checkCloudPriv(getCurrentUserIdentity(),
                     cloudClusterName, PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
                 // find a cluster has more than one alive be
                 List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);

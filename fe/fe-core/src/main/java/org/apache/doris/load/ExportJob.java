@@ -578,7 +578,10 @@ public class ExportJob implements Writable {
         // maybe user cancel this job
         if (task != null && state == JobState.EXPORTING && stmtExecutorList != null) {
             for (int idx = 0; idx < stmtExecutorList.size(); ++idx) {
-                stmtExecutorList.get(idx).cancel();
+                StmtExecutor executor = stmtExecutorList.get(idx);
+                if (executor != null) {
+                    executor.cancel();
+                }
             }
         }
 

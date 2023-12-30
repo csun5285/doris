@@ -151,6 +151,7 @@ public class ExportExportingTask extends MasterTask {
                         table.readUnlock();
                     }
                 } catch (AnalysisException e) {
+                    LOG.warn("analyze export job select stmt {} failed", idx, e);
                     return new ExportResult(true,
                             new ExportFailMsg(ExportFailMsg.CancelType.RUN_FAIL, e.getMessage()), null);
                 }
@@ -165,11 +166,15 @@ public class ExportExportingTask extends MasterTask {
                     ExportJob.OutfileInfo outfileInfo = getOutFileInfo(r.connectContext.getResultAttachedInfo());
                     return new ExportResult(false, null, outfileInfo);
                 } catch (Exception e) {
+                    LOG.warn("execute export job select stmt {} failed", idx, e);
                     return new ExportResult(true, new ExportFailMsg(ExportFailMsg.CancelType.RUN_FAIL,
                             e.getMessage()),
                             null);
                 } finally {
-                    job.getStmtExecutor(idx).addProfileToSpan();
+                    StmtExecutor executor = job.getStmtExecutor(idx);
+                    if (executor != null) {
+                        executor.addProfileToSpan();
+                    }
                 }
             });
         }
@@ -246,6 +251,7 @@ public class ExportExportingTask extends MasterTask {
         connectContext.setDatabase(job.getTableName().getDb());
         connectContext.setQualifiedUser(job.getQualifiedUser());
         connectContext.setCurrentUserIdentity(job.getUserIdentity());
+        connectContext.setCloudCluster();
         UUID uuid = UUID.randomUUID();
         TUniqueId queryId = new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits());
         connectContext.setQueryId(queryId);
