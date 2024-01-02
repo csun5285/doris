@@ -1417,8 +1417,8 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
     }
 }
 
-void create_object_file_pb(std::string prefix, std::vector<ObjectFilePB>* object_files) {
-    for (int i = 0; i < 10; ++i) {
+void create_object_file_pb(std::string prefix, std::vector<ObjectFilePB>* object_files, int file_num = 10) {
+    for (int i = 0; i < file_num; ++i) {
         ObjectFilePB object_file;
         // create object in S3, pay attention to the relative path
         object_file.set_relative_path(prefix + "/obj_" + std::to_string(i));
@@ -1561,6 +1561,117 @@ TEST(RecyclerTest, recycle_copy_jobs) {
     stage_table_files.emplace_back(external_stage_id, 3, 0, false);
     stage_table_files.emplace_back(external_stage_id, 4, 10, true);
     stage_table_files.emplace_back(nonexist_external_stage_id, 7, 0, false);
+    for (const auto& [stage_id, table_id, files, expected_job_exists] : stage_table_files) {
+        // check copy files
+        int file_num = 0;
+        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), stage_id, table_id, &file_num)) << table_id;
+        EXPECT_EQ(files, file_num) << table_id;
+        // check copy jobs
+        bool exist = false;
+        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), stage_id, table_id, &exist)) << table_id;
+        EXPECT_EQ(expected_job_exists, exist) << table_id;
+    }
+}
+
+TEST(RecyclerTest, recycle_batch_copy_jobs) {
+    auto sp = SyncPoint::get_instance();
+    std::unique_ptr<int, std::function<void(int*)>> defer(
+            (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
+    sp->set_call_back("MockAccessor::delete_objects_ret::pred",
+                      [](void* p) { *((bool*)p) = true; });
+    sp->enable_processing();
+    using namespace std::chrono;
+    auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
+    ASSERT_NE(txn_kv.get(), nullptr);
+    ASSERT_EQ(txn_kv->init(), 0);
+
+    // create internal/external stage
+    std::string internal_stage_id = "internal";
+    std::string external_stage_id = "external";
+    std::string nonexist_internal_stage_id = "non_exist_internal";
+    std::string nonexist_external_stage_id = "non_exist_external";
+
+    InstanceInfoPB instance_info;
+    create_instance(internal_stage_id, external_stage_id, instance_info);
+    InstanceRecycler recycler(txn_kv, instance_info);
+    ASSERT_EQ(recycler.init(), 0);
+    const auto& internal_accessor = recycler.accessor_map_.find(internal_stage_id)->second;
+
+    // create internal stage copy job with finish status
+    {
+        std::vector<ObjectFilePB> object_files;
+        create_object_file_pb("0", &object_files, 1000);
+        ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
+        create_copy_job(txn_kv.get(), internal_stage_id, 0, StagePB::INTERNAL, CopyJobPB::FINISH,
+                        object_files, 0);
+    }
+    {
+        std::vector<ObjectFilePB> object_files;
+        create_object_file_pb("4", &object_files);
+        ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
+        create_copy_job(txn_kv.get(), internal_stage_id, 4, StagePB::INTERNAL, CopyJobPB::FINISH,
+                        object_files, 0);
+    }
+    // create internal stage copy job with deleted stage id
+    {
+        std::vector<ObjectFilePB> object_files;
+        create_object_file_pb("8", &object_files);
+        ASSERT_EQ(create_object_files(internal_accessor.get(), &object_files), 0);
+        ASSERT_EQ(0, create_copy_job(txn_kv.get(), nonexist_internal_stage_id, 8, StagePB::INTERNAL,
+                                     CopyJobPB::FINISH, object_files, 0));
+    }
+
+    ASSERT_EQ(recycler.recycle_copy_jobs(), 0);
+
+    // check object files
+    std::vector<std::tuple<std::shared_ptr<ObjStoreAccessor>, std::string, int>>
+            prefix_and_files_list;
+    prefix_and_files_list.emplace_back(internal_accessor, "0/", 1000);
+    prefix_and_files_list.emplace_back(internal_accessor, "4/", 10);
+    prefix_and_files_list.emplace_back(internal_accessor, "8/", 10);
+    for (const auto& [accessor, relative_path, file_num] : prefix_and_files_list) {
+        std::vector<ObjectMeta> object_files;
+        ASSERT_EQ(0, accessor->list(relative_path, &object_files));
+        ASSERT_EQ(file_num, object_files.size());
+    }
+
+    // check fdb kvs
+    // <stage_id, table_id, expected_files, expected_job_exists>
+    std::vector<std::tuple<std::string, int, int, bool>> stage_table_files;
+    stage_table_files.emplace_back(internal_stage_id, 0, 1000, true);
+    stage_table_files.emplace_back(internal_stage_id, 4, 10, true);
+    stage_table_files.emplace_back(nonexist_internal_stage_id, 8, 0, false);
+    for (const auto& [stage_id, table_id, files, expected_job_exists] : stage_table_files) {
+        // check copy files
+        int file_num = 0;
+        ASSERT_EQ(0, get_copy_file_num(txn_kv.get(), stage_id, table_id, &file_num)) << table_id;
+        EXPECT_EQ(files, file_num) << table_id;
+        // check copy jobs
+        bool exist = false;
+        ASSERT_EQ(0, copy_job_exists(txn_kv.get(), stage_id, table_id, &exist)) << table_id;
+        EXPECT_EQ(expected_job_exists, exist) << table_id;
+    }
+
+    sp->clear_call_back("MockAccessor::delete_objects_ret::pred");
+    ASSERT_EQ(recycler.recycle_copy_jobs(), 0);
+
+    // check object files
+    prefix_and_files_list.clear();
+    prefix_and_files_list.emplace_back(internal_accessor, "0/", 0);
+    prefix_and_files_list.emplace_back(internal_accessor, "4/", 0);
+    prefix_and_files_list.emplace_back(internal_accessor, "8/", 10);
+    for (const auto& [accessor, relative_path, file_num] : prefix_and_files_list) {
+        std::vector<ObjectMeta> object_files;
+        ASSERT_EQ(0, accessor->list(relative_path, &object_files));
+        ASSERT_EQ(file_num, object_files.size());
+    }
+
+    // check fdb kvs
+    // <stage_id, table_id, expected_files, expected_job_exists>
+    stage_table_files.clear();
+    stage_table_files.emplace_back(internal_stage_id, 0, 0, false);
+    stage_table_files.emplace_back(internal_stage_id, 4, 0, false);
+    stage_table_files.emplace_back(nonexist_internal_stage_id, 8, 0, false);
     for (const auto& [stage_id, table_id, files, expected_job_exists] : stage_table_files) {
         // check copy files
         int file_num = 0;

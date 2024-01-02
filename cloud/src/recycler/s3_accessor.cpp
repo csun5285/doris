@@ -2,6 +2,7 @@
 
 #include <aws/core/Aws.h>
 #include <aws/core/auth/AWSCredentials.h>
+#include <aws/core/client/DefaultRetryStrategy.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/DeleteObjectsRequest.h>
@@ -68,6 +69,8 @@ int S3Accessor::init() {
     Aws::Client::ClientConfiguration aws_config;
     aws_config.endpointOverride = conf_.endpoint;
     aws_config.region = conf_.region;
+    aws_config.retryStrategy = std::make_shared<Aws::Client::DefaultRetryStrategy>(
+            /*maxRetries = 10, scaleFactor = 25*/);
     s3_client_ = std::make_shared<Aws::S3::S3Client>(
             std::move(aws_cred), std::move(aws_config),
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
