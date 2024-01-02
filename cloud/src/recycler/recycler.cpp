@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 
+#include "common/stopwatch.h"
 #include "meta-service/meta_service_schema.h"
 #include "meta-service/txn_kv_error.h"
 #include "recycler/checker.h"
@@ -1074,6 +1075,7 @@ int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) 
             file_paths.push_back(inverted_index_path(tablet_id, rowset_id, i, index_id));
         }
     }
+    // TODO(AlexYue): seems could do do batch
     return accessor->delete_objects(file_paths);
 }
 
@@ -1088,6 +1090,7 @@ int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>&
                 continue; // Rowset data has already been deleted
             }
         }
+
         auto it = accessor_map_.find(rs.resource_id());
         if (it == accessor_map_.end()) [[unlikely]] { // impossible
             LOG_WARNING("instance has no such resource id")
@@ -1096,11 +1099,13 @@ int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>&
             ret = -1;
             continue;
         }
+
         auto& file_paths = resource_file_paths[rs.resource_id()];
         const auto& rowset_id = rs.rowset_id_v2();
         int64_t tablet_id = rs.tablet_id();
         int64_t num_segments = rs.num_segments();
         if (num_segments <= 0) continue;
+
         // process inverted indexes
         std::vector<int64_t> index_ids;
         if (rs.has_tablet_schema()) {
@@ -1799,11 +1804,124 @@ int InstanceRecycler::recycle_expired_txn_label() {
                             std::move(handle_recycle_txn_kv));
 }
 
+struct CopyJobIdTuple {
+    std::string instance_id;
+    std::string stage_id;
+    long table_id;
+    std::string copy_id;
+    std::string stage_path;
+};
+struct BatchObjStoreAccessor {
+    BatchObjStoreAccessor(std::shared_ptr<ObjStoreAccessor> accessor, uint64_t& batch_count,
+                          TxnKv* txn_kv)
+            : accessor_(std::move(accessor)), batch_count_(batch_count), txn_kv_(txn_kv) {};
+    ~BatchObjStoreAccessor() {
+        if (!paths_.empty()) {
+            consume();
+        }
+    }
+
+    /**
+    * To implicitely do batch work and submit the batch delete task to s3
+    * The s3 delete oprations would be done in batches, and then delete CopyJobPB key one by one
+    *
+    * @param copy_job The protubuf struct consists of the copy job files.
+    * @param key The copy job's key on fdb, the key is originally occupied by fdb range iterator, to make sure
+    *            it would last until we finish the delele task, here we need pass one string value
+    * @param cope_job_id_tuple One tuple {log_trace instance_id, stage_id, table_id, query_id, stage_path} to print log
+    */
+    void add(CopyJobPB copy_job, std::string key, const CopyJobIdTuple cope_job_id_tuple) {
+        auto& [instance_id, stage_id, table_id, copy_id, path] = cope_job_id_tuple;
+        auto& file_keys = copy_file_keys_[key];
+        file_keys.log_trace =
+                fmt::format("instance_id={}, stage_id={}, table_id={}, query_id={}, path={}",
+                            instance_id, stage_id, table_id, copy_id, path);
+        std::string_view log_trace = file_keys.log_trace;
+        for (const auto& file : copy_job.object_files()) {
+            auto relative_path = file.relative_path();
+            paths_.push_back(relative_path);
+            file_keys.keys.push_back(copy_file_key(
+                    {instance_id, stage_id, table_id, file.relative_path(), file.etag()}));
+            LOG_INFO(log_trace)
+                    .tag("relative_path", relative_path)
+                    .tag("batch_count", batch_count_);
+        }
+        LOG_INFO(log_trace)
+                .tag("objects_num", copy_job.object_files().size())
+                .tag("batch_count", batch_count_);
+        // TODO(AlexYue): If the size is 1001, it woule be one delete with 1000 objects and one delete request with only one object(**ATTN**: DOESN'T
+        // recommend using delete objects when objects num is less than 10)
+        if (paths_.size() < 1000) {
+            return;
+        }
+        consume();
+    }
+
+private:
+    void consume() {
+        std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [this](int*) {
+            paths_.clear();
+            copy_file_keys_.clear();
+            batch_count_++;
+        });
+        LOG_INFO("begin to delete {} internal stage objects in batch {}", paths_.size(),
+                 batch_count_);
+        StopWatch sw;
+        // TODO(yuejing): 在accessor的delete_objets的实现里可以考虑如果_paths数量不超过10个的话，就直接发10个delete objection operation而不是发post
+        if (0 != accessor_->delete_objects(paths_)) {
+            LOG_WARNING("failed to delete {} internal stage objects in batch {} and it takes {} us",
+                        paths_.size(), batch_count_, sw.elapsed_us());
+            return;
+        }
+        LOG_INFO("succeed to delete {} internal stage objects in batch {} and it takes {} us",
+                 paths_.size(), batch_count_, sw.elapsed_us());
+        // delete fdb's keys
+        for (auto& file_keys : copy_file_keys_) {
+            auto& [log_trace, keys] = file_keys.second;
+            std::unique_ptr<Transaction> txn;
+            if (txn_kv_->create_txn(&txn) != selectdb::TxnErrorCode::TXN_OK) {
+                LOG(WARNING) << "failed to create txn";
+                continue;
+            }
+            // FIXME: We have already limited the file num and file meta size when selecting file in FE.
+            // And if too many copy files, begin_copy failed commit too. So here the copy file keys are
+            // limited, should not cause the txn commit failed.
+            for (const auto& key : keys) {
+                txn->remove(key);
+                LOG_INFO("remove copy_file_key={}, {}", hex(key), log_trace);
+            }
+            txn->remove(file_keys.first);
+            if (auto ret = txn->commit(); ret != selectdb::TxnErrorCode::TXN_OK) {
+                LOG(WARNING) << "failed to commit txn ret is " << ret;
+                continue;
+            }
+        }
+    }
+    std::shared_ptr<ObjStoreAccessor> accessor_;
+    // the path of the s3 files to be deleted
+    std::vector<std::string> paths_;
+    struct CopyFiles {
+        std::string log_trace;
+        std::vector<std::string> keys;
+    };
+    // pair<std::string, std::vector<std::string>>
+    // first: instance_id_ stage_id table_id query_id
+    // second: keys to be deleted
+    // <fdb key, <{instance_id_ stage_id table_id query_id}, file keys to be deleted>>
+    std::unordered_map<std::string, CopyFiles> copy_file_keys_;
+    // used to distinguish different batch tasks, the task log consists of thread ID and batch number
+    // which can together uniquely identifies different tasks for tracing log
+    uint64_t& batch_count_;
+    TxnKv* txn_kv_;
+};
+
 int InstanceRecycler::recycle_copy_jobs() {
     int num_scanned = 0;
     int num_finished = 0;
     int num_expired = 0;
     int num_recycled = 0;
+    // Used for INTERNAL stage's copy jobs to tag each batch for log trace
+    uint64_t batch_count = 0;
 
     LOG_INFO("begin to recycle copy jobs").tag("instance_id", instance_id_);
 
@@ -1826,9 +1944,8 @@ int InstanceRecycler::recycle_copy_jobs() {
     std::string key1;
     copy_job_key(key_info0, &key0);
     copy_job_key(key_info1, &key1);
-
-    std::unordered_map<std::string, std::shared_ptr<ObjStoreAccessor>> stage_accessor_map;
-    auto recycle_func = [&num_scanned, &num_finished, &num_expired, &num_recycled,
+    std::unordered_map<std::string, std::shared_ptr<BatchObjStoreAccessor>> stage_accessor_map;
+    auto recycle_func = [&num_scanned, &num_finished, &num_expired, &num_recycled, &batch_count,
                          &stage_accessor_map, this](std::string_view k, std::string_view v) -> int {
         ++num_scanned;
         CopyJobPB copy_job;
@@ -1854,53 +1971,31 @@ int InstanceRecycler::recycle_copy_jobs() {
 
             if (copy_job.stage_type() == StagePB::INTERNAL) {
                 auto it = stage_accessor_map.find(stage_id);
-                std::shared_ptr<ObjStoreAccessor> accessor;
+                std::shared_ptr<BatchObjStoreAccessor> accessor;
+                std::string_view path;
                 if (it != stage_accessor_map.end()) {
                     accessor = it->second;
                 } else {
-                    auto ret = init_copy_job_accessor(stage_id, copy_job.stage_type(), &accessor);
+                    std::shared_ptr<ObjStoreAccessor> inner_accessor;
+                    auto ret = init_copy_job_accessor(stage_id, copy_job.stage_type(),
+                                                      &inner_accessor);
                     if (ret < 0) { // error
+                        LOG_WARNING("Failed to init_copy_job_accessor due to error code {}", ret);
                         return -1;
                     } else if (ret == 0) {
+                        path = inner_accessor->path();
+                        accessor = std::make_shared<BatchObjStoreAccessor>(
+                                inner_accessor, batch_count, txn_kv_.get());
                         stage_accessor_map.emplace(stage_id, accessor);
                     } else { // stage not found, skip check storage
                         check_storage = false;
                     }
                 }
                 if (check_storage) {
-                    // delete objects on storage
-                    std::vector<std::string> relative_paths;
-                    for (const auto& file : copy_job.object_files()) {
-                        auto relative_path = file.relative_path();
-                        relative_paths.push_back(relative_path);
-                        LOG_INFO("begin to delete internal stage object")
-                                .tag("instance_id", instance_id_)
-                                .tag("stage_id", stage_id)
-                                .tag("table_id", table_id)
-                                .tag("query_id", copy_id)
-                                .tag("stage_path", accessor->path())
-                                .tag("relative_path", relative_path);
-                    }
-                    LOG_INFO("begin to delete internal stage objects")
-                            .tag("instance_id", instance_id_)
-                            .tag("stage_id", stage_id)
-                            .tag("table_id", table_id)
-                            .tag("query_id", copy_id)
-                            .tag("stage_path", accessor->path())
-                            .tag("num_objects", relative_paths.size());
-
                     // TODO delete objects with key and etag is not supported
-                    auto ret = accessor->delete_objects(relative_paths);
-                    if (ret != 0) {
-                        LOG_WARNING("failed to delete internal stage objects")
-                                .tag("instance_id", instance_id_)
-                                .tag("stage_id", stage_id)
-                                .tag("table_id", table_id)
-                                .tag("query_id", copy_id)
-                                .tag("stage_path", accessor->path())
-                                .tag("num_objects", relative_paths.size());
-                        return -1;
-                    }
+                    accessor->add(std::move(copy_job), std::string(k),
+                                  {instance_id_, stage_id, table_id, copy_id, std::string(path)});
+                    return 0;
                 }
             } else if (copy_job.stage_type() == StagePB::EXTERNAL) {
                 int64_t current_time =
@@ -1931,11 +2026,8 @@ int InstanceRecycler::recycle_copy_jobs() {
         // delete all copy files
         std::vector<std::string> copy_file_keys;
         for (auto& file : copy_job.object_files()) {
-            CopyFileKeyInfo file_key_info {instance_id_, stage_id, table_id, file.relative_path(),
-                                           file.etag()};
-            std::string file_key;
-            copy_file_key(file_key_info, &file_key);
-            copy_file_keys.push_back(std::move(file_key));
+            copy_file_keys.push_back(copy_file_key(
+                    {instance_id_, stage_id, table_id, file.relative_path(), file.etag()}));
         }
         std::unique_ptr<Transaction> txn;
         if (txn_kv_->create_txn(&txn) != TxnErrorCode::TXN_OK) {

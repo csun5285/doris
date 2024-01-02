@@ -45,6 +45,10 @@ public:
     // returns 0 for success otherwise error
     int delete_objects(const std::vector<std::string>& relative_paths) override {
         TEST_SYNC_POINT_CALLBACK("MockAccessor::delete_objects", nullptr);
+        {
+            [[maybe_unused]] int ret = -1;
+            TEST_SYNC_POINT_RETURN_WITH_VALUE("MockAccessor::delete_objects_ret", &ret);
+        }
         for (auto& path : relative_paths) {
             LOG(INFO) << "delete object path=" << path;
         }
