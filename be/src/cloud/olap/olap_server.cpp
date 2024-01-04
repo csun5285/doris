@@ -199,6 +199,7 @@ void StorageEngine::_refresh_s3_info_thread_callback() {
         for (auto& [id, s3_conf] : s3_infos) {
             auto fs = get_filesystem(id);
             if (fs == nullptr) {
+                LOG(INFO) << "get new s3 info: " << s3_conf.to_string() << " resource_id=" << id;
                 std::shared_ptr<io::S3FileSystem> s3_fs;
                 auto st = io::S3FileSystem::create(std::move(s3_conf), id, &s3_fs);
                 if (!st.ok()) {
@@ -213,8 +214,10 @@ void StorageEngine::_refresh_s3_info_thread_callback() {
                 put_storage_resource(std::atol(id.c_str()), {s3_fs, 0});
             } else {
                 auto s3_fs = std::reinterpret_pointer_cast<io::S3FileSystem>(fs);
-                if (s3_fs->s3_conf().ak != s3_conf.ak) {
+                if (s3_fs->s3_conf().ak != s3_conf.ak || s3_fs->s3_conf().sk != s3_conf.sk) {
                     auto cur_s3_conf = s3_fs->s3_conf();
+                    LOG(INFO) << "update s3 info, old: " << cur_s3_conf.to_string()
+                              << " new: " << s3_conf.to_string() << " resource_id=" << id;
                     cur_s3_conf.ak = s3_conf.ak;
                     cur_s3_conf.sk = s3_conf.sk;
                     s3_fs->set_conf(std::move(cur_s3_conf));

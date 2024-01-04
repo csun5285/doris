@@ -85,12 +85,24 @@ struct S3Conf {
     bool use_virtual_addressing = true;
 
     std::string to_string() const {
+        std::string masked_sk;
+        constexpr size_t HEAD_LEN = 4;
+        constexpr size_t TAIL_LEN = 4;
+        masked_sk.reserve(HEAD_LEN + 1 + TAIL_LEN);
+        if (sk.length() < HEAD_LEN + 1 + TAIL_LEN) {
+            masked_sk = "*";
+        } else {
+            auto sk_view = std::string_view(sk);
+            masked_sk += sk_view.substr(0, HEAD_LEN);
+            masked_sk += '*';
+            masked_sk += sk_view.substr(sk_view.size() - TAIL_LEN, TAIL_LEN);
+        }
         return fmt::format(
-                "(ak={}, sk=*, token={}, endpoint={}, region={}, bucket={}, prefix={}, "
+                "(ak={}, sk={}, token={}, endpoint={}, region={}, bucket={}, prefix={}, "
                 "max_connections={}, request_timeout_ms={}, connect_timeout_ms={}, "
                 "use_virtual_addressing={})",
-                ak, token, endpoint, region, bucket, prefix, max_connections, request_timeout_ms,
-                connect_timeout_ms, use_virtual_addressing);
+                ak, masked_sk, token, endpoint, region, bucket, prefix, max_connections,
+                request_timeout_ms, connect_timeout_ms, use_virtual_addressing);
     }
 
     uint64_t get_hash() const {

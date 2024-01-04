@@ -222,6 +222,7 @@ Status StorageEngine::_open() {
 
     CHECK(!s3_infos.empty()) << "no s3 infos";
     for (auto& [id, s3_conf] : s3_infos) {
+        LOG(INFO) << "get s3 info: " << s3_conf.to_string() << " resource_id=" << id;
         std::shared_ptr<io::S3FileSystem> s3_fs;
         RETURN_IF_ERROR(io::S3FileSystem::create(std::move(s3_conf), id, &s3_fs));
         RETURN_IF_ERROR(s3_fs->connect());
