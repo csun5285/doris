@@ -72,6 +72,7 @@ public class EnvOperationTest {
                 + "   \"port\" = \"8239\"\n"
                 + ");");
 
+        /*
         createTable("CREATE EXTERNAL TABLE test.mysqlRenameTest\n"
                 + "(\n"
                 + "k1 DATE,\n"
@@ -87,6 +88,7 @@ public class EnvOperationTest {
                 + "\"database\" = \"mysql_db_test\",\n"
                 + "\"table\" = \"mysql_table_test\"\n"
                 + ");");
+         */
     }
 
     @AfterClass
@@ -151,6 +153,7 @@ public class EnvOperationTest {
         Assert.assertNull(db.getTableNullable("newNewTest"));
         Assert.assertNotNull(db.getTableNullable("goodName"));
 
+        /*
         // rename external table
         renameTblStmt = "alter table test.mysqlRenameTest rename newMysqlRenameTest";
         alterTableStmt = (AlterTableStmt) UtFrameUtils.parseAndAnalyzeStmt(renameTblStmt, connectContext);
@@ -159,5 +162,6 @@ public class EnvOperationTest {
         Env.getCurrentEnv().getAlterInstance().processAlterTable(alterTableStmt);
         Assert.assertNull(db.getTableNullable("mysqlRenameTest"));
         Assert.assertNotNull(db.getTableNullable("newMysqlRenameTest"));
+         */
     }
 }

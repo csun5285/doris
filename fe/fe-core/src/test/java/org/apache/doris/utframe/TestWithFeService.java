@@ -725,6 +725,9 @@ public abstract class TestWithFeService {
             }
             Replica replica = cell.getValue();
             TabletMeta tabletMeta = Env.getCurrentInvertedIndex().getTabletMeta(cell.getRowKey());
+            if (tabletMeta == null) {
+                continue;
+            }
             ImmutableMap<String, DiskInfo> diskMap = be.getDisks();
             for (DiskInfo diskInfo : diskMap.values()) {
                 if (diskInfo.getStorageMedium() == tabletMeta.getStorageMedium()) {
@@ -734,7 +737,6 @@ public abstract class TestWithFeService {
             }
         }
     }
-
     private void checkAlterJob() throws InterruptedException {
         // check alter job
         Map<Long, AlterJobV2> alterJobs = Env.getCurrentEnv().getMaterializedViewHandler().getAlterJobsV2();

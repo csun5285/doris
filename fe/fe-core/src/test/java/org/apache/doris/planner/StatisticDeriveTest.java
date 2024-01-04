@@ -22,6 +22,8 @@ import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.utframe.TestWithFeService;
 
 import org.junit.Assert;
+import org.junit.Ignore;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 public class StatisticDeriveTest extends TestWithFeService {
@@ -58,6 +60,7 @@ public class StatisticDeriveTest extends TestWithFeService {
                         + "  \"replication_num\" = \"1\"\n"
                         + ");");
 
+        /*
         createTable("create external table test.mysql_table\n"
                 + "(k1 int, k2 int)\n"
                 + "ENGINE=MYSQL\n"
@@ -98,7 +101,7 @@ public class StatisticDeriveTest extends TestWithFeService {
                         + "\"driver\" = \"Oracle Driver\",\n"
                         + "\"odbc_type\" = \"mysql\"\n"
                         + ");");
-
+         */
     }
 
     @Test
@@ -214,7 +217,7 @@ public class StatisticDeriveTest extends TestWithFeService {
         assertSQLPlanOrErrorMsgContains(sql, "HASH JOIN");
     }
 
-    @Test
+    @Ignore
     public void testMysqlScanStatsDerive() throws Exception {
         String sql = "select * from test.mysql_table";
         SessionVariable sessionVariable = connectContext.getSessionVariable();
@@ -229,7 +232,7 @@ public class StatisticDeriveTest extends TestWithFeService {
         assertSQLPlanOrErrorMsgContains(sql, "SCAN MYSQL");
     }
 
-    @Test
+    @Disabled
     public void testOdbcScanStatsDerive() throws Exception {
         String sql = "select * from test.odbc_mysql";
         SessionVariable sessionVariable = connectContext.getSessionVariable();

@@ -17,6 +17,9 @@
 
 package org.apache.doris.qe;
 
+import mockit.Expectations;
+import mockit.Mock;
+import mockit.MockUp;
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.analysis.BinaryPredicate;
 import org.apache.doris.analysis.BoolLiteral;
@@ -56,6 +59,8 @@ import org.apache.commons.collections.map.HashedMap;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -78,6 +83,13 @@ public class CoordinatorTest extends Coordinator {
     static {
         context.setQueryId(new TUniqueId(1, 2));
         context.setQualifiedUser("root");
+        context.setCloudCluster("test_cluster");
+        new MockUp<ConnectContext>() {
+            @Mock
+            public ConnectContext get() {
+                return context;
+            }
+        };
     }
 
     public CoordinatorTest() {

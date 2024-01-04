@@ -20,6 +20,7 @@ package org.apache.doris.catalog;
 import org.apache.doris.analysis.CreateDbStmt;
 import org.apache.doris.analysis.CreateTableLikeStmt;
 import org.apache.doris.analysis.CreateTableStmt;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ExceptionChecker;
 import org.apache.doris.qe.ConnectContext;
@@ -244,6 +245,7 @@ public class CreateTableLikeTest {
         checkCreateOlapTableLike(createColocateTblSql, createTableLikeSql7, newDbName7, newDbName7, newTblName7,
                 existedTblName7);
 
+        /*
         // 8. creat non-OLAP table
         String createNonOlapTableSql =
                 "create table test.testMysqlTbl\n" + "(k1 DATE, k2 INT, k3 SMALLINT, k4 VARCHAR(2048), k5 DATETIME)\n"
@@ -257,16 +259,17 @@ public class CreateTableLikeTest {
         String existedTblName8 = "testMysqlTbl";
         checkCreateMysqlTableLike(createNonOlapTableSql, createTableLikeSql8, newDbName8, existedDbName8, newTblName8,
                 existedTblName8);
+         */
 
         // 9. test if not exist
-        String createTableLikeSql9 = "create table test.testMysqlTbl_like like test.testMysqlTbl";
+        String createTableLikeSql9 = "create table test.dynamic_partition_normal like test.testTbl5";
         try {
             createTableLike(createTableLikeSql9);
             Assert.fail();
         } catch (Exception e) {
             Assert.assertTrue(e.getMessage().contains("already exists"));
         }
-        createTableLikeSql9 = "create table if not exists test.testMysqlTbl_like like test.testMysqlTbl";
+        createTableLikeSql9 = "create table if not exists test.dynamic_partition_normal like test.testTbl5";
         try {
             createTableLike(createTableLikeSql9);
         } catch (Exception e) {

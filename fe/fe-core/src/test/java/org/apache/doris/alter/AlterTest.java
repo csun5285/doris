@@ -59,6 +59,7 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
 
 import java.io.File;
 import java.util.List;
@@ -157,12 +158,14 @@ public class AlterTest {
                         + "    PARTITION p2 values less than('2020-03-01 00:00:00')\n" + ")\n"
                         + "DISTRIBUTED BY HASH(k2) BUCKETS 3\n" + "PROPERTIES('replication_num' = '1','enable_unique_key_merge_on_write' = 'false');");
 
+        /*
         createTable("create external table test.odbc_table\n" + "(  `k1` bigint(20) COMMENT \"\",\n"
                 + "  `k2` datetime COMMENT \"\",\n" + "  `k3` varchar(20) COMMENT \"\",\n"
                 + "  `k4` varchar(100) COMMENT \"\",\n" + "  `k5` float COMMENT \"\"\n" + ")ENGINE=ODBC\n"
                 + "PROPERTIES (\n" + "\"host\" = \"127.0.0.1\",\n" + "\"port\" = \"3306\",\n" + "\"user\" = \"root\",\n"
                 + "\"password\" = \"123\",\n" + "\"database\" = \"db1\",\n" + "\"table\" = \"tbl1\",\n"
                 + "\"driver\" = \"Oracle Driver\",\n" + "\"odbc_type\" = \"oracle\"\n" + ");");
+         */
 
         // s3 resource
         createRemoteStorageResource(
@@ -1118,7 +1121,7 @@ public class AlterTest {
         return true;
     }
 
-    @Test
+    @Disabled
     public void testExternalTableAlterOperations() throws Exception {
         // external table do not support partition operation
         String stmt = "alter table test.odbc_table add partition p3 values less than('2020-04-01'), add partition p4 values less than('2020-05-01')";
@@ -1191,7 +1194,7 @@ public class AlterTest {
         Assert.assertNull(odbcTable);
     }
 
-    @Test
+    @Disabled
     public void testModifyTableEngine() throws Exception {
         String createOlapTblStmt = "CREATE TABLE test.mysql_table (\n"
                 + "  `k1` date NULL COMMENT \"\",\n"

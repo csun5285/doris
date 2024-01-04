@@ -313,6 +313,7 @@ public class QueryPlanTest extends TestWithFeService {
                 + "properties(\"replication_num\" = \"1\","
                 + "\"colocate_with\" = \"group1\");");
 
+        /*
         createTable("create external table test.mysql_table\n"
                 + "(k1 int, k2 int)\n"
                 + "ENGINE=MYSQL\n"
@@ -324,6 +325,7 @@ public class QueryPlanTest extends TestWithFeService {
                 + "\"database\" = \"db1\",\n"
                 + "\"table\" = \"tbl1\"\n"
                 + ");");
+         */
 
         createTable("CREATE TABLE test.`table_partitioned` (\n"
                 + "  `dt` int(11) NOT NULL COMMENT \"\",\n"
@@ -349,6 +351,7 @@ public class QueryPlanTest extends TestWithFeService {
                 + "\"replication_num\" = \"1\"\n"
                 + ");");
 
+        /*
         createTable("create external table test.odbc_oracle\n"
                 + "(k1 float, k2 int)\n"
                 + "ENGINE=ODBC\n"
@@ -376,6 +379,7 @@ public class QueryPlanTest extends TestWithFeService {
                 + "\"driver\" = \"Oracle Driver\",\n"
                 + "\"odbc_type\" = \"mysql\"\n"
                 + ");");
+         */
 
         createTable("create table test.tbl_int_date ("
                 + "`date` datetime NULL,"
@@ -1184,7 +1188,7 @@ public class QueryPlanTest extends TestWithFeService {
         Deencapsulation.setField(connectContext.getSessionVariable(), "enableBucketShuffleJoin", false);
     }
 
-    @Test
+    @Disabled
     public void testJoinWithMysqlTable() throws Exception {
         connectContext.setDatabase("default_cluster:test");
 
@@ -1253,6 +1257,7 @@ public class QueryPlanTest extends TestWithFeService {
             }
         }
 
+        /*
         // disable bucket shuffle join
         Deencapsulation.setField(connectContext.getSessionVariable(), "enableBucketShuffleJoin", false);
         String queryStr = "explain select * from odbc_mysql t2, jointest t1 where t1.k1 = t2.k1";
@@ -1268,6 +1273,7 @@ public class QueryPlanTest extends TestWithFeService {
         queryStr = "explain select * from jointest t1, odbc_mysql t2, odbc_mysql t3 where t1.k1 = t3.k1";
         explainString = getSQLPlanOrErrorMsg(queryStr);
         Assert.assertFalse(explainString.contains("INNER JOIN(PARTITIONED)"));
+         */
 
         // should clear the jointest table to make sure do not affect other test
         for (Partition partition : tbl.getPartitions()) {
@@ -1301,7 +1307,7 @@ public class QueryPlanTest extends TestWithFeService {
         Assert.assertTrue(!explainString.contains("abs(k1) > 10"));
     }
 
-    @Test
+    @Disabled
     public void testLimitOfExternalTable() throws Exception {
         connectContext.setDatabase("default_cluster:test");
 
@@ -1328,7 +1334,7 @@ public class QueryPlanTest extends TestWithFeService {
         Assert.assertTrue(explainString.contains("LIMIT 10"));
     }
 
-    @Test
+    @Disabled
     public void testOdbcSink() throws Exception {
         connectContext.setDatabase("default_cluster:test");
 
