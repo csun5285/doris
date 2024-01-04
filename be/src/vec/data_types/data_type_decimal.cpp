@@ -229,10 +229,16 @@ Int64 max_decimal_value<Decimal64>(UInt32 precision) {
 }
 template <>
 Int128 max_decimal_value<Decimal128>(UInt32 precision) {
+    return DecimalV2Value::get_max_decimal().value() /
+           DataTypeDecimal<Decimal128>::get_scale_multiplier(
+                   (UInt64)max_decimal_precision<Decimal128>() - precision);
+}
+template <>
+Int128 max_decimal_value<Decimal128I>(UInt32 precision) {
     return (static_cast<int128_t>(999999999999999999ll) * 100000000000000000ll * 1000ll +
             static_cast<int128_t>(99999999999999999ll) * 1000ll + 999ll) /
            DataTypeDecimal<Decimal128>::get_scale_multiplier(
-                   (UInt64)max_decimal_precision<Decimal128>() - precision);
+                   (UInt64)max_decimal_precision<Decimal128I>() - precision);
 }
 
 template <typename T>
@@ -250,9 +256,15 @@ Int64 min_decimal_value<Decimal64>(UInt32 precision) {
                                          (UInt64)max_decimal_precision<Decimal64>() - precision);
 }
 template <>
-Int128 min_decimal_value<Decimal128>(UInt32 precision) {
+Int128 min_decimal_value<Decimal128I>(UInt32 precision) {
     return -(static_cast<int128_t>(999999999999999999ll) * 100000000000000000ll * 1000ll +
              static_cast<int128_t>(99999999999999999ll) * 1000ll + 999ll) /
+           DataTypeDecimal<Decimal128>::get_scale_multiplier(
+                   (UInt64)max_decimal_precision<Decimal128I>() - precision);
+}
+template <>
+Int128 min_decimal_value<Decimal128>(UInt32 precision) {
+    return DecimalV2Value::get_min_decimal().value() /
            DataTypeDecimal<Decimal128>::get_scale_multiplier(
                    (UInt64)max_decimal_precision<Decimal128>() - precision);
 }
