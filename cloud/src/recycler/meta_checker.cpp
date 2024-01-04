@@ -78,6 +78,7 @@ bool MetaChecker::check_fe_meta_by_fdb(MYSQL* conn) {
         start_key.push_back('\x00');
     } while (it->more());
 
+    bool check_res = true;
     for (const TabletIndexPB& tablet_idx : tablet_indexes) {
         std::string sql_stmt = "show tablet " + std::to_string(tablet_idx.tablet_id());
         MYSQL_RES *result;
@@ -88,17 +89,17 @@ bool MetaChecker::check_fe_meta_by_fdb(MYSQL* conn) {
             if (tablet_idx.table_id() != atoll(row[5])) {
                 LOG(WARNING) << "check failed, fdb meta: " << tablet_idx.ShortDebugString()
                              << " fe table_id: " << atoll(row[5]);
-                return false;
+                check_res = false;
             }
             if (tablet_idx.partition_id() != atoll(row[6])) {
                 LOG(WARNING) << "check failed, fdb meta: " << tablet_idx.ShortDebugString()
                              << " fe partition_id: " << atoll(row[6]);
-                return false;
+                check_res = false;
             }
             if (tablet_idx.index_id() != atoll(row[7])) {
                 LOG(WARNING) << "check failed, fdb meta: " << tablet_idx.ShortDebugString()
                              << " fe index_id: " << atoll(row[7]);
-                return false;
+                check_res = false;
             }
         }
         mysql_free_result(result);
@@ -106,7 +107,7 @@ bool MetaChecker::check_fe_meta_by_fdb(MYSQL* conn) {
     }
     LOG(INFO) << "check_fe_tablet_num: " << stat_info_.check_fe_tablet_num;
 
-    return true;
+    return check_res;
 }
 
 bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
@@ -406,7 +407,6 @@ void MetaChecker::do_check(const std::string& host, const std::string& port,
     if (!ret) {
         LOG(WARNING) << "check_fe_meta_by_fdb failed, there may be data leak";
         msg = "meta leak err";
-        return;
     }
     now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     LOG(INFO) << "check_fe_meta_by_fdb finish, cost(second): " << now - start;
