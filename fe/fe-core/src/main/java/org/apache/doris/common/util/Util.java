@@ -472,8 +472,11 @@ public class Util {
     // If no auth info, pass a null.
     public static InputStream getInputStreamFromUrl(String urlStr, String encodedAuthInfo, int connectTimeoutMs,
             int readTimeoutMs) throws IOException {
+        boolean needSecurityCheck = !(urlStr.startsWith("/") || urlStr.startsWith("file://"));
         try {
-            UrlSecurityChecker.startSSRFChecking(urlStr);
+            if (needSecurityCheck) {
+                UrlSecurityChecker.startSSRFChecking(urlStr);
+            }
             URL url = new URL(urlStr);
             URLConnection conn = url.openConnection();
             if (encodedAuthInfo != null) {
@@ -484,6 +487,10 @@ public class Util {
             return conn.getInputStream();
         } catch (Exception e) {
             throw new IOException(e);
+        } finally {
+            if (needSecurityCheck) {
+                UrlSecurityChecker.stopSSRFChecking();
+            }
         }
     }
 

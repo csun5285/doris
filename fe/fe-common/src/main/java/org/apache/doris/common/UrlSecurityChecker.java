@@ -17,20 +17,28 @@
 
 package org.apache.doris.common;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
 /**
  * This class is used to check if the url is safe
  */
 public class UrlSecurityChecker {
+    private static final Logger LOG = LogManager.getLogger(UrlSecurityChecker.class);
+
     private static Method jdbcUrlCheckMethod = null;
     private static Method urlSecurityCheckMethod = null;
+    private static Method urlSecurityStopCheckMethod = null;
 
     static {
         try {
             Class clazz = Class.forName("com.aliyun.securitysdk.SecurityUtil");
             jdbcUrlCheckMethod = clazz.getMethod("filterJdbcConnectionSource", String.class);
             urlSecurityCheckMethod = clazz.getMethod("startSSRFNetHookChecking", String.class);
+            urlSecurityStopCheckMethod = clazz.getMethod("stopSSRFNetHookChecking", String.class);
         } catch (Exception e) {
             e.printStackTrace();
             System.out.println("Failed to find com.aliyun.securitysdk.SecurityUtil's method");
@@ -67,6 +75,21 @@ public class UrlSecurityChecker {
                 return;
             }
             throw new Exception("SecurityUtil.startSSRFNetHookChecking not found");
+        } else {
+            return;
+        }
+    }
+
+    public static void stopSSRFChecking() {
+        if (Config.apsaradb_env_enabled) {
+            if (urlSecurityStopCheckMethod != null) {
+                try {
+                    urlSecurityStopCheckMethod.invoke(null);
+                } catch (Exception e) {
+                    LOG.warn("failed to stop SSRF checking, log and ignore.", e);
+                }
+                return;
+            }
         } else {
             return;
         }
