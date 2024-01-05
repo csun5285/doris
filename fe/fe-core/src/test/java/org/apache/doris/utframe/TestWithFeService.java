@@ -737,6 +737,7 @@ public abstract class TestWithFeService {
             }
         }
     }
+
     private void checkAlterJob() throws InterruptedException {
         // check alter job
         Map<Long, AlterJobV2> alterJobs = Env.getCurrentEnv().getMaterializedViewHandler().getAlterJobsV2();
