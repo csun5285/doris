@@ -201,6 +201,7 @@ public class StatisticsUtil {
         if (Config.isCloudMode()) {
             AutoCloseConnectContext ctx = new AutoCloseConnectContext(connectContext);
             ctx.connectContext.setCloudCluster();
+            sessionVariable.disableFileCache = Config.forbid_analyze_polluting_file_cache;
             return ctx;
         } else {
             return new AutoCloseConnectContext(connectContext);

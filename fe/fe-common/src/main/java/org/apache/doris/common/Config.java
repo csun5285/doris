@@ -2383,6 +2383,9 @@ public class Config extends ConfigBase {
 
     @ConfField
     public static int drop_user_notify_ms_max_times = 86400;
+    // forbid the analyze task triggering writing data into BE's cache
+    @ConfField(mutable = false)
+    public static boolean forbid_analyze_polluting_file_cache = true;
 
     //==========================================================================
     //                    end of cloud config
