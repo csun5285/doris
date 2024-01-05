@@ -16,6 +16,7 @@
 # under the License.
 
 
+# https://docs.github.com/en/webhooks-and-events/webhooks/webhook-events-and-payloads#pull_request
 # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows
 #
 # For pull requests from a forked repository to the base repository, GitHub
@@ -28,7 +29,26 @@
 ---
 name: Pull-Request Feishu Notification
 
-on: issue_comment
+on:
+  pull_request_target:
+    types:
+      - assigned
+      - unassigned
+      - labeled
+      - unlabeled
+      - opened
+      - edited
+      - closed
+      - reopened
+      - synchronize
+      - converted_to_draft
+      - ready_for_review
+      - locked
+      - unlocked
+      - review_requested
+      - review_request_removed
+      - auto_merge_enabled
+      - auto_merge_disabled
 
 env:
   APP_SERVER: '43.138.9.29:8888'
