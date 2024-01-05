@@ -678,6 +678,11 @@ FileBlocks BlockFileCache::split_range_into_cells(const Key& key, const CacheCon
                 if (!context.is_cold_data) {
                     cell->update_atime();
                 }
+            } else {
+                auto file_block = std::make_shared<FileBlock>(
+                    current_pos, current_size, key, this, FileBlock::State::SKIP_CACHE,
+                    context.cache_type, context.expiration_time);
+                file_blocks.push_back(std::move(file_block));
             }
         }
 
@@ -788,26 +793,29 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
     auto& offsets = _files[key];
     DCHECK((context.expiration_time == 0 && context.cache_type != FileCacheType::TTL) ||
            (context.cache_type == FileCacheType::TTL && context.expiration_time != 0));
+    auto key_path = get_path_in_local_cache(key, context.expiration_time);
     if (offsets.empty()) {
-        auto key_path = get_path_in_local_cache(key, context.expiration_time);
-        std::error_code ec;
-        if (bool is_exist = std::filesystem::exists(key_path, ec); !is_exist || !ec) {
-            std::filesystem::create_directories(key_path, ec);
-            if (ec) [[unlikely]] {
-                LOG(WARNING) << fmt::format("cannot create {}: {}", key_path,
-                                            std::strerror(ec.value()));
-                state = FileBlock::State::SKIP_CACHE;
-            }
-        } else if (ec) [[unlikely]] {
-            LOG(WARNING) << fmt::format("cannot exists {}: {}", key_path,
-                                        std::strerror(ec.value()));
+        Status st = global_local_filesystem()->create_directory(key_path);
+        if (!st.ok()) [[unlikely]] {
+            LOG_WARNING("Cannot create").tag("dir", key_path).error(st);
             state = FileBlock::State::SKIP_CACHE;
         }
     }
 
+    if (state == FileBlock::State::SKIP_CACHE) {
+        return nullptr; 
+    }
+
+    DCHECK([&]() -> bool {
+        bool res;
+        Status st = global_local_filesystem()->exists(key_path, &res);
+        return st.ok() && res;
+    }());
+
     FileBlockCell cell(std::make_shared<FileBlock>(offset, size, key, this, state,
                                                    context.cache_type, context.expiration_time),
                        context.cache_type, cache_lock);
+    
     if (context.cache_type != FileCacheType::TTL) {
         auto& queue = get_queue(context.cache_type);
         cell.queue_iterator = queue.add(key, offset, size, cache_lock);

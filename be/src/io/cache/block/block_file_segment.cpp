@@ -143,6 +143,11 @@ Status FileBlock::append(Slice data) {
     Status st = Status::OK();
     SYNC_POINT_RETURN_WITH_VALUE("file_block::append", st);
     if (!_cache_writer) {
+        DCHECK([&]() -> bool {
+            bool res;
+            Status st = global_local_filesystem()->exists(_cache->get_path_in_local_cache(key(), _expiration_time), &res);
+            return st.ok() && res;
+        }());
         auto download_path = get_path_in_local_cache(true);
         FileWriterOptions not_sync {.sync_file_data = false};
         st = global_local_filesystem()->create_file(download_path, &_cache_writer, &not_sync);

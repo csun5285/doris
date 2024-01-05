@@ -3629,4 +3629,47 @@ TEST_F(BlockFileCacheTest, test_align_size) {
     });
 }
 
+TEST_F(BlockFileCacheTest, test_skip_cache) {
+     if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.index_queue_size = 30;
+    settings.index_queue_elements = 5;
+    settings.disposable_queue_size = 30;
+    settings.disposable_queue_elements = 5;
+    settings.total_size = 90;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.query_id = query_id;
+    auto key = io::BlockFileCache::hash("key1");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto sp = SyncPoint::get_instance();
+    sp->enable_processing();
+    Defer defer {[sp] { sp->clear_all_call_backs(); }};
+    sp->set_call_back("LocalFileSystem::create_directory_impl", [&](auto&& values) {
+        std::pair<Status, bool>* pairs = try_any_cast<std::pair<Status, bool>*>(values.back());
+        pairs->second = true;
+    });
+    auto holder = cache.get_or_set(key, 0, 10, context); /// Add range [0, 9]
+    auto segments = fromHolder(holder);
+    ASSERT_EQ(segments.size(), 1);
+    assert_range(1, segments[0], io::FileBlock::Range(0, 9), io::FileBlock::State::SKIP_CACHE);
+    EXPECT_EQ(cache._cur_cache_size, 0);
+}
+
 } // namespace doris::io

@@ -89,6 +89,8 @@ Status LocalFileSystem::open_file_impl(const Path& file, FileReaderSPtr* reader,
 }
 
 Status LocalFileSystem::create_directory_impl(const Path& dir, bool failed_if_exists) {
+    TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileSystem::create_directory_impl",
+                                      Status::IOError("inject io error"));
     if (failed_if_exists) {
         bool exists = true;
         RETURN_IF_ERROR(exists_impl(dir, &exists));
