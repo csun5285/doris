@@ -215,12 +215,17 @@ void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& i
     msg = proto_to_json(job_info);
 }
 
+
 void check_meta(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
                 const std::string& host, const std::string& port,
                 const std::string& user, const std::string& password,
                 std::string& msg) {
+#ifdef BUILD_CHECK_META
     std::unique_ptr<MetaChecker> meta_checker = std::make_unique<MetaChecker>(txn_kv);
     meta_checker->do_check(host, port, user, password, instance_id, msg);
+#else
+    msg = "check meta not build, please export BUILD_CHECK_META=ON before build cloud";
+#endif
 }
 
 void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,

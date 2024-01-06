@@ -387,6 +387,10 @@ endif()
 # Add flags that are common across build types
 SET(CMAKE_CXX_FLAGS "${CXX_COMMON_FLAGS} ${CMAKE_CXX_FLAGS} ${EXTRA_CXX_FLAGS}")
 
+if(BUILD_CHECK_META STREQUAL "ON")
+    set(CXX_COMMON_FLAGS "${CXX_COMMON_FLAGS} -DBUILD_CHECK_META")
+endif()
+
 message(STATUS "Compiler Flags: ${CMAKE_CXX_FLAGS}")
 
 # Thrift requires these two definitions for some types that we use
@@ -500,8 +504,12 @@ else()
 endif()
 
 set(DORIS_LINK_LIBS ${DORIS_LINK_LIBS}
-    -lrt -l:libbfd.a -liberty -lc -lm -ldl -pthread -lmysqlclient
+    -lrt -l:libbfd.a -liberty -lc -lm -ldl -pthread
 )
+
+if(BUILD_CHECK_META STREQUAL "ON")
+    set(DORIS_LINK_LIBS ${DORIS_LINK_LIBS} -lmysqlclient)
+endif ()
 
 # Set libraries for test
 set (TEST_LINK_LIBS ${DORIS_LINK_LIBS}
