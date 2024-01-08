@@ -17,6 +17,7 @@
 
 #include "olap/single_replica_compaction.h"
 
+#include "cloud/olap/storage_engine.h"
 #include "common/logging.h"
 #include "gen_cpp/Types_constants.h"
 #include "gen_cpp/internal_service.pb.h"
@@ -29,7 +30,6 @@
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/snapshot_manager.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_meta.h"
 #include "runtime/client_cache.h"
 #include "runtime/memory/mem_tracker_limiter.h"

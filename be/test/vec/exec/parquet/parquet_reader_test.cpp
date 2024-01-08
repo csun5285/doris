@@ -115,7 +115,8 @@ TEST_F(ParquetReaderTest, normal) {
     auto slot_descs = desc_tbl->get_tuple_descriptor(0)->slots();
     io::FileSystemSPtr local_fs = io::LocalFileSystem::create("");
     io::FileReaderSPtr reader;
-    auto st = local_fs->open_file("./be/test/exec/test_data/parquet_scanner/type-decoder.parquet", &reader);
+    auto st = local_fs->open_file("./be/test/exec/test_data/parquet_scanner/type-decoder.parquet",
+                                  &reader);
     ASSERT_TRUE(st.ok()) << st;
 
     cctz::time_zone ctz;

@@ -149,12 +149,15 @@ TEST(MetaServerTest, StartAndStop) {
 
     auto sp = selectdb::SyncPoint::get_instance();
 
-    std::array<std::string, 3> sps{"MetaServer::start:1", "MetaServer::start:2", "MetaServer::start:3"};
+    std::array<std::string, 3> sps {"MetaServer::start:1", "MetaServer::start:2",
+                                    "MetaServer::start:3"};
     // use structured binding for point alias (avoid multi lines of declaration)
     auto [meta_server_start_1, meta_server_start_2, meta_server_start_3] = sps;
     sp->enable_processing();
     std::unique_ptr<int, std::function<void(int*)>> defer((int*)0x01, [&](...) {
-        for (auto& i : sps) { sp->clear_call_back(i); } // redundant
+        for (auto& i : sps) {
+            sp->clear_call_back(i);
+        } // redundant
         sp->disable_processing();
     });
 
@@ -198,4 +201,3 @@ TEST(MetaServerTest, StartAndStop) {
     brpc_server.Stop(1);
     brpc_server.Join();
 }
-

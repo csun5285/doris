@@ -257,7 +257,7 @@ TEST_F(LocalFileSystemTest, AbnormalFileWriter) {
 
 TEST_F(LocalFileSystemTest, AbnormalWriteRead) {
     auto sp = SyncPoint::get_instance();
-    Defer defer {[sp] { 
+    Defer defer {[sp] {
         sp->clear_call_back("LocalFileWriter::writev");
         sp->clear_call_back("LocalFileReader::pread");
     }};
@@ -332,7 +332,7 @@ TEST_F(LocalFileSystemTest, AbnormalWriteRead) {
         auto* ret = try_any_cast_ret<ssize_t>(args);
         ret->first = -1;
         ret->second = true;
-        errno = EIO; 
+        errno = EIO;
     });
     st = file_reader->read_at(0, {buf, 26}, &bytes_read);
     ASSERT_FALSE(st.ok()) << st;

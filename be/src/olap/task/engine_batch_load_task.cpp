@@ -33,6 +33,7 @@
 #include <system_error>
 
 #include "boost/lexical_cast.hpp"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
@@ -42,7 +43,6 @@
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/push_handler.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "runtime/memory/mem_tracker_limiter.h"
@@ -348,7 +348,7 @@ Status EngineBatchLoadTask::_delete_data(const TPushReq& request,
 
 #ifdef CLOUD_MODE
     res = push_handler.cloud_process_streaming_ingestion(tablet, request, PushType::PUSH_FOR_DELETE,
-                                                             tablet_info_vec);
+                                                         tablet_info_vec);
 #else
     res = push_handler.process_streaming_ingestion(tablet, request, PushType::PUSH_FOR_DELETE,
                                                    tablet_info_vec);

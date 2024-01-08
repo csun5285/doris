@@ -474,15 +474,16 @@ TxnErrorCode RangeGetIterator::init() {
     return TxnErrorCode::TXN_OK;
 }
 
-TxnErrorCode Transaction::batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
-                           const BatchGetOptions& opts) {
+TxnErrorCode Transaction::batch_get(std::vector<std::optional<std::string>>* res,
+                                    const std::vector<std::string>& keys,
+                                    const BatchGetOptions& opts) {
     if (keys.empty()) {
         return TxnErrorCode::TXN_OK;
     }
     StopWatch sw;
     std::vector<FDBFuture*> futs;
     futs.reserve(keys.size());
-    for (const auto& k: keys) {
+    for (const auto& k : keys) {
         futs.push_back(fdb_transaction_get(txn_, (uint8_t*)k.data(), k.size(), opts.snapshot));
     }
 

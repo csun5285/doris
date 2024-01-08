@@ -32,8 +32,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "common/logging.h"
 #include "cloud/olap/storage_engine.h"
+#include "common/logging.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
 #include "olap/txn_manager.h"

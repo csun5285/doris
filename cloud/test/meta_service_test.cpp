@@ -336,11 +336,11 @@ TEST(MetaServiceTest, CreateInstanceTest) {
         brpc::Controller cntl;
         GetInstanceRequest req;
         GetInstanceResponse res;
-        meta_service->get_instance(reinterpret_cast<::google::protobuf::RpcController *>(&cntl),
+        meta_service->get_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                    &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::INVALID_ARGUMENT);
         req.set_cloud_unique_id("1:test_instance:m-n3qdpyal27rh8iprxx");
-        meta_service->get_instance(reinterpret_cast<::google::protobuf::RpcController *>(&cntl),
+        meta_service->get_instance(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                    &req, &res, nullptr);
         ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
     }
@@ -3707,7 +3707,6 @@ TEST(MetaServiceTest, UpdateDeleteBitmapWithException) {
                 &update_delete_bitmap_req, &update_delete_bitmap_res, nullptr);
         ASSERT_EQ(update_delete_bitmap_res.status().code(), MetaServiceCode::LOCK_EXPIRED);
     }
-
 }
 
 TEST(MetaServiceTest, GetDeleteBitmapWithIdx) {
@@ -4023,8 +4022,7 @@ TEST(MetaServiceTest, BatchGetVersion) {
         GetVersionResponse resp;
         service->get_version(&ctrl, &req, &resp, nullptr);
         ASSERT_EQ(resp.status().code(), MetaServiceCode::INVALID_ARGUMENT)
-            << " status is " << resp.status().msg()
-            << ", code=" << resp.status().code();
+                << " status is " << resp.status().msg() << ", code=" << resp.status().code();
     }
 }
 

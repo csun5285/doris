@@ -19,13 +19,13 @@
 
 #include <gen_cpp/PlanNodes_types.h>
 #include <stdint.h>
-#include "bvar/status.h"
 
 #include <iomanip>
 #include <map>
 #include <sstream> // IWYU pragma: keep
 #include <utility>
 
+#include "bvar/status.h"
 #include "common/version_internal.h"
 
 namespace doris {
@@ -45,11 +45,11 @@ std::string get_build_version(bool compact) {
     std::stringstream ss;
     ss << version::doris_build_version()
 #if defined(__x86_64__) || defined(_M_X64)
-  #ifdef __AVX2__
-         << "(AVX2)"
-  #else
-         << "(SSE4.2)"
-  #endif
+#ifdef __AVX2__
+       << "(AVX2)"
+#else
+       << "(SSE4.2)"
+#endif
 #elif defined(__aarch64__)
        << "(AArch64)"
 #endif

@@ -281,7 +281,7 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
     response->mutable_partition_ids()->CopyFrom(request->partition_ids());
 
     while (code == MetaServiceCode::OK &&
-            response->versions_size() < response->partition_ids_size()) {
+           response->versions_size() < response->partition_ids_size()) {
         std::unique_ptr<Transaction> txn;
         TxnErrorCode err = txn_kv_->create_txn(&txn);
         if (err != TxnErrorCode::TXN_OK) {

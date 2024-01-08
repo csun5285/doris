@@ -116,8 +116,8 @@ void RecyclerServiceImpl::check_instance(const std::string& instance_id, MetaSer
     {
         std::lock_guard lock(checker_->mtx_);
         using namespace std::chrono;
-        auto enqueue_time_s = duration_cast<seconds>(
-                    system_clock::now().time_since_epoch()).count();
+        auto enqueue_time_s =
+                duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
         auto [_, success] = checker_->pending_instance_map_.insert({instance_id, enqueue_time_s});
         // skip instance already in pending queue
         if (success) {
@@ -215,11 +215,9 @@ void recycle_job_info(const std::shared_ptr<TxnKv>& txn_kv, const std::string& i
     msg = proto_to_json(job_info);
 }
 
-
 void check_meta(const std::shared_ptr<TxnKv>& txn_kv, const std::string& instance_id,
-                const std::string& host, const std::string& port,
-                const std::string& user, const std::string& password,
-                std::string& msg) {
+                const std::string& host, const std::string& port, const std::string& user,
+                const std::string& password, std::string& msg) {
 #ifdef BUILD_CHECK_META
     std::unique_ptr<MetaChecker> meta_checker = std::make_unique<MetaChecker>(txn_kv);
     meta_checker->do_check(host, port, user, password, instance_id, msg);
@@ -371,11 +369,9 @@ void RecyclerServiceImpl::http(::google::protobuf::RpcController* controller,
         LOG(INFO) << " user " << *user;
         LOG(INFO) << " passwd " << *password;
         LOG(INFO) << " instance " << *instance_id;
-        if (instance_id == nullptr || instance_id->empty()
-                || host == nullptr || host->empty()
-                || port == nullptr || port->empty()
-                || password == nullptr
-                || user == nullptr || user->empty()) {
+        if (instance_id == nullptr || instance_id->empty() || host == nullptr || host->empty() ||
+            port == nullptr || port->empty() || password == nullptr || user == nullptr ||
+            user->empty()) {
             msg = "no instance id or mysql conn str info";
             response_body = msg;
             status_code = 400;

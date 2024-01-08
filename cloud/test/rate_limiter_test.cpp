@@ -66,7 +66,7 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
     for (int i = 0; i < 20; ++i) {
         threads.emplace_back(get_cluster, MetaServiceCode::OK);
     }
-    for (auto& t: threads) {
+    for (auto& t : threads) {
         t.join();
     }
     threads.clear();
@@ -77,7 +77,7 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
             ->qps_limiter_[mock_instance]
             ->max_qps_limit_ = 1;
     threads.emplace_back(get_cluster, MetaServiceCode::MAX_QPS_LIMIT);
-    for (auto& t: threads) {
+    for (auto& t : threads) {
         t.join();
     }
     threads.clear();
@@ -88,9 +88,8 @@ TEST(RateLimiterTest, RateLimitGetClusterTest) {
             ->qps_limiter_[mock_instance]
             ->max_qps_limit_ = 10000;
     threads.emplace_back(get_cluster, MetaServiceCode::OK);
-    for (auto& t: threads) {
+    for (auto& t : threads) {
         t.join();
     }
     threads.clear();
-
 }

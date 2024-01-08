@@ -79,4 +79,3 @@ private:
     std::string _empty_string;
 };
 } // namespace doris::vectorized
-

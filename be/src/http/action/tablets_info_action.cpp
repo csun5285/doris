@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "gutil/strings/substitute.h"
 #include "http/http_channel.h"
@@ -33,7 +34,6 @@
 #include "http/http_request.h"
 #include "http/http_status.h"
 #include "olap/olap_common.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "service/backend_options.h"
 

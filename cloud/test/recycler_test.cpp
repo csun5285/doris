@@ -1417,7 +1417,8 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
     }
 }
 
-void create_object_file_pb(std::string prefix, std::vector<ObjectFilePB>* object_files, int file_num = 10) {
+void create_object_file_pb(std::string prefix, std::vector<ObjectFilePB>* object_files,
+                           int file_num = 10) {
     for (int i = 0; i < file_num; ++i) {
         ObjectFilePB object_file;
         // create object in S3, pay attention to the relative path

@@ -441,7 +441,8 @@ void CloudTabletMgr::OverlapRowsetsMgr::handle_overlap_rowsets() {
             download_file_meta.file_size = rowset_meta->get_segment_file_size(seg_id);
             download_file_meta.file_system = rowset_meta->fs();
             download_file_meta.path = io::Path(download_rowset->segment_file_path(seg_id));
-            download_file_meta.expiration_time = tablet_meta->ttl_seconds() == 0
+            download_file_meta.expiration_time =
+                    tablet_meta->ttl_seconds() == 0
                             ? 0
                             : rowset_meta->newest_write_timestamp() + tablet_meta->ttl_seconds();
             download_file_meta.download_callback = [wait](Status st) {

@@ -38,6 +38,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "gutil/strings/split.h"
@@ -53,7 +54,6 @@
 #include "olap/pb_helper.h"
 #include "olap/rowset/rowset.h"
 #include "olap/snapshot_manager.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"

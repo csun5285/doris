@@ -25,7 +25,6 @@
 #include "util/lock.h"
 #include "util/thread.h"
 #include "util/thread_group.h"
-#include "util/lock.h"
 namespace doris {
 
 // Simple threadpool which processes items (of type T) in parallel which were placed on a

@@ -3,10 +3,10 @@
 #include <condition_variable>
 #include <string>
 
+#include "common/config.h"
 #include "io/fs/local_file_system.h"
 #include "io/fs/path.h"
 #include "io/fs/s3_file_writer.h"
-#include "common/config.h"
 
 namespace doris::io {
 

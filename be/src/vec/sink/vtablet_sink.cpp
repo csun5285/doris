@@ -378,8 +378,9 @@ void VNodeChannel::open() {
     static_cast<void>(request.release_schema());
 }
 
-void VNodeChannel::_refresh_load_wait_time(const ::google::protobuf::RepeatedPtrField<
-                                    ::doris::PTabletLoadRowsetInfo>& tablet_load_infos) {
+void VNodeChannel::_refresh_load_wait_time(
+        const ::google::protobuf::RepeatedPtrField<::doris::PTabletLoadRowsetInfo>&
+                tablet_load_infos) {
     int64_t max_rowset_num_gap = 0;
     // if any one tablet is under high load pressure, we would make the whole procedure
     // sleep to prevent the corresponding BE return -235
@@ -1603,8 +1604,8 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
                         [this, &index_channel, &status, &state, &node_add_batch_counter_map,
                          &serialize_batch_ns, &channel_stat, &queue_push_lock_ns,
                          &actual_consume_ns, &total_add_batch_exec_time_ns, &add_batch_exec_time,
-                         &total_wait_exec_time_ns, &wait_exec_time,
-                         &total_add_batch_num, &load_pressure_time_ns](const std::shared_ptr<VNodeChannel>& ch) {
+                         &total_wait_exec_time_ns, &wait_exec_time, &total_add_batch_num,
+                         &load_pressure_time_ns](const std::shared_ptr<VNodeChannel>& ch) {
                             if (!status.ok() || ch->is_closed()) {
                                 return;
                             }
@@ -1710,7 +1711,6 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
         // shutdown it.
         _send_batch_thread_pool_token->wait();
     }
-
 
     DataSink::close(state, exec_status);
     return _close_status;

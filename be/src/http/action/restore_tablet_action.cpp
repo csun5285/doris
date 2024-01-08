@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "http/http_channel.h"
 #include "http/http_request.h"
 #include "http/http_status.h"
@@ -37,7 +38,6 @@
 #include "io/fs/local_file_system.h"
 #include "io/fs/path.h"
 #include "olap/data_dir.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"
@@ -182,7 +182,8 @@ Status RestoreTabletAction::_restore(const std::string& key, int64_t tablet_id,
     Status s = _create_hard_link_recursive(latest_tablet_path, restore_schema_hash_path);
     if (!s.ok()) {
         // do not check the status of delete_directory, return status of link operation
-        static_cast<void>(io::global_local_filesystem()->delete_directory(restore_schema_hash_path));
+        static_cast<void>(
+                io::global_local_filesystem()->delete_directory(restore_schema_hash_path));
         return s;
     }
     std::string restore_shard_path = store->get_absolute_shard_path(tablet_meta.shard_id());

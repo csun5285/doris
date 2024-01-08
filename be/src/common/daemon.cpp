@@ -38,12 +38,12 @@
 #include <string>
 
 #include "cloud/cloud_tablet_mgr.h"
+#include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "olap/options.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "runtime/block_spill_manager.h"
 #include "runtime/exec_env.h"

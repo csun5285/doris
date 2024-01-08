@@ -32,10 +32,10 @@
 #include <utility>
 
 #include "common/status.h"
-#include "io/fs/file_writer.h"
 #include "io/cache/block/block_file_cache_fwd.h"
-#include "util/slice.h"
+#include "io/fs/file_writer.h"
 #include "util/lock.h"
+#include "util/slice.h"
 
 namespace doris {
 namespace io {
@@ -71,9 +71,9 @@ public:
         SKIP_CACHE,
     };
 
-    FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache, State download_state,
-                FileCacheType cache_type, uint64_t expiration_time);
-    
+    FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache,
+              State download_state, FileCacheType cache_type, uint64_t expiration_time);
+
     ~FileBlock();
 
     State state() const;

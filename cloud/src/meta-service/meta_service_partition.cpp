@@ -1,6 +1,5 @@
-#include <gen_cpp/selectdb_cloud.pb.h>
-
 #include <fmt/format.h>
+#include <gen_cpp/selectdb_cloud.pb.h>
 
 #include "common/logging.h"
 #include "meta-service/keys.h"

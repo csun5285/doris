@@ -694,4 +694,3 @@ int64_t MemTrackerLimiter::tg_memory_limit_gc(
 }
 
 } // namespace doris
-

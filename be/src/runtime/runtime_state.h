@@ -39,9 +39,9 @@
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/factory_creator.h"
 #include "common/status.h"
+#include "gutil/integral_types.h"
 #include "io/cache/block/block_file_cache.h"
 #include "io/fs/file_system.h"
-#include "gutil/integral_types.h"
 #include "util/runtime_profile.h"
 #include "util/telemetry/telemetry.h"
 

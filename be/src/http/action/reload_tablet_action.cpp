@@ -24,12 +24,12 @@
 #include <string>
 
 #include "boost/lexical_cast.hpp"
+#include "cloud/olap/storage_engine.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "http/http_channel.h"
 #include "http/http_request.h"
 #include "http/http_status.h"
-#include "cloud/olap/storage_engine.h"
 #include "runtime/exec_env.h"
 
 namespace doris {

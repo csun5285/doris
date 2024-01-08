@@ -1,9 +1,11 @@
 #pragma once
 #include <bthread/mutex.h>
+
 #include <cstdint>
 #include <memory>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
+
 #include "brpc/server.h"
 #include "common/config.h"
 namespace selectdb {
@@ -25,7 +27,7 @@ private:
 class RpcRateLimiter {
 public:
     RpcRateLimiter(const std::string rpc_name, const int64_t max_qps_limit)
-                        : rpc_name_(rpc_name), max_qps_limit_(max_qps_limit) {}
+            : rpc_name_(rpc_name), max_qps_limit_(max_qps_limit) {}
 
     ~RpcRateLimiter() = default;
 
@@ -45,11 +47,12 @@ private:
         QpsToken(const int64_t max_qps_limit) : max_qps_limit_(max_qps_limit) {}
 
         bool get_token(std::function<int()>& get_bvar_qps);
+
     private:
         bthread::Mutex mutex_;
         std::chrono::steady_clock::time_point last_update_time_;
-        int64_t access_count_{0};
-        int64_t current_qps_{0};
+        int64_t access_count_ {0};
+        int64_t current_qps_ {0};
         int64_t max_qps_limit_;
     };
 

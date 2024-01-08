@@ -47,7 +47,7 @@ public:
     DISALLOW_COPY_AND_ASSIGN(FileWriter);
 
     // Normal close. Wait for all data to persist before returning.
-    [[nodiscard]] virtual  Status close() = 0;
+    [[nodiscard]] virtual Status close() = 0;
 
     [[nodiscard]] Status append(const Slice& data) { return appendv(&data, 1); }
 

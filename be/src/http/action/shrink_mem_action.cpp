@@ -23,8 +23,8 @@
 #include "http/http_request.h"
 #include "runtime/exec_env.h"
 #include "util/brpc_client_cache.h"
-#include "util/string_util.h"
 #include "util/mem_info.h"
+#include "util/string_util.h"
 
 namespace doris {
 void ShrinkMemAction::handle(HttpRequest* req) {

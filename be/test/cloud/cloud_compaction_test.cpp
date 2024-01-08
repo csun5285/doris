@@ -895,8 +895,8 @@ TEST(CloudCompactionTest, full_compaction_schedule) {
     ASSERT_EQ(candidate_tablets[0], tablet);
 
     // `tablet` should not in candidate tablets for base compaction
-    candidate_tablets = storage_engine._generate_cloud_compaction_tasks(
-            CompactionType::BASE_COMPACTION, false);
+    candidate_tablets =
+            storage_engine._generate_cloud_compaction_tasks(CompactionType::BASE_COMPACTION, false);
     ASSERT_EQ(candidate_tablets.size(), 0);
 
     st = storage_engine.submit_compaction_task(tablet, CompactionType::FULL_COMPACTION);

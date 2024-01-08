@@ -104,7 +104,8 @@ Status EngineCalcDeleteBitmapTask::finish() {
 
     LOG(INFO) << "finish to calculate delete bitmap on transaction."
               << "transaction_id=" << transaction_id << ", cost(us): " << watch.get_elapse_time_us()
-              << ", error_tablet_size=" << _error_tablet_ids->size() << ", res=" << _res.to_string();
+              << ", error_tablet_size=" << _error_tablet_ids->size()
+              << ", res=" << _res.to_string();
     return _res;
 }
 

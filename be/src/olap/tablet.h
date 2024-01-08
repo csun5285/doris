@@ -17,9 +17,9 @@
 
 #pragma once
 
+#include <bthread/mutex.h>
 #include <butil/macros.h>
 #include <glog/logging.h>
-#include <bthread/mutex.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -677,9 +677,9 @@ public:
     Status check_delete_bitmap_correctness(DeleteBitmapPtr delete_bitmap, int64_t max_version,
                                            int64_t txn_id, const RowsetIdUnorderedSet& rowset_ids,
                                            std::vector<RowsetSharedPtr>* rowsets = nullptr);
-    
+
     static void recycle_file_cache(const std::vector<RowsetSharedPtr>& rowsets);
-    
+
     // When the tablet is droped, we need to recycle some resoures.
     // 1. The data in file cache
     // 2. The memory in tablet cache

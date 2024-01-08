@@ -6,9 +6,9 @@
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
+#include "service/backend_options.h"
 #include "util/thread.h"
 #include "util/uuid_generator.h"
-#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -108,8 +108,8 @@ Status CloudBaseCompaction::pick_rowsets_to_compact() {
     }
     _filter_input_rowset();
     if (_input_rowsets.size() <= 1) {
-        return Status::Error<BE_NO_SUITABLE_VERSION>("insuffient compation input rowset, #rowsets={}",
-                                                     _input_rowsets.size());
+        return Status::Error<BE_NO_SUITABLE_VERSION>(
+                "insuffient compation input rowset, #rowsets={}", _input_rowsets.size());
     }
 
     if (_input_rowsets.size() == 2 && _input_rowsets[0]->end_version() == 1) {
@@ -313,7 +313,7 @@ void CloudBaseCompaction::garbage_collection() {
 void CloudBaseCompaction::do_lease() {
     selectdb::TabletJobInfoPB job;
     if (_compaction_succeed) {
-        return ;
+        return;
     }
     auto idx = job.mutable_idx();
     idx->set_tablet_id(_tablet->tablet_id());

@@ -46,7 +46,7 @@ private:
     friend class RecyclerServiceImpl;
 
     std::shared_ptr<TxnKv> txn_kv_;
-    std::atomic_bool stopped_{false};
+    std::atomic_bool stopped_ {false};
 
     std::vector<std::thread> workers_;
 
@@ -105,7 +105,8 @@ public:
      * @param is_empty_tablet indicates whether the tablet has object files, can skip delete objects if tablet is empty
      * @return 0 for success otherwise error
      */
-    int recycle_tablets(int64_t table_id, int64_t index_id, int64_t partition_id = -1, bool is_empty_tablet = false);
+    int recycle_tablets(int64_t table_id, int64_t index_id, int64_t partition_id = -1,
+                        bool is_empty_tablet = false);
 
     /**
      * recycle all rowsets belonging to the tablet specified by `tablet_id`

@@ -33,6 +33,7 @@
 
 #include "beta_rowset_writer.h"
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include "cloud/olap/storage_engine.h"
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/logging.h"
 #include "gutil/stringprintf.h"
@@ -54,7 +55,6 @@
 #include "olap/rowset/segment_v2/segment.h"
 #include "olap/rowset/segment_v2/segment_writer.h"
 #include "olap/schema.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_schema.h"
 #include "runtime/memory/mem_tracker_limiter.h"
 #include "runtime/thread_context.h"

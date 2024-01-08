@@ -64,7 +64,8 @@ void LoadChannel::_init_profile() {
     _add_batch_times = ADD_COUNTER(_self_profile, "AddBatchTimes", TUnit::UNIT);
 }
 
-Status LoadChannel::open(const PTabletWriterOpenRequest& params, PTabletWriterOpenResult* response) {
+Status LoadChannel::open(const PTabletWriterOpenRequest& params,
+                         PTabletWriterOpenResult* response) {
     int64_t index_id = params.index_id();
     std::shared_ptr<TabletsChannel> channel;
     {

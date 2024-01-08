@@ -39,7 +39,8 @@ struct FileCacheStatistics;
 
 class CachedRemoteFileReader final : public FileReader {
 public:
-    CachedRemoteFileReader(FileReaderSPtr remote_file_reader, const FileReaderOptions* reader_options);
+    CachedRemoteFileReader(FileReaderSPtr remote_file_reader,
+                           const FileReaderOptions* reader_options);
 
     ~CachedRemoteFileReader() override;
 
@@ -59,10 +60,9 @@ public:
 
 protected:
     [[nodiscard]] Status read_at_impl(size_t offset, Slice result, size_t* bytes_read,
-                        const IOContext* io_ctx) override;
+                                      const IOContext* io_ctx) override;
 
 private:
-
     FileReaderSPtr _remote_file_reader;
     Key _cache_key;
     BlockFileCachePtr _cache;

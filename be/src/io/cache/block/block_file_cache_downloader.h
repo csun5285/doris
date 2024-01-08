@@ -61,8 +61,7 @@ public:
 
     void polling_download_task();
 
-    void check_download_task(const std::vector<int64_t>& tablets,
-                                     std::map<int64_t, bool>* done);
+    void check_download_task(const std::vector<int64_t>& tablets, std::map<int64_t, bool>* done);
 
 protected:
     std::mutex _mtx;

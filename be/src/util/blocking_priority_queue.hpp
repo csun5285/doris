@@ -29,7 +29,6 @@
 #include "common/config.h"
 #include "util/lock.h"
 #include "util/stopwatch.hpp"
-#include "util/lock.h"
 namespace doris {
 
 // Fixed capacity FIFO queue, where both blocking_get and blocking_put operations block

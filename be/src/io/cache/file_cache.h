@@ -56,7 +56,7 @@ public:
 
     // Dummy fs
     FileSystemSPtr fs() const override { return nullptr; }
-    
+
     virtual Status clean_one_cache(size_t* cleaned_size) = 0;
 
     virtual bool is_gc_finish() const = 0;

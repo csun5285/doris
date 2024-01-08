@@ -345,4 +345,3 @@ ColumnPtr ColumnDecimal<T>::index_impl(const PaddedPODArray<Type>& indexes, size
 }
 
 } // namespace doris::vectorized
-

@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <mysql/mysql.h>
+
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -8,10 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <mysql/mysql.h>
-
 #include "gen_cpp/selectdb_cloud.pb.h"
-
 #include "recycler/white_black_list.h"
 
 namespace selectdb {
@@ -25,12 +24,10 @@ struct StatInfo {
 };
 
 class MetaChecker {
-
 public:
     explicit MetaChecker(std::shared_ptr<TxnKv> txn_kv);
-    void do_check(const std::string& host, const std::string& port,
-                  const std::string& user, const std::string& password,
-                  const std::string& instance_id, std::string& msg);
+    void do_check(const std::string& host, const std::string& port, const std::string& user,
+                  const std::string& password, const std::string& instance_id, std::string& msg);
     bool check_fe_meta_by_fdb(MYSQL* conn);
     bool check_fdb_by_fe_meta(MYSQL* conn);
 
@@ -40,4 +37,4 @@ private:
     std::string instance_id_;
 };
 
-}
+} // namespace selectdb

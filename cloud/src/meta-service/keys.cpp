@@ -370,10 +370,10 @@ void job_check_key(const JobRecycleKeyInfo& in, std::string* out) {
 }
 
 void rl_job_progress_key_info(const RLJobProgressKeyInfo& in, std::string* out) {
-    encode_prefix(in, out);                    // 0x01 "job" ${instance_id}
+    encode_prefix(in, out);                       // 0x01 "job" ${instance_id}
     encode_bytes(JOB_KEY_INFIX_RL_PROGRESS, out); // "routine_load_progress"
-    encode_int64(std::get<1>(in), out);        // db_id
-    encode_int64(std::get<2>(in), out);        // job_id
+    encode_int64(std::get<1>(in), out);           // db_id
+    encode_int64(std::get<2>(in), out);           // job_id
 }
 
 //==============================================================================

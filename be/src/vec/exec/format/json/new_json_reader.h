@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "common/status.h"
+#include "exec/decompressor.h"
 #include "exec/line_reader.h"
 #include "exprs/json_functions.h"
 #include "io/file_factory.h"
@@ -41,7 +42,6 @@
 #include "vec/common/hash_table/hash_map.h"
 #include "vec/common/string_ref.h"
 #include "vec/core/types.h"
-#include "exec/decompressor.h"
 #include "vec/exec/format/generic_reader.h"
 #include "vec/json/json_parser.h"
 #include "vec/json/simd_json_parser.h"

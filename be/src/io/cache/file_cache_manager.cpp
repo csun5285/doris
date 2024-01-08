@@ -26,6 +26,7 @@
 #include <ostream>
 #include <utility>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "io/cache/dummy_file_cache.h"
 #include "io/cache/sub_file_cache.h"
@@ -35,7 +36,6 @@
 #include "io/fs/local_file_system.h"
 #include "olap/data_dir.h"
 #include "olap/rowset/beta_rowset.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 

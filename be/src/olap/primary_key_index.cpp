@@ -17,11 +17,12 @@
 
 #include "olap/primary_key_index.h"
 
-#include "io/fs/file_reader.h"
-#include "common/config.h"
 #include <gen_cpp/segment_v2.pb.h>
 
 #include <utility>
+
+#include "common/config.h"
+#include "io/fs/file_reader.h"
 
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep

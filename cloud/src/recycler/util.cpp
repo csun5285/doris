@@ -82,8 +82,8 @@ int prepare_instance_recycle_job(TxnKv* txn_kv, std::string_view key,
         DCHECK(job_info.instance_id() == instance_id);
         bool lease_expired =
                 job_info.status() == JobRecyclePB::BUSY && job_info.expiration_time_ms() < now;
-        bool finish_expired =
-                job_info.status() == JobRecyclePB::IDLE && now - job_info.last_ctime_ms() > interval_ms;
+        bool finish_expired = job_info.status() == JobRecyclePB::IDLE &&
+                              now - job_info.last_ctime_ms() > interval_ms;
         return lease_expired || finish_expired;
     };
 

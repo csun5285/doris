@@ -180,7 +180,6 @@ public:
 
     Status close() override {
         if (!_closed) {
-            
             _closed = true;
             // the underlying buffer is closed in its own destructor
             // return _reader->close();
@@ -196,7 +195,8 @@ public:
             // _profile = nullptr;
             LOG_INFO(
                     "The merge range reader's profile, path {}, copy time {}, read time {}, "
-                    "request io {}, merged io {}, request bytes {}, merged bytes {}, apply_bytes {}",
+                    "request io {}, merged io {}, request bytes {}, merged bytes {}, apply_bytes "
+                    "{}",
                     _reader->path().string(), _statistics.copy_time, _statistics.read_time,
                     _statistics.request_io, _statistics.merged_io, _statistics.request_bytes,
                     _statistics.merged_bytes, _statistics.apply_bytes);

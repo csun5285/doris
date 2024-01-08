@@ -5,8 +5,8 @@
 #pragma once
 
 #include <fmt/format.h>
-#include <gen_cpp/selectdb_cloud.pb.h>
 #include <gen_cpp/Status_types.h> // for TStatus
+#include <gen_cpp/selectdb_cloud.pb.h>
 #include <gen_cpp/types.pb.h>
 #include <glog/logging.h>
 #include <stdint.h>

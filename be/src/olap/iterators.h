@@ -38,7 +38,7 @@ class ColumnPredicate;
 namespace vectorized {
 struct IteratorRowRef;
 class ScannerContext;
-};
+}; // namespace vectorized
 
 class StorageReadOptions {
 public:
@@ -175,7 +175,7 @@ public:
     // return rows merged count by iterator
     virtual uint64_t merged_rows() const { return 0; }
 
-    virtual void set_ctx(vectorized::ScannerContext* ctx) { }
+    virtual void set_ctx(vectorized::ScannerContext* ctx) {}
 
     // return if it's an empty iterator
     virtual bool empty() const { return false; }

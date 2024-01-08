@@ -19,20 +19,20 @@
 
 #include <bthread/bthread.h>
 #include <bthread/countdown_event.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 
-#include "io/fs/file_reader.h"
-#include "io/fs/file_system.h"
 #include "common/logging.h"
 #include "common/signal_handler.h"
+#include "io/fs/file_reader.h"
+#include "io/fs/file_system.h"
 #include "olap/olap_define.h"
-#include "work_thread_pool.hpp"
 #include "runtime/threadlocal.h"
 #include "util/metrics.h"
 #include "util/runtime_profile.h"
-
+#include "work_thread_pool.hpp"
 
 namespace doris {
 
@@ -46,10 +46,12 @@ struct AsyncIOCtx {
 class AsyncIO {
 public:
     AsyncIO() {
-        _local_io_thread_pool = new PriorityThreadPool(config::async_local_io_thread_pool_thread_num,
-                                                 config::async_local_io_thread_pool_queue_size, "async_local_io_thread_pool");
-        _remote_io_thread_pool = new PriorityThreadPool(config::async_remote_io_thread_pool_thread_num,
-                                       config::async_remote_io_thread_pool_queue_size, "async_remote_io_thread_pool");
+        _local_io_thread_pool = new PriorityThreadPool(
+                config::async_local_io_thread_pool_thread_num,
+                config::async_local_io_thread_pool_queue_size, "async_local_io_thread_pool");
+        _remote_io_thread_pool = new PriorityThreadPool(
+                config::async_remote_io_thread_pool_thread_num,
+                config::async_remote_io_thread_pool_queue_size, "async_remote_io_thread_pool");
     }
 
     ~AsyncIO() {
@@ -68,7 +70,8 @@ public:
     // This function should run on the bthread, and it will put the task into
     // thread_pool and release the bthread_worker at cv.wait. When the task is completed,
     // the bthread will continue to execute.
-    static void run_task(const std::function<void()>& fn, io::FileSystemType file_type, io::AsyncIOStatistics* stats = nullptr) {
+    static void run_task(const std::function<void()>& fn, io::FileSystemType file_type,
+                         io::AsyncIOStatistics* stats = nullptr) {
         DCHECK(bthread_self() != 0);
         struct TaskStats {
             int64_t total_use_timer_ns = 0;
@@ -88,7 +91,8 @@ public:
             int nice = ctx != nullptr ? ctx->nice : 18;
 
             doris::signal::BthreadSignalCtx* sig_ctx =
-                        static_cast<doris::signal::BthreadSignalCtx*>(bthread_getspecific(doris::signal::btls_signal_key));
+                    static_cast<doris::signal::BthreadSignalCtx*>(
+                            bthread_getspecific(doris::signal::btls_signal_key));
             uint64_t query_id_hi = sig_ctx != nullptr ? sig_ctx->query_id_hi : 0;
             uint64_t query_id_lo = sig_ctx != nullptr ? sig_ctx->query_id_lo : 0;
 
@@ -98,7 +102,9 @@ public:
             task.priority = nice;
             task.work_function = [&] {
                 task_stats.task_wait_worker_timer_ns =
-                        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - task_wait_time).count();
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now() - task_wait_time)
+                                .count();
                 {
                     SCOPED_RAW_TIMER(&task_stats.task_exec_timer_ns);
                     doris::signal::query_id_hi = query_id_hi;
@@ -114,13 +120,17 @@ public:
             } else {
                 AsyncIO::instance().remote_io_thread_pool()->offer(task);
             }
-            task_stats.wait_for_putting_queue = 
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - wait_for_putting_queue).count(); 
+            task_stats.wait_for_putting_queue =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - wait_for_putting_queue)
+                            .count();
             if (int ec = event.wait(); ec != 0) [[unlikely]] {
                 LOG(FATAL) << "Failed to wait for task to complete";
             }
             task_stats.task_wake_up_timer_ns =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - task_wake_up_time).count();
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - task_wake_up_time)
+                            .count();
         }
         if (stats) {
             if (file_type != io::FileSystemType::LOCAL) {
@@ -139,7 +149,6 @@ public:
                 stats->local_wait_for_putting_queue += task_stats.wait_for_putting_queue;
             }
         }
-
     }
 
     inline static bthread_key_t btls_io_ctx_key;
@@ -152,8 +161,8 @@ private:
 
     PriorityThreadPool* local_io_thread_pool() { return _local_io_thread_pool; }
     PriorityThreadPool* remote_io_thread_pool() { return _remote_io_thread_pool; }
-    std::atomic<int> _local_queue_id{0};
-    std::atomic<int> _remote_queue_id{0};
+    std::atomic<int> _local_queue_id {0};
+    std::atomic<int> _remote_queue_id {0};
 };
 
 } // end namespace doris

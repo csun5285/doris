@@ -26,13 +26,13 @@
 
 #include <string>
 
-#include "io/cache/block/block_file_cache_factory.h"
-#include "io/fs/s3_file_system.h"
 #include "cloud/utils.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/object_pool.h"
 #include "common/status.h"
+#include "io/cache/block/block_file_cache_factory.h"
+#include "io/fs/s3_file_system.h"
 #include "runtime/exec_env.h"
 #include "runtime/fragment_mgr.h"
 #include "runtime/load_path_mgr.h"
@@ -420,7 +420,6 @@ const std::string RuntimeState::get_error_log_file_path() const {
     return to_load_error_http_path(_error_log_file_path);
 #endif
 }
-
 
 int64_t RuntimeState::get_load_mem_limit() {
     // TODO: the code is abandoned, it can be deleted after v1.3

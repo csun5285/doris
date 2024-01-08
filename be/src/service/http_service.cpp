@@ -372,8 +372,7 @@ Status HttpService::cloud_start() {
     ShrinkMemAction* shrink_mem_action = _pool.add(new ShrinkMemAction());
     _ev_http_server->register_handler(HttpMethod::GET, "/api/shrink_mem", shrink_mem_action);
 
-    ClearFileCacheAction* clear_file_cache_action =
-            _pool.add(new ClearFileCacheAction());
+    ClearFileCacheAction* clear_file_cache_action = _pool.add(new ClearFileCacheAction());
     _ev_http_server->register_handler(HttpMethod::POST, "/api/clear_file_cache",
                                       clear_file_cache_action);
 

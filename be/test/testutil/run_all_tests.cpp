@@ -58,7 +58,8 @@ int main(int argc, char** argv) {
     doris::MemInfo::init();
     doris::BackendOptions::init();
 
-    config::tmp_file_dirs = R"([{"path":")" + std::string(getenv("DORIS_HOME")) + "/tmp" + R"(","max_upload_bytes":1073741824}])";
+    config::tmp_file_dirs = R"([{"path":")" + std::string(getenv("DORIS_HOME")) + "/tmp" +
+                            R"(","max_upload_bytes":1073741824}])";
     doris::io::TmpFileMgr::create_tmp_file_mgrs();
 
     auto service = std::make_unique<doris::HttpService>(doris::ExecEnv::GetInstance(), 0, 1);

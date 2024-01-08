@@ -253,7 +253,8 @@ void DumpTimeInfo() {
     MinimalFormatter formatter(buf, sizeof(buf));
     formatter.AppendString("*** Query id: ");
     if (bthread_self() != 0) {
-        BthreadSignalCtx* ctx = static_cast<BthreadSignalCtx*>(bthread_getspecific(btls_signal_key));
+        BthreadSignalCtx* ctx =
+                static_cast<BthreadSignalCtx*>(bthread_getspecific(btls_signal_key));
         query_id_hi = ctx != nullptr ? ctx->query_id_hi : 0;
         query_id_lo = ctx != nullptr ? ctx->query_id_lo : 0;
     }

@@ -15,11 +15,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "io/fs/file_system.h"
 #include "olap/rowset/segment_v2/inverted_index_cache.h"
 
 #include <CLucene/debug/mem.h>
 #include <CLucene/search/IndexSearcher.h>
+
+#include "io/fs/file_system.h"
 // IWYU pragma: no_include <bthread/errno.h>
 #include <errno.h> // IWYU pragma: keep
 #include <string.h>

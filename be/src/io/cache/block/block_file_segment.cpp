@@ -145,7 +145,8 @@ Status FileBlock::append(Slice data) {
     if (!_cache_writer) {
         DCHECK([&]() -> bool {
             bool res;
-            Status st = global_local_filesystem()->exists(_cache->get_path_in_local_cache(key(), _expiration_time), &res);
+            Status st = global_local_filesystem()->exists(
+                    _cache->get_path_in_local_cache(key(), _expiration_time), &res);
             return st.ok() && res;
         }());
         auto download_path = get_path_in_local_cache(true);
@@ -199,7 +200,8 @@ bool FileBlock::change_cache_type(FileCacheType new_type) {
         return true;
     }
     if (_download_state == State::DOWNLOADED) {
-        Status st = global_local_filesystem()->rename(get_path_in_local_cache(), 
+        Status st = global_local_filesystem()->rename(
+                get_path_in_local_cache(),
                 _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type));
         if (!st.ok()) {
             LOG_WARNING("").error(st);
@@ -217,7 +219,8 @@ void FileBlock::change_cache_type_self(FileCacheType new_type) {
         return;
     }
     if (_download_state == State::DOWNLOADED) {
-        Status st = global_local_filesystem()->rename(get_path_in_local_cache(), 
+        Status st = global_local_filesystem()->rename(
+                get_path_in_local_cache(),
                 _cache->get_path_in_local_cache(key(), _expiration_time, offset(), new_type));
         if (!st.ok()) {
             LOG_WARNING("").error(st);
@@ -283,9 +286,10 @@ Status FileBlock::set_downloaded(std::lock_guard<doris::Mutex>& /* segment_lock 
         status = _cache_writer->close();
         _cache_writer.reset();
     }
-    
+
     if (status.ok()) {
-        status = global_local_filesystem()->rename(get_path_in_local_cache(true), get_path_in_local_cache());
+        status = global_local_filesystem()->rename(get_path_in_local_cache(true),
+                                                   get_path_in_local_cache());
     }
     TEST_SYNC_POINT_CALLBACK("FileBlock::rename_error", &status);
 

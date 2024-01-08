@@ -759,7 +759,8 @@ static int get_current_root_keys(TxnKv* txn_kv, std::map<int64_t, std::string>* 
                 root_key_plaintext.assign(root_key_plaintext.data(), decoded_text_len);
                 keys->insert({item.key_id(), std::move(root_key_plaintext)});
             }
-            if (config::enable_kms && config::focus_add_kms_data_key && need_to_focus_add_kms_data_key) {
+            if (config::enable_kms && config::focus_add_kms_data_key &&
+                need_to_focus_add_kms_data_key) {
                 // Todo: need to restart other ms to update global_encryption_key_info_map now
                 LOG(INFO) << "focus to add kms data key";
             } else {

@@ -74,18 +74,21 @@ class FileSystem : public std::enable_shared_from_this<FileSystem> {
 public:
     // The following are public interface.
     // And derived classes should implement all xxx_impl methods.
-    [[nodiscard]] Status create_file(const Path& file, FileWriterPtr* writer, const FileWriterOptions* opts = nullptr);
+    [[nodiscard]] Status create_file(const Path& file, FileWriterPtr* writer,
+                                     const FileWriterOptions* opts = nullptr);
     // FIXME(plat1ko): Will deprecate in future
-    [[nodiscard]] Status open_file(const FileDescription& fd, const FileReaderOptions& reader_options,
-                     FileReaderSPtr* reader);
-    [[nodiscard]] Status open_file(const Path& file, FileReaderSPtr* reader, const FileReaderOptions* opts = nullptr);
+    [[nodiscard]] Status open_file(const FileDescription& fd,
+                                   const FileReaderOptions& reader_options, FileReaderSPtr* reader);
+    [[nodiscard]] Status open_file(const Path& file, FileReaderSPtr* reader,
+                                   const FileReaderOptions* opts = nullptr);
     [[nodiscard]] Status create_directory(const Path& dir, bool failed_if_exists = false);
     Status delete_file(const Path& file);
     Status delete_directory(const Path& dir);
     Status batch_delete(const std::vector<Path>& files);
     [[nodiscard]] Status exists(const Path& path, bool* res) const;
     [[nodiscard]] Status file_size(const Path& file, int64_t* file_size) const;
-    [[nodiscard]] Status list(const Path& dir, bool only_file, std::vector<FileInfo>* files, bool* exists);
+    [[nodiscard]] Status list(const Path& dir, bool only_file, std::vector<FileInfo>* files,
+                              bool* exists);
     [[nodiscard]] Status rename(const Path& orig_name, const Path& new_name);
 
     std::shared_ptr<FileSystem> getSPtr() { return shared_from_this(); }

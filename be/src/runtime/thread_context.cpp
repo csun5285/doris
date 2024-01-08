@@ -74,4 +74,3 @@ AddThreadMemTrackerConsumer::~AddThreadMemTrackerConsumer() {
 }
 
 } // namespace doris
-

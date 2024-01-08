@@ -29,12 +29,12 @@
 #include <vector>
 
 #include "CLucene/analysis/standard95/StandardAnalyzer.h"
+#include "cloud/io/tmp_file_mgr.h"
 #include "common/config.h"
+#include "io/fs/local_file_system.h"
 #include "olap/field.h"
 #include "olap/inverted_index_parser.h"
 #include "olap/key_coder.h"
-#include "io/fs/local_file_system.h"
-#include "cloud/io/tmp_file_mgr.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/common.h"
 #include "olap/rowset/segment_v2/inverted_index/char_filter/char_filter_factory.h"
@@ -150,8 +150,8 @@ public:
 
         _doc = std::make_unique<lucene::document::Document>();
 #ifdef CLOUD_MODE
-        _lfs = doris::io::LocalFileSystem::create(
-                io::TmpFileMgr::instance()->get_tmp_file_dir(), "");
+        _lfs = doris::io::LocalFileSystem::create(io::TmpFileMgr::instance()->get_tmp_file_dir(),
+                                                  "");
         auto lfs_index_path = InvertedIndexDescriptor::get_temporary_index_path(
                 io::TmpFileMgr::instance()->get_tmp_file_dir() + "/" + _segment_file_name,
                 _index_meta->index_id());

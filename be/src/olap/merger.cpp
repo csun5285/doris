@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "olap/olap_common.h"
@@ -41,7 +42,6 @@
 #include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_writer.h"
 #include "olap/rowset/segment_v2/segment_writer.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/utils.h"
 #include "util/slice.h"

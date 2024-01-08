@@ -408,8 +408,9 @@ TxnErrorCode Transaction::abort() {
     return TxnErrorCode::TXN_OK;
 }
 
-TxnErrorCode Transaction::batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
-                           const BatchGetOptions& opts) {
+TxnErrorCode Transaction::batch_get(std::vector<std::optional<std::string>>* res,
+                                    const std::vector<std::string>& keys,
+                                    const BatchGetOptions& opts) {
     if (keys.empty()) {
         return TxnErrorCode::TXN_OK;
     }

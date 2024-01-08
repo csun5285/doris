@@ -104,7 +104,8 @@ Status LoadChannelMgr::init(int64_t process_mem_limit) {
     return Status::OK();
 }
 
-Status LoadChannelMgr::open(const PTabletWriterOpenRequest& params, PTabletWriterOpenResult* response) {
+Status LoadChannelMgr::open(const PTabletWriterOpenRequest& params,
+                            PTabletWriterOpenResult* response) {
     UniqueId load_id(params.id());
     std::shared_ptr<LoadChannel> channel;
     {

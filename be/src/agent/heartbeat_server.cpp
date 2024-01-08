@@ -26,11 +26,11 @@
 #include <ostream>
 #include <string>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/status.h"
-#include "cloud/olap/storage_engine.h"
-#include "runtime/fragment_mgr.h"
 #include "runtime/exec_env.h"
+#include "runtime/fragment_mgr.h"
 #include "runtime/heartbeat_flags.h"
 #include "service/backend_options.h"
 #include "util/debug_util.h"
@@ -79,8 +79,10 @@ void HeartbeatServer::heartbeat(THeartbeatResult& heartbeat_result,
         heartbeat_result.backend_info.__set_version(get_short_version());
         heartbeat_result.backend_info.__set_be_start_time(_be_epoch);
         heartbeat_result.backend_info.__set_be_node_role(config::be_node_role);
-        heartbeat_result.backend_info.__set_fragment_executing_count(get_fragment_executing_count());
-        heartbeat_result.backend_info.__set_fragment_last_active_time(get_fragment_last_active_time());
+        heartbeat_result.backend_info.__set_fragment_executing_count(
+                get_fragment_executing_count());
+        heartbeat_result.backend_info.__set_fragment_last_active_time(
+                get_fragment_last_active_time());
     }
     watch.stop();
     if (watch.elapsed_time() > 1000L * 1000L * 1000L) {

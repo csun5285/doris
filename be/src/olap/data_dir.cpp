@@ -35,6 +35,7 @@
 #include <thread>
 #include <utility>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "gutil/strings/substitute.h"
@@ -53,7 +54,6 @@
 #include "olap/rowset/rowset_id_generator.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_meta_manager.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/storage_policy.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
@@ -165,7 +165,7 @@ Status DataDir::read_cluster_id(const std::string& cluster_id_path, int32_t* clu
             size_t bytes_read = 0;
             RETURN_IF_ERROR(reader->read_at(0, {content.data(), fsize}, &bytes_read));
             *cluster_id = std::stoi(content);
-        } 
+        }
     }
     return Status::OK();
 }

@@ -9,9 +9,9 @@
 #include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "olap/cumulative_compaction_policy.h"
+#include "service/backend_options.h"
 #include "util/trace.h"
 #include "util/uuid_generator.h"
-#include "service/backend_options.h"
 
 namespace doris {
 using namespace ErrorCode;
@@ -333,10 +333,9 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
 
     size_t compaction_score = 0;
     StorageEngine::instance()->cumu_compaction_policy()->pick_input_rowsets(
-            _tablet.get(), candidate_rowsets,
-            config::cumulative_compaction_max_deltas,
-            config::cumulative_compaction_min_deltas, &_input_rowsets,
-            &_last_delete_version, &compaction_score);
+            _tablet.get(), candidate_rowsets, config::cumulative_compaction_max_deltas,
+            config::cumulative_compaction_min_deltas, &_input_rowsets, &_last_delete_version,
+            &compaction_score);
 
     if (_input_rowsets.empty()) {
         return Status::Error<CUMULATIVE_NO_SUITABLE_VERSION>("no suitable versions");
@@ -429,7 +428,7 @@ void CloudCumulativeCompaction::update_cumulative_point() {
 void CloudCumulativeCompaction::do_lease() {
     TEST_INJECTION_POINT_RETURN_WITH_VOID("CloudCumulativeCompaction::do_lease");
     if (_compaction_succeed) {
-        return ;
+        return;
     }
     selectdb::TabletJobInfoPB job;
     auto idx = job.mutable_idx();

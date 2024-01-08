@@ -93,7 +93,8 @@ public:
                                                               const std::string& instance_id,
                                                               InstanceInfoPB* inst_pb);
     // return err msg
-    virtual std::string modify_nodes(const std::string& instance_id, const std::vector<NodeInfo>& to_add,
+    virtual std::string modify_nodes(const std::string& instance_id,
+                                     const std::vector<NodeInfo>& to_add,
                                      const std::vector<NodeInfo>& to_del);
 
     bool check_cluster_params_valid(const ClusterPB& cluster, std::string* err,
@@ -106,7 +107,8 @@ public:
      * @param instance_id instance to manipulate
      * @return a pair of code and msg
      */
-    virtual std::pair<MetaServiceCode, std::string> refresh_instance(const std::string& instance_id);
+    virtual std::pair<MetaServiceCode, std::string> refresh_instance(
+            const std::string& instance_id);
 
 private:
     void add_cluster_to_index(const std::string& instance_id, const ClusterPB& cluster);

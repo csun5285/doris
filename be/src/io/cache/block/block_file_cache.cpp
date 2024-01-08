@@ -70,20 +70,15 @@ BlockFileCache::BlockFileCache(const std::string& cache_base_path,
     _cur_disposable_queue_cache_size_metrics = std::make_shared<bvar::Status<size_t>>(
             _cache_base_path.c_str(), "file_cache_disposable_queue_cache_size", 0);
     _queue_evict_size_metrics[0] = std::make_shared<bvar::Adder<size_t>>(
-        _cache_base_path.c_str(), "file_cache_index_queue_evict_size"
-    );
+            _cache_base_path.c_str(), "file_cache_index_queue_evict_size");
     _queue_evict_size_metrics[1] = std::make_shared<bvar::Adder<size_t>>(
-        _cache_base_path.c_str(), "file_cache_normal_queue_evict_size"
-    );
+            _cache_base_path.c_str(), "file_cache_normal_queue_evict_size");
     _queue_evict_size_metrics[2] = std::make_shared<bvar::Adder<size_t>>(
-        _cache_base_path.c_str(), "file_cache_disposable_queue_evict_size"
-    );
+            _cache_base_path.c_str(), "file_cache_disposable_queue_evict_size");
     _queue_evict_size_metrics[3] = std::make_shared<bvar::Adder<size_t>>(
-        _cache_base_path.c_str(), "file_cache_ttl_cache_evict_size"
-    );
+            _cache_base_path.c_str(), "file_cache_ttl_cache_evict_size");
     _total_evict_size_metrics = std::make_shared<bvar::Adder<size_t>>(
-        _cache_base_path.c_str(), "file_cache_total_evict_size"
-    );
+            _cache_base_path.c_str(), "file_cache_total_evict_size");
 
     _disposable_queue = LRUQueue(cache_settings.disposable_queue_size,
                                  cache_settings.disposable_queue_elements, 60 * 60);
@@ -697,8 +692,8 @@ FileBlocks BlockFileCache::split_range_into_cells(const Key& key, const CacheCon
                 }
             } else {
                 auto file_block = std::make_shared<FileBlock>(
-                    current_pos, current_size, key, this, FileBlock::State::SKIP_CACHE,
-                    context.cache_type, context.expiration_time);
+                        current_pos, current_size, key, this, FileBlock::State::SKIP_CACHE,
+                        context.cache_type, context.expiration_time);
                 file_blocks.push_back(std::move(file_block));
             }
         }
@@ -820,7 +815,7 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
     }
 
     if (state == FileBlock::State::SKIP_CACHE) {
-        return nullptr; 
+        return nullptr;
     }
 
     DCHECK([&]() -> bool {
@@ -832,7 +827,7 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
     FileBlockCell cell(std::make_shared<FileBlock>(offset, size, key, this, state,
                                                    context.cache_type, context.expiration_time),
                        context.cache_type, cache_lock);
-    
+
     if (context.cache_type != FileCacheType::TTL) {
         auto& queue = get_queue(context.cache_type);
         cell.queue_iterator = queue.add(key, offset, size, cache_lock);

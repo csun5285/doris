@@ -28,13 +28,14 @@ TEST(NetworkUtilTest, ParseEndpoint) {
         uint16_t port;
     };
 
-    std::vector<TestCase> cases {
-            {"localhost:80", "localhost", 80},
-            {"127.0.0.1:123", "127.0.0.1", 123},
-            {"[::FFFF:204.152.189.116]:444", "::FFFF:204.152.189.116", 444},
-            {"voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-east-1.voce.amazonaws.com:5000",
-                "voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-east-1.voce.amazonaws.com", 5000}
-    };
+    std::vector<TestCase> cases {{"localhost:80", "localhost", 80},
+                                 {"127.0.0.1:123", "127.0.0.1", 123},
+                                 {"[::FFFF:204.152.189.116]:444", "::FFFF:204.152.189.116", 444},
+                                 {"voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-"
+                                  "east-1.voce.amazonaws.com:5000",
+                                  "voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-"
+                                  "east-1.voce.amazonaws.com",
+                                  5000}};
 
     for (auto& [endpoint, expect_host, expect_port] : cases) {
         std::string host;
@@ -61,7 +62,9 @@ TEST(NetworkUtilTest, DISABLED_ResolveLongEndpoint) {
     // ATTN: Append below line into /etc/hosts before run this test.
     //
     // 127.0.0.1 voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-east-1.voce.amazonaws.com
-    std::string endpoint = "voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-east-1.voce.amazonaws.com:5000";
+    std::string endpoint =
+            "voce-0679a55f02f4419a9-v609v81w.vpce-svc-023de1c5d795efa0a.us-east-1.voce.amazonaws."
+            "com:5000";
 
     std::string host;
     uint16_t port;
@@ -80,4 +83,3 @@ int main(int argc, char** argv) {
     return RUN_ALL_TESTS();
 }
 #endif
-

@@ -537,4 +537,3 @@ template class ColumnDecimal<Decimal64>;
 template class ColumnDecimal<Decimal128>;
 template class ColumnDecimal<Decimal128I>;
 } // namespace doris::vectorized
-

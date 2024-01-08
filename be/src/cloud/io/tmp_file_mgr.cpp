@@ -46,7 +46,8 @@ Status TmpFileMgr::create_tmp_file_mgrs() {
             }
         }
         if (tmp_file_mgr_config.max_upload_bytes <= 0) {
-            return Status::InvalidArgument("max_upload_bytes should not less than or equal to zero");
+            return Status::InvalidArgument(
+                    "max_upload_bytes should not less than or equal to zero");
         }
         if (tmp_file_mgr_config.max_cache_bytes < 0) {
             return Status::InvalidArgument("max_cache_bytes should not less than zero");

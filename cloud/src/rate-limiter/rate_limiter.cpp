@@ -1,20 +1,21 @@
+#include "rate_limiter.h"
+
 #include <chrono>
 #include <memory>
 #include <mutex>
+
 #include "butil/strings/string_split.h"
 #include "common/bvars.h"
-#include "common/configbase.h"
-#include "rate_limiter.h"
 #include "common/config.h"
+#include "common/configbase.h"
 
 namespace selectdb {
 
-void RateLimiter::init(google::protobuf::Service *service) {
-
+void RateLimiter::init(google::protobuf::Service* service) {
     std::map<std::string, int64_t> rpc_name_to_max_qps_limit;
     std::vector<std::string> max_qps_limit_list;
     butil::SplitString(config::specific_max_qps_limit, ';', &max_qps_limit_list);
-    for (const auto& v: max_qps_limit_list) {
+    for (const auto& v : max_qps_limit_list) {
         auto p = v.find(':');
         if (p != std::string::npos && p != (v.size() - 1)) {
             auto rpc_name = v.substr(0, p);
@@ -24,8 +25,9 @@ void RateLimiter::init(google::protobuf::Service *service) {
                     rpc_name_to_max_qps_limit[rpc_name] = max_qps_limit;
                     LOG(INFO) << "set rpc: " << rpc_name << " max_qps_limit: " << max_qps_limit;
                 }
-            } catch(...) {
-                LOG(WARNING) << "failed to set max_qps_limit to rpc: " << rpc_name << " config: " << v;
+            } catch (...) {
+                LOG(WARNING) << "failed to set max_qps_limit to rpc: " << rpc_name
+                             << " config: " << v;
             }
         }
     }
@@ -33,14 +35,13 @@ void RateLimiter::init(google::protobuf::Service *service) {
     for (auto i = 0; i < method_size; ++i) {
         std::string rpc_name = service->GetDescriptor()->method(i)->name();
         int64_t max_qps_limit = config::default_max_qps_limit;
-        
+
         auto it = rpc_name_to_max_qps_limit.find(rpc_name);
         if (it != rpc_name_to_max_qps_limit.end()) {
             max_qps_limit = it->second;
         }
         limiters_[rpc_name] = std::make_shared<RpcRateLimiter>(rpc_name, max_qps_limit);
     }
-    
 }
 
 std::shared_ptr<RpcRateLimiter> RateLimiter::get_rpc_rate_limiter(const std::string& rpc_name) {
@@ -52,7 +53,8 @@ std::shared_ptr<RpcRateLimiter> RateLimiter::get_rpc_rate_limiter(const std::str
     return it->second;
 }
 
-bool RpcRateLimiter::get_qps_token(const std::string &instance_id, std::function<int()>& get_bvar_qps) {
+bool RpcRateLimiter::get_qps_token(const std::string& instance_id,
+                                   std::function<int()>& get_bvar_qps) {
     if (!config::use_detailed_metrics || instance_id == "") {
         return true;
     }
@@ -70,7 +72,6 @@ bool RpcRateLimiter::get_qps_token(const std::string &instance_id, std::function
         qps_token = it->second;
     }
 
-
     return qps_token->get_token(get_bvar_qps);
 }
 
@@ -82,14 +83,13 @@ bool RpcRateLimiter::QpsToken::get_token(std::function<int()>& get_bvar_qps) {
     //        maybe need to reduce the bvar's update interval.
     ++access_count_;
     auto duration_s = duration_cast<seconds>(now - last_update_time_).count();
-    if (duration_s > config::bvar_qps_update_second
-            || (duration_s != 0 && (access_count_ / duration_s > max_qps_limit_ / 2))) {
+    if (duration_s > config::bvar_qps_update_second ||
+        (duration_s != 0 && (access_count_ / duration_s > max_qps_limit_ / 2))) {
         access_count_ = 0;
         last_update_time_ = now;
         current_qps_ = get_bvar_qps();
     }
     return current_qps_ < max_qps_limit_ ? true : false;
 }
-
 
 } // namespace selectdb

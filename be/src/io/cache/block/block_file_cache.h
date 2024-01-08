@@ -76,9 +76,8 @@ struct CacheContext {
     CacheContext() = default;
 
     bool operator==(const CacheContext& rhs) const {
-        return query_id == rhs.query_id && cache_type == rhs.cache_type 
-                && expiration_time == rhs.expiration_time
-                && is_cold_data == rhs.is_cold_data;
+        return query_id == rhs.query_id && cache_type == rhs.cache_type &&
+               expiration_time == rhs.expiration_time && is_cold_data == rhs.is_cold_data;
     }
 
     TUniqueId query_id;
@@ -434,7 +433,7 @@ private:
     bool try_reserve_for_lru(const Key& key, QueryFileCacheContextPtr query_context,
                              const CacheContext& context, size_t offset, size_t size,
                              std::lock_guard<doris::Mutex>& cache_lock);
-    
+
     bool try_reserve_for_lazy_load(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
 
     std::vector<FileCacheType> get_other_cache_type(FileCacheType cur_cache_type);

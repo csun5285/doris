@@ -621,16 +621,17 @@ Status VSchemaChangeWithSorting::_internal_sorting(
     _add_merged_rows(merged_rows);
     auto st = rowset_writer->build(*rowset);
     if (!st.ok()) {
-        LOG(WARNING) << "sc rowset_writer return with nullptr, rowset_id=" << rowset_writer->rowset_id().to_string()
-        << " tablet_id=" << context.table_id << " newest_write_timestamp=" << context.newest_write_timestamp
-        << " verison=" << context.version.to_string()
-        << " table_id=" << new_tablet->table_id()
-        << " full_name=" << new_tablet->full_name()
-        << " partition_id=" << new_tablet->partition_id()
-        << " tablet_id=" << new_tablet->tablet_id()
-        << " replica_id=" << new_tablet->replica_id()
-        << " sehema_hash=" << new_tablet->schema_hash()
-        << " shard_id=" << new_tablet->shard_id();
+        LOG(WARNING) << "sc rowset_writer return with nullptr, rowset_id="
+                     << rowset_writer->rowset_id().to_string() << " tablet_id=" << context.table_id
+                     << " newest_write_timestamp=" << context.newest_write_timestamp
+                     << " verison=" << context.version.to_string()
+                     << " table_id=" << new_tablet->table_id()
+                     << " full_name=" << new_tablet->full_name()
+                     << " partition_id=" << new_tablet->partition_id()
+                     << " tablet_id=" << new_tablet->tablet_id()
+                     << " replica_id=" << new_tablet->replica_id()
+                     << " sehema_hash=" << new_tablet->schema_hash()
+                     << " shard_id=" << new_tablet->shard_id();
         return st;
     }
     return Status::OK();

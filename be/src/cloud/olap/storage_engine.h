@@ -393,7 +393,6 @@ private:
 
     HeartbeatFlags* _heartbeat_flags;
 
-
     std::unique_ptr<ThreadPool> _tablet_publish_txn_thread_pool;
 
     std::unique_ptr<ThreadPool> _tablet_meta_checkpoint_thread_pool;

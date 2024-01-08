@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "http/http_channel.h"
 #include "http/http_request.h"
 #include "http/http_status.h"
@@ -35,7 +36,6 @@
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_writer.h"
 #include "olap/rowset/rowset_writer_context.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet_manager.h"
 #include "util/time.h"
 #include "util/trace.h"

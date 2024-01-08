@@ -22,6 +22,7 @@
 
 #include <memory>
 
+#include "cloud/olap/storage_engine.h"
 #include "gtest/gtest_pred_impl.h"
 #include "olap/cumulative_compaction_policy.h"
 #include "olap/olap_common.h"
@@ -29,7 +30,6 @@
 #include "olap/rowset/rowset_factory.h"
 #include "olap/rowset/rowset_meta.h"
 #include "olap/rowset/rowset_meta_manager.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
 #include "olap/task/engine_publish_version_task.h"
@@ -208,8 +208,8 @@ public:
         // init tablet meta
         _tablet_meta = std::shared_ptr<TabletMeta>(new TabletMeta(
                 1, partition_id, tablet_id, 15674, schema_hash, 5, TTabletSchema(), 6, {{7, 8}},
-                _tablet_uid, TTabletType::TABLET_TYPE_DISK, TCompressionType::LZ4F,
-                false, false, 0, true, {}, "size_based", 1024, 2000, 3600));
+                _tablet_uid, TTabletType::TABLET_TYPE_DISK, TCompressionType::LZ4F, false, false, 0,
+                true, {}, "size_based", 1024, 2000, 3600));
         static_cast<void>(_tablet_meta->add_rs_meta(rowset_meta1));
         static_cast<void>(_tablet_meta->add_rs_meta(rowset_meta2));
         static_cast<void>(_tablet_meta->add_rs_meta(rowset_meta3));

@@ -239,7 +239,7 @@ Status FullTextIndexReader::query(OlapReaderStatistics* stats, RuntimeState* run
 
     std::string search_str = reinterpret_cast<const StringRef*>(query_value)->to_string();
     VLOG_DEBUG << column_name << " begin to search the fulltext index from clucene, query_str ["
-              << search_str << "]";
+               << search_str << "]";
 
     io::Path path(_path);
     auto index_dir = path.parent_path();

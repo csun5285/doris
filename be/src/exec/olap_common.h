@@ -422,7 +422,7 @@ private:
     bool _contain_null;
     int _precision;
     int _scale;
-    
+
     static constexpr bool _is_reject_split_type = primitive_type == PrimitiveType::TYPE_LARGEINT ||
                                                   primitive_type == PrimitiveType::TYPE_DECIMALV2 ||
                                                   primitive_type == PrimitiveType::TYPE_HLL ||
@@ -1262,4 +1262,3 @@ struct ScanPredicate {
 };
 
 } // namespace doris
-

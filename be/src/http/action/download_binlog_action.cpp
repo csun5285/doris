@@ -27,13 +27,13 @@
 #include <utility>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "http/http_channel.h"
 #include "http/http_request.h"
 #include "http/utils.h"
 #include "io/fs/local_file_system.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "runtime/exec_env.h"

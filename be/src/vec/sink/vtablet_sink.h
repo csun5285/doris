@@ -302,8 +302,9 @@ public:
 protected:
     void _close_check();
     void _cancel_with_msg(const std::string& msg);
-    void _refresh_load_wait_time(const ::google::protobuf::RepeatedPtrField<
-                                    ::doris::PTabletLoadRowsetInfo>& tablet_load_infos);
+    void _refresh_load_wait_time(
+            const ::google::protobuf::RepeatedPtrField<::doris::PTabletLoadRowsetInfo>&
+                    tablet_load_infos);
 
     VOlapTableSink* _parent = nullptr;
     IndexChannel* _index_channel = nullptr;
@@ -687,7 +688,7 @@ private:
 
     RuntimeState* _state = nullptr;
 
-//    std::shared_ptr<WalWriter> _wal_writer = nullptr;
+    //    std::shared_ptr<WalWriter> _wal_writer = nullptr;
 };
 
 } // namespace stream_load

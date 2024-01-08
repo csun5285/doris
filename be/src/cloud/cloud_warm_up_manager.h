@@ -9,7 +9,6 @@
 
 #include "common/status.h"
 #include "gen_cpp/BackendService.h"
-#include "common/status.h"
 
 namespace doris::cloud {
 
@@ -17,7 +16,6 @@ enum class DownloadType {
     BE,
     S3,
 };
-
 
 struct JobMeta {
     JobMeta(const TJobMeta& meta);

@@ -52,6 +52,7 @@
 #include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
 #include "common/config.h"
+#include "common/exception.h"
 #include "common/logging.h"
 #include "common/signal_handler.h"
 #include "common/status.h"
@@ -59,8 +60,6 @@
 #include "http/http_client.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/cache/block/block_file_cache_fwd.h"
-#include "common/exception.h"
-#include "common/status.h"
 #include "io/fs/local_file_system.h"
 #include "io/fs/stream_load_pipe.h"
 #include "io/io_common.h"
@@ -1495,7 +1494,7 @@ Status PInternalServiceImpl::_multi_get(const PMultiGetRequest& request,
 #ifdef CLOUD_MODE
     // CHECK(false) << "UB in CLOUD_MODE";
     return Status::InternalError("UB in CLOUD_MODE");
-#else // !CLOUD_MODE
+#else  // !CLOUD_MODE
     OlapReaderStatistics stats;
     vectorized::Block result_block;
     int64_t acquire_tablet_ms = 0;
@@ -1526,7 +1525,7 @@ Status PInternalServiceImpl::_multi_get(const PMultiGetRequest& request,
         TabletSharedPtr tablet = scope_timer_run(
                 [&]() {
                     return StorageEngine::instance()->tablet_manager()->get_tablet(
-                        row_loc.tablet_id(), true /*include deleted*/);
+                            row_loc.tablet_id(), true /*include deleted*/);
                 },
                 &acquire_tablet_ms);
         RowsetId rowset_id;

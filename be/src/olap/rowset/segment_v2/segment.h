@@ -76,7 +76,7 @@ public:
                        const io::FileReaderOptions& reader_options,
                        std::shared_ptr<Segment>* output, bool is_lazy_open = false,
                        bool disable_file_cache = false);
-    
+
     static Status check_segment_footer(io::FileReaderSPtr file_reader);
 
     ~Segment();
@@ -91,7 +91,7 @@ public:
     uint32_t num_rows() const { return _num_rows; }
 
     Status new_column_iterator(const TabletColumn& tablet_column,
-                                std::unique_ptr<ColumnIterator>* iter);
+                               std::unique_ptr<ColumnIterator>* iter);
 
     Status new_bitmap_index_iterator(const TabletColumn& tablet_column,
                                      std::unique_ptr<BitmapIndexIterator>* iter);

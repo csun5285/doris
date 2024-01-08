@@ -388,7 +388,6 @@ struct OlapReaderStatistics {
     int64_t lazy_open_segment_timer = 0;
 };
 
-
 using ColumnId = uint32_t;
 // Column unique id set
 using UniqueIdSet = std::set<uint32_t>;

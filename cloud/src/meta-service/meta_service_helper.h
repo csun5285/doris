@@ -7,8 +7,8 @@
 #include <string_view>
 
 #include "common/bvars.h"
-#include "common/logging.h"
 #include "common/config.h"
+#include "common/logging.h"
 #include "common/stopwatch.h"
 #include "common/util.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
@@ -37,8 +37,8 @@ void begin_rpc(std::string_view func_name, brpc::Controller* ctrl, const Request
         VLOG_DEBUG << "begin " << func_name << " from " << ctrl->remote_side()
                    << " tablet size: " << req->tablet_idx().size();
     } else if constexpr (std::is_same_v<Request, GetVersionRequest> ||
-            std::is_same_v<Request, GetRowsetRequest> ||
-            std::is_same_v<Request, GetTabletRequest>) {
+                         std::is_same_v<Request, GetRowsetRequest> ||
+                         std::is_same_v<Request, GetTabletRequest>) {
         VLOG_DEBUG << "begin " << func_name << " from " << ctrl->remote_side()
                    << " request=" << req->ShortDebugString();
     } else {
@@ -68,7 +68,7 @@ void finish_rpc(std::string_view func_name, brpc::Controller* ctrl, Response* re
                    << " status=" << res->status().ShortDebugString()
                    << " tablet size: " << res->tablet_stats().size();
     } else if constexpr (std::is_same_v<Response, GetVersionResponse> ||
-            std::is_same_v<Response, GetTabletResponse>) {
+                         std::is_same_v<Response, GetTabletResponse>) {
         VLOG_DEBUG << "finish " << func_name << " from " << ctrl->remote_side()
                    << " response=" << res->ShortDebugString();
     } else if constexpr (std::is_same_v<Response, GetDeleteBitmapResponse>) {

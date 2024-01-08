@@ -26,13 +26,13 @@
 #include <unordered_map>
 #include <vector>
 
+#include "cloud/cloud_tablet_mgr.h"
+#include "cloud/olap/storage_engine.h"
+#include "cloud/utils.h"
 #include "gutil/integral_types.h"
 #include "olap/lru_cache.h"
 #include "olap/olap_tuple.h"
 #include "olap/row_cursor.h"
-#include "cloud/cloud_tablet_mgr.h"
-#include "cloud/olap/storage_engine.h"
-#include "cloud/utils.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_schema.h"
 #include "runtime/runtime_state.h"
@@ -195,10 +195,10 @@ Status PointQueryExecutor::init(const PTabletKeyLookupRequest* request,
         }
     }
 #ifdef CLOUD_MODE
-        cloud::tablet_mgr()->get_tablet(request->tablet_id(), &_tablet);
+    cloud::tablet_mgr()->get_tablet(request->tablet_id(), &_tablet);
 #else
-        _tablet = StorageEngine::instance()->tablet_manager()->get_tablet(
-                request->tablet_id(), true /*include deleted*/);
+    _tablet = StorageEngine::instance()->tablet_manager()->get_tablet(request->tablet_id(),
+                                                                      true /*include deleted*/);
 #endif
     if (request->has_version() && request->version() >= 0) {
         _version = request->version();

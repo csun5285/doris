@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include "bthread/bthread.h"
-#include "bthread/task_group.h"
 #include <stdint.h>
 
 #include <algorithm>
 #include <vector>
 
+#include "bthread/bthread.h"
+#include "bthread/task_group.h"
 #include "common/status.h"
 #include "olap/tablet.h"
 #include "runtime/exec_env.h"

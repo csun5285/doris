@@ -118,12 +118,12 @@ public:
 
         brpc::Controller ctrl;
         if (params.find("token=") != std::string_view::npos) {
-            ctrl.http_request().uri() =
-                    fmt::format("0.0.0.0:{}/MetaService/http/{}?{}", endpoint.port, resource, params);
+            ctrl.http_request().uri() = fmt::format("0.0.0.0:{}/MetaService/http/{}?{}",
+                                                    endpoint.port, resource, params);
         } else {
             ctrl.http_request().uri() =
-                    fmt::format("0.0.0.0:{}/MetaService/http/{}?token={}&{}", endpoint.port, resource,
-                                config::http_token, params);
+                    fmt::format("0.0.0.0:{}/MetaService/http/{}?token={}&{}", endpoint.port,
+                                resource, config::http_token, params);
         }
         if (body.has_value()) {
             ctrl.http_request().set_method(brpc::HTTP_METHOD_POST);
@@ -433,7 +433,7 @@ TEST(MetaServiceHttpTest, InstanceTest) {
         req.set_op(AlterInstanceRequest::SET_OVERDUE);
         req.set_instance_id("test_instance");
         auto [status_code, resp] =
-            ctx.forward<MetaServiceResponseStatus>("set_instance_status", req);
+                ctx.forward<MetaServiceResponseStatus>("set_instance_status", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
         InstanceInfoPB instance = ctx.get_instance_info("test_instance");
@@ -446,7 +446,7 @@ TEST(MetaServiceHttpTest, InstanceTest) {
         req.set_op(AlterInstanceRequest::SET_NORMAL);
         req.set_instance_id("test_instance");
         auto [status_code, resp] =
-            ctx.forward<MetaServiceResponseStatus>("set_instance_status", req);
+                ctx.forward<MetaServiceResponseStatus>("set_instance_status", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
 
@@ -671,7 +671,8 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         req.mutable_cluster()->set_cluster_id(mock_cluster_id);
         req.mutable_cluster()->set_cluster_status(ClusterStatus::SUSPENDED);
         req.set_op(AlterClusterRequest::SET_CLUSTER_STATUS);
-        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("set_cluster_status", req);
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("set_cluster_status", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
@@ -682,7 +683,8 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         req.mutable_cluster()->add_mysql_user_name("test_user");
         req.set_instance_id(mock_instance);
         req.mutable_cluster()->set_cluster_id(mock_cluster_id);
-        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("update_cluster_mysql_user_name", req);
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("update_cluster_mysql_user_name", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
@@ -730,7 +732,8 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         meta_service->resource_mgr()->node_info_.insert(
                 {"cloud_unique_id", NodeInfo {Role::COMPUTE_NODE, mock_instance,
                                               "rename_cluster_name", mock_cluster_id, npb}});
-        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("notify_decommissioned", req);
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("notify_decommissioned", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
@@ -743,7 +746,8 @@ TEST(MetaServiceHttpTest, AlterClusterTest) {
         req.mutable_cluster()->set_cluster_id(mock_cluster_id);
         req.mutable_cluster()->set_public_endpoint("127.0.0.2");
         req.mutable_cluster()->set_private_endpoint("127.0.0.3");
-        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("update_cluster_endpoint", req);
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("update_cluster_endpoint", req);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
@@ -934,7 +938,8 @@ TEST(MetaServiceHttpTest, AlterIamTest) {
         alter_iam_request.set_ak("new_ak");
         alter_iam_request.set_sk("new_sk");
         alter_iam_request.set_account_id("account_id");
-        auto [status_code, resp] = ctx.forward<MetaServiceResponseStatus>("alter_iam", alter_iam_request);
+        auto [status_code, resp] =
+                ctx.forward<MetaServiceResponseStatus>("alter_iam", alter_iam_request);
         ASSERT_EQ(status_code, 200);
         ASSERT_EQ(resp.code(), MetaServiceCode::OK);
     }
@@ -1236,7 +1241,9 @@ TEST(MetaServiceHttpTest, UnknownFields) {
     // LOG:
     // parse http request 'get_tablet_stats': INVALID_ARGUMENT:an_unknown_field: Cannot find field. body="{"table_id": 1, "an_unknown_field": "xxxx"}"
     HttpContext ctx;
-    std::string body = "{\"table_id\": 1, \"an_unknown_field\": \"xxxx\", \"cloud_unique_id\": \"1:test_instance:1\"}";
+    std::string body =
+            "{\"table_id\": 1, \"an_unknown_field\": \"xxxx\", \"cloud_unique_id\": "
+            "\"1:test_instance:1\"}";
     auto [status_code, content] = ctx.query<std::string>("get_tablet_stats", "", body);
     ASSERT_EQ(status_code, 200);
 }
@@ -1244,8 +1251,8 @@ TEST(MetaServiceHttpTest, UnknownFields) {
 TEST(MetaServiceHttpTest, EncodeAndDecodeKey) {
     HttpContext ctx;
     {
-        auto [status_code, content] = ctx.query<std::string>(
-                "encode_key", "key_type=InstanceKey&instance_id=test", "");
+        auto [status_code, content] =
+                ctx.query<std::string>("encode_key", "key_type=InstanceKey&instance_id=test", "");
         ASSERT_EQ(status_code, 200);
         const char* encode_key_output = R"(
 ┌───────────────────────── 0. key space: 1

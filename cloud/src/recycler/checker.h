@@ -35,7 +35,7 @@ private:
     friend class RecyclerServiceImpl;
 
     std::shared_ptr<TxnKv> txn_kv_;
-    std::atomic_bool stopped_{false};
+    std::atomic_bool stopped_ {false};
     std::string ip_port_;
     std::vector<std::thread> workers_;
 
@@ -50,7 +50,6 @@ private:
     std::condition_variable notifier_;
 
     WhiteBlackList instance_filter_;
-
 };
 
 class InstanceChecker {

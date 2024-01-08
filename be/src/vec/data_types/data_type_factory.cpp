@@ -629,4 +629,3 @@ DataTypePtr DataTypeFactory::create_data_type(const arrow::DataType* type, bool 
 }
 
 } // namespace doris::vectorized
-

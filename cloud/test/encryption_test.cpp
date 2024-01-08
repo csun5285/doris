@@ -270,7 +270,7 @@ TEST(EncryptionTest, RootKeyTestWithKms3) {
     auto ret = init_global_encryption_key_info_map(mem_kv.get());
     ASSERT_EQ(ret, 0);
     ASSERT_EQ(global_encryption_key_info_map.size(), 1);
-    
+
     // enable kms but not focus to add kms data key
     config::enable_kms = true;
     config::focus_add_kms_data_key = false;
@@ -280,7 +280,7 @@ TEST(EncryptionTest, RootKeyTestWithKms3) {
     config::kms_endpoint = "3";
     config::kms_region = "4";
     config::kms_provider = "ali";
-    config::kms_info_encryption_key = "uwPXjGTuFJXyDZJBuYG52kdMxrWB24952HkXSa2v3Vw="; 
+    config::kms_info_encryption_key = "uwPXjGTuFJXyDZJBuYG52kdMxrWB24952HkXSa2v3Vw=";
     global_encryption_key_info_map.clear();
     ret = init_global_encryption_key_info_map(mem_kv.get());
     ASSERT_EQ(ret, 0);
@@ -296,19 +296,19 @@ TEST(EncryptionTest, RootKeyTestWithKms3) {
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [](int*) { SyncPoint::get_instance()->clear_all_call_backs(); });
     sp->set_call_back("alikms::generate_data_key::plaintext",
-                        [&](void* p) { *((std::string*)p) = mock_encoded_plaintext; });
+                      [&](void* p) { *((std::string*)p) = mock_encoded_plaintext; });
     sp->set_call_back("alikms::generate_data_key::ciphertext",
-                        [&](void* p) { *((std::string*)p) = mock_encoded_ciphertext; });
+                      [&](void* p) { *((std::string*)p) = mock_encoded_ciphertext; });
     sp->set_call_back("alikms::generate_data_key::ret::pred",
-                        [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
+                      [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
     sp->set_call_back("alikms::generate_data_key::ret", [](void* p) { *((int*)p) = 0; });
 
     sp->set_call_back("alikms::decrypt::output",
-                          [&](void* p) { *((std::string*)p) = mock_encoded_plaintext; });
+                      [&](void* p) { *((std::string*)p) = mock_encoded_plaintext; });
     sp->set_call_back("alikms::decrypt::ret::pred",
-                        [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
-    sp->set_call_back("alikms::decrypt::ret", [](void* p) { *((int*)p) = 0; }); 
-    sp->enable_processing(); 
+                      [](void* pred) { *reinterpret_cast<bool*>(pred) = true; });
+    sp->set_call_back("alikms::decrypt::ret", [](void* p) { *((int*)p) = 0; });
+    sp->enable_processing();
 
     global_encryption_key_info_map.clear();
     ret = init_global_encryption_key_info_map(mem_kv.get());
@@ -317,7 +317,7 @@ TEST(EncryptionTest, RootKeyTestWithKms3) {
 
     // get again
     global_encryption_key_info_map.clear();
-    ret = init_global_encryption_key_info_map(mem_kv.get()); 
+    ret = init_global_encryption_key_info_map(mem_kv.get());
     ASSERT_EQ(global_encryption_key_info_map.size(), 2);
 
     // finally check kv
@@ -348,5 +348,5 @@ TEST(EncryptionTest, RootKeyTestWithKms3) {
             base64_decode(item2.key().c_str(), item2.key().length(), decoded_string2.data());
     decoded_string2.assign(decoded_string2.data(), decoded_text_len2);
     ASSERT_EQ(decoded_string2, plaintext);
-    ASSERT_EQ(global_encryption_key_info_map.at(item2.key_id()), decoded_string2); 
+    ASSERT_EQ(global_encryption_key_info_map.at(item2.key_id()), decoded_string2);
 }

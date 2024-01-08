@@ -62,7 +62,7 @@ Status CloudSchemaChange::process_alter_tablet(const TAlterTabletReqV2& request)
 
     // MUST sync rowsets before capturing rowset readers and building DeleteHandler
     RETURN_IF_ERROR(base_tablet->cloud_sync_rowsets(request.alter_version));
-   // ATTN: Only convert rowsets of version larger than 1, MUST let the new tablet cache have rowset [0-1]
+    // ATTN: Only convert rowsets of version larger than 1, MUST let the new tablet cache have rowset [0-1]
     _output_cumulative_point = base_tablet->cumulative_layer_point();
 
     std::vector<RowSetSplits> rs_splits;
@@ -400,9 +400,8 @@ Status CloudSchemaChange::_process_delete_bitmap(TabletSharedPtr new_tablet, int
     auto& delete_bitmap = tmp_tablet->tablet_meta()->delete_bitmap();
 
     // step4, store delete bitmap
-    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(tmp_tablet.get(),
-                                                            SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID,
-                                                            initiator, &delete_bitmap));
+    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
+            tmp_tablet.get(), SCHEMA_CHANGE_DELETE_BITMAP_LOCK_ID, initiator, &delete_bitmap));
 
     new_tablet->tablet_meta()->delete_bitmap() = delete_bitmap;
     return Status::OK();

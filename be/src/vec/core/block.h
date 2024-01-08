@@ -437,7 +437,6 @@ private:
     IndexByName index_by_name;
 
 public:
-
     static MutableBlock build_mutable_block(Block* block) {
         return block == nullptr ? MutableBlock() : MutableBlock(block);
     }

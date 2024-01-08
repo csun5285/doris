@@ -25,47 +25,42 @@ namespace doris {
 
 class WaitGroup {
 public:
+    WaitGroup() = default;
 
-WaitGroup() = default;
+    ~WaitGroup() = default;
 
-~WaitGroup() = default;
+    WaitGroup(const WaitGroup&) = delete;
+    WaitGroup(WaitGroup&&) = delete;
+    void operator=(const WaitGroup&) = delete;
+    void operator=(WaitGroup&&) = delete;
 
-WaitGroup(const WaitGroup& ) = delete;
-WaitGroup(WaitGroup&&) = delete;
-void operator=(const WaitGroup&) = delete;
-void operator=(WaitGroup&&) = delete;
+    // add one counter indicating one more concurrent worker
+    void add(int count = 1) { _count += count; }
 
-// add one counter indicating one more concurrent worker
-void add(int count = 1) {
-    _count += count;
-}
-
-// decrese count if one concurrent worker finished it's work
-void done() {
-    _count--;
-    if (_count.load() <= 0) {
-        _cv.notify_all();
+    // decrese count if one concurrent worker finished it's work
+    void done() {
+        _count--;
+        if (_count.load() <= 0) {
+            _cv.notify_all();
+        }
     }
-}
 
-// wait for all concurrent workers finish their work then return true
-// would return false if timeout, default timeout would be 5min
-bool wait(int64_t timeout_seconds = 300) {
-    if (_count.load() <= 0) {
-        return true;
-    }
-    std::unique_lock<std::mutex> lck{_lock};
-    _cv.wait_for(lck, std::chrono::seconds(timeout_seconds), [this](){
+    // wait for all concurrent workers finish their work then return true
+    // would return false if timeout, default timeout would be 5min
+    bool wait(int64_t timeout_seconds = 300) {
+        if (_count.load() <= 0) {
+            return true;
+        }
+        std::unique_lock<std::mutex> lck {_lock};
+        _cv.wait_for(lck, std::chrono::seconds(timeout_seconds),
+                     [this]() { return _count.load() <= 0; });
         return _count.load() <= 0;
-    });
-    return _count.load() <= 0;
-}
-
+    }
 
 private:
     std::mutex _lock;
     std::condition_variable _cv;
-    std::atomic_int64_t _count{0};
+    std::atomic_int64_t _count {0};
 };
 
-}
+} // namespace doris

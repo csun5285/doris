@@ -1067,8 +1067,8 @@ DEFINE_mInt64(s3_write_buffer_size, "5242880");
 DEFINE_mInt32(s3_task_check_interval, "60");
 DEFINE_mBool(enable_file_cache_block_prefetch, "false")
 
-//disable shrink memory by default
-DEFINE_Bool(enable_shrink_memory, "false");
+        //disable shrink memory by default
+        DEFINE_Bool(enable_shrink_memory, "false");
 DEFINE_mInt32(schema_cache_capacity, "1024");
 DEFINE_mInt32(schema_cache_sweep_time_sec, "100");
 

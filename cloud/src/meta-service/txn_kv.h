@@ -146,8 +146,9 @@ public:
      * @param opts
      * @return If all keys are successfully retrieved, return TXN_OK. Otherwise, return the code of the first occurring error
      */
-    virtual TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
-                          const BatchGetOptions& opts = BatchGetOptions()) = 0;
+    virtual TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res,
+                                   const std::vector<std::string>& keys,
+                                   const BatchGetOptions& opts = BatchGetOptions()) = 0;
 };
 
 class RangeGetIterator {
@@ -433,8 +434,9 @@ public:
 
     TxnErrorCode abort() override;
 
-    TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res, const std::vector<std::string>& keys,
-                  const BatchGetOptions& opts = BatchGetOptions()) override;
+    TxnErrorCode batch_get(std::vector<std::optional<std::string>>* res,
+                           const std::vector<std::string>& keys,
+                           const BatchGetOptions& opts = BatchGetOptions()) override;
 
 private:
     std::shared_ptr<Database> db_ {nullptr};

@@ -19,8 +19,9 @@
 
 #include <stdint.h>
 
-#include <string>
 #include <functional>
+#include <string>
+
 #include "io/io_common.h"
 
 namespace doris {
@@ -63,9 +64,7 @@ private:
 
 class FileBlockCachePathPolicy : public CachePathPolicy {
 public:
-    std::string get_cache_path(const std::string& path) const override {
-        return path;
-    }
+    std::string get_cache_path(const std::string& path) const override { return path; }
 };
 
 using MetricsHook = std::function<void(const ReadStatistics&)>;

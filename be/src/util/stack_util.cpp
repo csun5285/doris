@@ -18,18 +18,17 @@
 #include "util/stack_util.h"
 
 #include <bvar/latency_recorder.h>
-
-#include "common/config.h"
-#include "util/runtime_profile.h"
 #include <execinfo.h>
 #include <signal.h>
 #include <stdio.h>
 
 #include <boost/stacktrace.hpp>
 
+#include "common/config.h"
 #include "common/stack_trace.h"
 #include "util/mem_info.h"
 #include "util/pretty_printer.h"
+#include "util/runtime_profile.h"
 
 namespace google {
 namespace glog_internal_namespace_ {

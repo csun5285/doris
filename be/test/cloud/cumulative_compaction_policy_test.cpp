@@ -25,7 +25,6 @@
 #include "olap/rowset/rowset_meta.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
-#include "olap/tablet.h"
 
 namespace doris {
 

@@ -104,7 +104,8 @@ Status CGroupUtil::find_cgroup_mounts(const string& subsystem, pair<string, stri
     string line;
     while (true) {
         if (mountinfo.fail() || mountinfo.bad()) {
-            return Status::InternalError("Error reading /proc/self/mountinfo: {}", get_str_err_msg());
+            return Status::InternalError("Error reading /proc/self/mountinfo: {}",
+                                         get_str_err_msg());
         } else if (mountinfo.eof()) {
             return Status::NotFound("Could not find subsystem {} in /proc/self/mountinfo",
                                     subsystem);

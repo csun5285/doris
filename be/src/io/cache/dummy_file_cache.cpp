@@ -32,8 +32,7 @@ DummyFileCache::DummyFileCache(const Path& cache_dir, int64_t alive_time_sec)
 
 DummyFileCache::~DummyFileCache() = default;
 
-void DummyFileCache::_add_file_cache(const Path& data_file) {
-}
+void DummyFileCache::_add_file_cache(const Path& data_file) {}
 
 void DummyFileCache::_load() {
     std::vector<Path> cache_names;

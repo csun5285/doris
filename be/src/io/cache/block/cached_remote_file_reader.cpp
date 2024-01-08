@@ -44,7 +44,6 @@ namespace io {
 bvar::Adder<uint64_t> cache_skipped_bytes_read("cached_remote_reader", "cache_skipped_read_bytes");
 bvar::Adder<uint64_t> s3_read_counter("cached_remote_reader_s3_read");
 
-
 CachedRemoteFileReader::CachedRemoteFileReader(FileReaderSPtr remote_file_reader,
                                                const FileReaderOptions* opts)
         : _remote_file_reader(std::move(remote_file_reader)) {
@@ -80,8 +79,8 @@ Status CachedRemoteFileReader::close() {
     return _remote_file_reader->close();
 }
 
-std::pair<size_t, size_t> CachedRemoteFileReader::s_align_size(size_t offset,
-                                                              size_t read_size, size_t length) {
+std::pair<size_t, size_t> CachedRemoteFileReader::s_align_size(size_t offset, size_t read_size,
+                                                               size_t length) {
     size_t left = offset;
     size_t right = offset + read_size - 1;
     size_t align_left, align_right;
@@ -89,7 +88,8 @@ std::pair<size_t, size_t> CachedRemoteFileReader::s_align_size(size_t offset,
     align_right = (right / FILE_CACHE_MAX_FILE_BLOCK_SIZE + 1) * FILE_CACHE_MAX_FILE_BLOCK_SIZE;
     align_right = align_right < length ? align_right : length;
     size_t align_size = align_right - align_left;
-    if (config::enable_file_cache_block_prefetch && align_size < FILE_CACHE_MAX_FILE_BLOCK_SIZE && align_left != 0) {
+    if (config::enable_file_cache_block_prefetch && align_size < FILE_CACHE_MAX_FILE_BLOCK_SIZE &&
+        align_left != 0) {
         align_size += FILE_CACHE_MAX_FILE_BLOCK_SIZE;
         align_left -= FILE_CACHE_MAX_FILE_BLOCK_SIZE;
     }

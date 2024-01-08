@@ -1,6 +1,6 @@
 #pragma once
-#include <bvar/bvar.h>
 #include <bthread/mutex.h>
+#include <bvar/bvar.h>
 #include <bvar/latency_recorder.h>
 
 #include <cstdint>
@@ -11,7 +11,8 @@
 
 class BvarLatencyRecorderWithTag {
 public:
-    BvarLatencyRecorderWithTag(std::string module, std::string name): module_(module), name_(name){}
+    BvarLatencyRecorderWithTag(std::string module, std::string name)
+            : module_(module), name_(name) {}
 
     void put(const std::string& tag, int64_t value) {
         std::shared_ptr<bvar::LatencyRecorder> instance = nullptr;
@@ -19,8 +20,7 @@ public:
             std::lock_guard<bthread::Mutex> l(mutex_);
             auto it = bvar_map_.find(tag);
             if (it == bvar_map_.end()) {
-                instance = std::make_shared<bvar::LatencyRecorder>(
-                                                module_, name_ + "_" + tag);
+                instance = std::make_shared<bvar::LatencyRecorder>(module_, name_ + "_" + tag);
                 bvar_map_[tag] = instance;
             } else {
                 instance = it->second;
@@ -35,13 +35,11 @@ public:
 
         auto it = bvar_map_.find(tag);
         if (it == bvar_map_.end()) {
-            instance = std::make_shared<bvar::LatencyRecorder>(
-                                                module_, name_ + "_" + tag);
+            instance = std::make_shared<bvar::LatencyRecorder>(module_, name_ + "_" + tag);
             bvar_map_[tag] = instance;
             return instance;
         }
         return it->second;
-
     }
 
     void remove(const std::string& tag) {
@@ -59,7 +57,7 @@ private:
 template <class T>
 class BvarStatusWithTag {
 public:
-    BvarStatusWithTag(std::string module, std::string name): module_(module), name_(name){}
+    BvarStatusWithTag(std::string module, std::string name) : module_(module), name_(name) {}
 
     void put(const std::string& tag, T value) {
         std::shared_ptr<bvar::Status<T>> instance = nullptr;
@@ -67,8 +65,7 @@ public:
             std::lock_guard<bthread::Mutex> l(mutex_);
             auto it = bvar_map_.find(tag);
             if (it == bvar_map_.end()) {
-                instance = std::make_shared<bvar::Status<T>>(
-                                                module_, name_ + "_" + tag, T());
+                instance = std::make_shared<bvar::Status<T>>(module_, name_ + "_" + tag, T());
                 bvar_map_[tag] = instance;
             } else {
                 instance = it->second;
@@ -83,13 +80,11 @@ public:
 
         auto it = bvar_map_.find(tag);
         if (it == bvar_map_.end()) {
-            instance = std::make_shared<bvar::Status<T>>(
-                                                module_, name_ + "_" + tag);
+            instance = std::make_shared<bvar::Status<T>>(module_, name_ + "_" + tag);
             bvar_map_[tag] = instance;
             return instance;
         }
         return it->second;
-
     }
 
     void remove(const std::string& tag) {
@@ -103,7 +98,6 @@ private:
     std::string name_;
     std::map<std::string, std::shared_ptr<bvar::Status<T>>> bvar_map_;
 };
-
 
 // meta-service's bvars
 extern BvarLatencyRecorderWithTag g_bvar_ms_begin_txn;

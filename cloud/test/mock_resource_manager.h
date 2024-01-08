@@ -34,7 +34,8 @@ public:
         return std::make_pair(MetaServiceCode::OK, "");
     }
 
-    std::pair<MetaServiceCode, std::string> refresh_instance(const std::string& instance_id) override {
+    std::pair<MetaServiceCode, std::string> refresh_instance(
+            const std::string& instance_id) override {
         return std::make_pair(MetaServiceCode::OK, "");
     }
 

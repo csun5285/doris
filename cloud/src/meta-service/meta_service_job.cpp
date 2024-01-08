@@ -143,7 +143,8 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
         } else if (compaction.input_versions().empty()) {
             // Unknown input version range, doesn't support parallel compaction of same type
             for (auto& c : compactions) {
-                if (c.type() != compaction.type() && c.type() != TabletCompactionJobPB::FULL) continue;
+                if (c.type() != compaction.type() && c.type() != TabletCompactionJobPB::FULL)
+                    continue;
                 if (c.id() == compaction.id()) return; // Same job, return OK to keep idempotency
                 msg = fmt::format("compaction has already started, tablet_id={} job={}", tablet_id,
                                   proto_to_json(c));
@@ -160,7 +161,8 @@ void start_compaction_job(MetaServiceCode& code, std::string& msg, std::stringst
                        a.input_versions(1) < b.input_versions(0);
             };
             for (auto& c : compactions) {
-                if (c.type() != compaction.type() && c.type() != TabletCompactionJobPB::FULL) continue;
+                if (c.type() != compaction.type() && c.type() != TabletCompactionJobPB::FULL)
+                    continue;
                 if (c.input_versions_size() > 0 && version_not_conflict(c, compaction)) continue;
                 if (c.id() == compaction.id()) return; // Same job, return OK to keep idempotency
                 msg = fmt::format("compaction has already started, tablet_id={} job={}", tablet_id,

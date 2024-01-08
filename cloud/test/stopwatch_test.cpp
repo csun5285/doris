@@ -1,6 +1,7 @@
 #include "common/stopwatch.h"
 
 #include <gtest/gtest.h>
+
 #include <chrono>
 #include <thread>
 

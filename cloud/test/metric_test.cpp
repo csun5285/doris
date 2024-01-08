@@ -27,7 +27,7 @@ TEST(MetricTest, FdbMetricExporterTest) {
 
         ASSERT_TRUE(inFile.is_open());
         std::string fileContent((std::istreambuf_iterator<char>(inFile)),
-                                    std::istreambuf_iterator<char>());
+                                std::istreambuf_iterator<char>());
 
         std::shared_ptr<TxnKv> txn_kv = std::make_shared<MemTxnKv>();
         std::unique_ptr<Transaction> txn;
@@ -69,13 +69,13 @@ TEST(MetricTest, FdbMetricExporterTest) {
 
         ASSERT_TRUE(inFile.is_open());
         std::string fileContent((std::istreambuf_iterator<char>(inFile)),
-                                    std::istreambuf_iterator<char>());
+                                std::istreambuf_iterator<char>());
 
         std::string word_to_replace = "cluster";
         std::string new_word = "xxxx";
 
         size_t start_pos = 0;
-        while((start_pos = fileContent.find(word_to_replace, start_pos)) != std::string::npos) {
+        while ((start_pos = fileContent.find(word_to_replace, start_pos)) != std::string::npos) {
             fileContent.replace(start_pos, word_to_replace.length(), new_word);
             start_pos += new_word.length();
         }
@@ -104,13 +104,13 @@ TEST(MetricTest, FdbMetricExporterTest) {
 
         ASSERT_TRUE(inFile.is_open());
         std::string fileContent((std::istreambuf_iterator<char>(inFile)),
-                                    std::istreambuf_iterator<char>());
+                                std::istreambuf_iterator<char>());
 
         std::string word_to_replace = "machines";
         std::string new_word = "xxxx";
 
         size_t start_pos = 0;
-        while((start_pos = fileContent.find(word_to_replace, start_pos)) != std::string::npos) {
+        while ((start_pos = fileContent.find(word_to_replace, start_pos)) != std::string::npos) {
             fileContent.replace(start_pos, word_to_replace.length(), new_word);
             start_pos += new_word.length();
         }
@@ -129,7 +129,7 @@ TEST(MetricTest, FdbMetricExporterTest) {
         ASSERT_EQ(g_bvar_fdb_client_count.get_value(), 8);
     }
 
-    // stop without start 
+    // stop without start
     {
         g_bvar_fdb_machines_count.set_value(BVAR_FDB_INVALID_VALUE);
         g_bvar_fdb_client_count.set_value(BVAR_FDB_INVALID_VALUE);
@@ -139,7 +139,7 @@ TEST(MetricTest, FdbMetricExporterTest) {
 
         ASSERT_TRUE(inFile.is_open());
         std::string fileContent((std::istreambuf_iterator<char>(inFile)),
-                                    std::istreambuf_iterator<char>());
+                                std::istreambuf_iterator<char>());
 
         std::shared_ptr<TxnKv> txn_kv = std::make_shared<MemTxnKv>();
         std::unique_ptr<Transaction> txn;

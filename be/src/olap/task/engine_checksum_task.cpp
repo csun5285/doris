@@ -24,12 +24,12 @@
 #include <string>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "io/io_common.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/reader.h"
 #include "olap/rowset/rowset.h"
-#include "cloud/olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "olap/utils.h"

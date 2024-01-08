@@ -119,8 +119,8 @@ void insert_rowsets(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int64_t p
     ASSERT_EQ(txn->commit(), TxnErrorCode::TXN_OK) << tablet_id;
 }
 
-MetaServiceCode get_delete_bitmap_lock(MetaServiceProxy* meta_service, int64_t table_id, int64_t lock_id,
-                            int64_t initor) {
+MetaServiceCode get_delete_bitmap_lock(MetaServiceProxy* meta_service, int64_t table_id,
+                                       int64_t lock_id, int64_t initor) {
     brpc::Controller cntl;
     GetDeleteBitmapUpdateLockRequest req;
     GetDeleteBitmapUpdateLockResponse res;

@@ -17,9 +17,6 @@
 
 #pragma once
 
-#include "io/fs/file_writer.h"
-#include "common/status.h"
-#include "gen_cpp/segment_v2.pb.h"
 #include <glog/logging.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -27,7 +24,9 @@
 #include <memory>
 
 #include "common/status.h"
+#include "gen_cpp/segment_v2.pb.h"
 #include "io/fs/file_reader_writer_fwd.h"
+#include "io/fs/file_writer.h"
 #include "olap/rowset/segment_v2/bloom_filter.h"
 #include "olap/rowset/segment_v2/bloom_filter_index_writer.h"
 #include "olap/rowset/segment_v2/indexed_column_reader.h"

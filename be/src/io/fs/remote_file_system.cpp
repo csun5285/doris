@@ -56,7 +56,8 @@ Status RemoteFileSystem::connect() {
     FILESYSTEM_M(connect_impl());
 }
 
-Status RemoteFileSystem::open_file_impl(const Path& path, FileReaderSPtr* reader, const FileReaderOptions* opts) {
+Status RemoteFileSystem::open_file_impl(const Path& path, FileReaderSPtr* reader,
+                                        const FileReaderOptions* opts) {
     FileReaderSPtr raw_reader;
     if (!opts) {
         opts = &FileReaderOptions::DEFAULT;
@@ -71,8 +72,7 @@ Status RemoteFileSystem::open_file_impl(const Path& path, FileReaderSPtr* reader
     case io::FileCachePolicy::WHOLE_FILE_CACHE: {
         std::string cache_path = opts->path_policy.get_cache_path(path.native());
         io::FileCachePtr cache_reader = FileCacheManager::instance()->new_file_cache(
-                cache_path, config::file_cache_alive_time_sec, raw_reader,
-                opts->cache_type);
+                cache_path, config::file_cache_alive_time_sec, raw_reader, opts->cache_type);
         FileCacheManager::instance()->add_file_cache(cache_path, cache_reader);
         *reader = cache_reader;
         break;

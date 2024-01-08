@@ -16,7 +16,6 @@
 // under the License.
 
 #include "vec/exec/scan/new_olap_scanner.h"
-#include <atomic>
 
 #include <gen_cpp/Descriptors_types.h>
 #include <gen_cpp/PlanNodes_types.h>
@@ -26,6 +25,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <iterator>
 #include <ostream>
 #include <set>

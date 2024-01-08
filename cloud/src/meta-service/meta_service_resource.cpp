@@ -2295,7 +2295,8 @@ void MetaServiceImpl::alter_iam(google::protobuf::RpcController* controller,
         return;
     }
     if (is_add_req) {
-        LOG(INFO) << "add new iam info, cipher ak: " << iam_user.ak() << " cipher sk: " << iam_user.sk();
+        LOG(INFO) << "add new iam info, cipher ak: " << iam_user.ak()
+                  << " cipher sk: " << iam_user.sk();
     } else {
         LOG(INFO) << "alter iam info, old:  cipher ak: " << old_ak << " cipher sk" << old_sk
                   << " new: cipher ak: " << iam_user.ak() << " cipher sk:" << iam_user.sk();
@@ -2888,7 +2889,8 @@ void notify_refresh_instance(std::shared_ptr<TxnKv> txn_kv, const std::string& i
     std::string val;
     err = txn->get(key, &val);
     if (err != TxnErrorCode::TXN_OK) {
-        LOG(WARNING) << "failed to get server registry" << " err=" << err;
+        LOG(WARNING) << "failed to get server registry"
+                     << " err=" << err;
         return;
     }
     std::string self_endpoint;
