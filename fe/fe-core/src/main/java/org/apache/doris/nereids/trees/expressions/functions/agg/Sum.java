@@ -30,6 +30,7 @@ import org.apache.doris.nereids.types.BooleanType;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.DecimalV3Type;
 import org.apache.doris.nereids.types.DoubleType;
+import org.apache.doris.nereids.types.FloatType;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.LargeIntType;
 import org.apache.doris.nereids.types.SmallIntType;
@@ -106,5 +107,13 @@ public class Sum extends NullableAggregateFunction
     @Override
     public List<FunctionSignature> getSignatures() {
         return SIGNATURES;
+    }
+
+    @Override
+    public FunctionSignature searchSignature(List<FunctionSignature> signatures) {
+        if (getArgument(0).getDataType() instanceof FloatType) {
+            return FunctionSignature.ret(DoubleType.INSTANCE).args(FloatType.INSTANCE);
+        }
+        return ExplicitlyCastableSignature.super.searchSignature(signatures);
     }
 }

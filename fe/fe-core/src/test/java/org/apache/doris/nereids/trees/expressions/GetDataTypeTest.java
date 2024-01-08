@@ -72,7 +72,7 @@ public class GetDataTypeTest {
         Assertions.assertEquals(BigIntType.INSTANCE, checkAndGetDataType(new Sum(integerLiteral)));
         Assertions.assertEquals(BigIntType.INSTANCE, checkAndGetDataType(new Sum(bigIntLiteral)));
         Assertions.assertEquals(LargeIntType.INSTANCE, checkAndGetDataType(new Sum(largeIntLiteral)));
-        Assertions.assertEquals(DecimalV3Type.createDecimalV3Type(38, 7), checkAndGetDataType(new Sum(floatLiteral)));
+        Assertions.assertEquals(DoubleType.INSTANCE, checkAndGetDataType(new Sum(floatLiteral)));
         Assertions.assertEquals(DoubleType.INSTANCE, checkAndGetDataType(new Sum(doubleLiteral)));
         Assertions.assertEquals(DecimalV3Type.createDecimalV3Type(38, 0), checkAndGetDataType(new Sum(decimalLiteral)));
         Assertions.assertEquals(BigIntType.INSTANCE, checkAndGetDataType(new Sum(bigIntLiteral)));

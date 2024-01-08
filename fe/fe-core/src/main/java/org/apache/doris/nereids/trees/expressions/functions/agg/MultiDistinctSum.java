@@ -65,6 +65,11 @@ public class MultiDistinctSum extends AggregateFunction implements UnaryExpressi
     }
 
     @Override
+    public FunctionSignature searchSignature(List<FunctionSignature> signatures) {
+        return new Sum(getArgument(0)).searchSignature(signatures);
+    }
+
+    @Override
     public MultiDistinctSum withDistinctAndChildren(boolean distinct, List<Expression> children) {
         Preconditions.checkArgument(children.size() == 1);
         return new MultiDistinctSum(distinct, children.get(0));
