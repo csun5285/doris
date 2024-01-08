@@ -60,10 +60,14 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
     if (statfs(cache_base_path.c_str(), &stat) < 0) {
         return localfs_error(errno, fmt::format("{} statfs error", cache_base_path));
     }
-    size_t disk_total_size = static_cast<size_t>(stat.f_blocks) * static_cast<size_t>(stat.f_bsize);
+    size_t disk_total_size = static_cast<size_t>(stat.f_blocks) * static_cast<size_t>(stat.f_bsize)
+            * (static_cast<double>(config::file_cache_enter_disk_resource_limit_mode_percent) / 100);
     if (disk_total_size < file_cache_settings.total_size) {
+        LOG_INFO("The cache {} config size {} is larger than {}% disk size {}, recalc it.",
+                cache_base_path, file_cache_settings.total_size,
+                config::file_cache_enter_disk_resource_limit_mode_percent, disk_total_size);
         file_cache_settings =
-                calc_settings(disk_total_size * 0.9, file_cache_settings.max_query_cache_size);
+                calc_settings(disk_total_size, file_cache_settings.max_query_cache_size);
     }
     auto cache = std::make_unique<BlockFileCache>(cache_base_path, file_cache_settings);
     RETURN_IF_ERROR(cache->initialize());
