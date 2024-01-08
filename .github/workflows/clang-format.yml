@@ -45,12 +45,18 @@ jobs:
               - 'be/src/**'
               - 'be/test/**'
 
+      - name: Get Changed Files
+        id: files
+        run: |
+          echo "modified=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }}..${{ github.head_ref }} | xargs)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
       - name: "Format it!"
         if: ${{ steps.filter.outputs.be_changes == 'true' }}
         uses: ./.github/actions/clang-format-lint-action
         id: be_clang_format
         with:
-          source: "be/src be/test"
+          source: "${{ steps.files.outputs.modified }}"
           clangFormatVersion: 16
           inplace: False
 
