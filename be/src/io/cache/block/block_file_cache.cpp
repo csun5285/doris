@@ -346,9 +346,10 @@ void BlockFileCache::recycle_deleted_blocks() {
                     if (!cell->is_deleted) {
                         end = true;
                         break;
+                    } else if (cell->releasable()) {
+                        i++;
+                        cells.push_back(cell);
                     }
-                    i++;
-                    cells.push_back(cell);
                 }
                 std::for_each(cells.begin(), cells.end(), remove_file_block);
                 // just for sleep
@@ -375,9 +376,10 @@ void BlockFileCache::recycle_deleted_blocks() {
                 for (auto& [_, cell] : iter->second) {
                     if (!cell.is_deleted) {
                         continue;
+                    } else if (cell.releasable()) {
+                        cells.emplace_back(&cell);
+                        i++;
                     }
-                    cells.emplace_back(&cell);
-                    i++;
                 }
                 std::for_each(cells.begin(), cells.end(), remove_file_block);
             }
@@ -1077,7 +1079,11 @@ bool BlockFileCache::remove_if_ttl_file_unlock(const Key& file_key, bool remove_
         } else {
             std::vector<FileBlockCell*> to_remove;
             for (auto& [_, cell] : _files[file_key]) {
-                to_remove.push_back(&cell);
+                if (cell.releasable()) {
+                    to_remove.push_back(&cell);
+                } else {
+                    cell.is_deleted = true;
+                }
             }
             std::for_each(to_remove.begin(), to_remove.end(), [&](FileBlockCell* cell) {
                 FileBlockSPtr file_block = cell->file_block;
@@ -1109,7 +1115,9 @@ void BlockFileCache::remove_if_cached(const Key& file_key) {
         std::vector<FileBlockCell*> to_remove;
         if (iter != _files.end()) {
             for (auto& [_, cell] : iter->second) {
-                to_remove.push_back(&cell);
+                if (cell.releasable()) {
+                    to_remove.push_back(&cell);
+                }
             }
         }
         auto remove_file_block_if = [&](FileBlockCell* cell) {

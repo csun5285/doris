@@ -3672,4 +3672,43 @@ TEST_F(BlockFileCacheTest, test_skip_cache) {
     EXPECT_EQ(cache._cur_cache_size, 0);
 }
 
+TEST_F(BlockFileCacheTest, remove_if_cached_when_isnt_releasable) {
+     if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 30;
+    settings.query_queue_elements = 5;
+    settings.index_queue_size = 30;
+    settings.index_queue_elements = 5;
+    settings.disposable_queue_size = 30;
+    settings.disposable_queue_elements = 5;
+    settings.total_size = 90;
+    settings.max_file_block_size = 30;
+    settings.max_query_cache_size = 30;
+    io::CacheContext context;
+    context.query_id = query_id;
+    auto key = io::BlockFileCache::hash("key1");
+    io::BlockFileCache cache(cache_base_path, settings);
+    ASSERT_TRUE(cache.initialize());
+    while (true) {
+        if (cache.get_lazy_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto holder = cache.get_or_set(key, 0, 10, context); /// Add range [0, 9]
+    auto segments = fromHolder(holder);
+    ASSERT_EQ(segments.size(), 1);
+    ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
+    assert_range(1, segments[0], io::FileBlock::Range(0, 9), io::FileBlock::State::DOWNLOADING);
+    cache.remove_if_cached(key);
+    ASSERT_TRUE(segments[0]->append(Slice("aaaa", 4)).ok());
+    ASSERT_TRUE(segments[0]->finalize_write().ok());
+}
+
 } // namespace doris::io
