@@ -48,7 +48,8 @@ jobs:
       - name: Get Changed Files
         id: files
         run: |
-          echo "modified=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }}..${{ github.head_ref }} | xargs)" >> "$GITHUB_OUTPUT"
+          echo "modified=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }} ${{ github.head_ref }} | xargs)"
+          echo "modified=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }} ${{ github.head_ref }} | xargs)" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: "Format it!"
