@@ -148,4 +148,7 @@ CONF_Bool(focus_add_kms_data_key, "false");
 CONF_Bool(enable_txn_store_retry, "false");
 CONF_Int32(txn_store_retry_times, "20");
 
+// If enabled, some high-risk HTTP api for emergency fix can be used
+CONF_mBool(enable_risky_api, "false");
+
 } // namespace selectdb::config

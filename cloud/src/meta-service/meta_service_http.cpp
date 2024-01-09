@@ -22,6 +22,13 @@
 #include "meta_service.h"
 
 namespace selectdb {
+namespace {
+
+auto disable_risk_api_reponse() {
+    return HttpResponse {403, "FORBIDDEN", "risky API is disabled"};
+}
+
+} // namespace
 
 #define PARSE_MESSAGE_OR_RETURN(ctrl, req)                                                      \
     do {                                                                                        \
@@ -381,6 +388,17 @@ static HttpResponse process_unknown(MetaServiceImpl*, brpc::Controller*) {
     return http_json_reply(MetaServiceCode::OK, "");
 }
 
+static HttpResponse process_drop_index(MetaServiceImpl* service, brpc::Controller* ctrl) {
+    if (!config::enable_risky_api) {
+        return disable_risk_api_reponse();
+    }
+    IndexRequest req;
+    PARSE_MESSAGE_OR_RETURN(ctrl, req);
+    IndexResponse resp;
+    service->drop_index(ctrl, &req, &resp, nullptr);
+    return http_json_reply_message(resp.status(), resp);
+}
+
 void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
                            const ::selectdb::MetaServiceHttpRequest*,
                            ::selectdb::MetaServiceHttpResponse*,
@@ -456,6 +474,9 @@ void MetaServiceImpl::http(::google::protobuf::RpcController* controller,
             {"v1/abort_tablet_job", process_abort_tablet_job},
             {"v1/alter_ram_user", process_alter_ram_user},
             {"v1/alter_iam", process_alter_iam},
+            // for high-risk HTTP api
+            {"drop_index", process_drop_index},
+            {"v1/drop_index", process_drop_index},
     };
 
     auto cntl = static_cast<brpc::Controller*>(controller);
