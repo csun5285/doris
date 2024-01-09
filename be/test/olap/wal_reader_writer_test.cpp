@@ -17,14 +17,15 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <memory>
 
 #include "agent/be_exec_version_manager.h"
 #include "common/object_pool.h"
 #include "gen_cpp/internal_service.pb.h"
 #include "gmock/gmock.h"
 #include "io/fs/local_file_system.h"
-#include "olap/wal_reader.h"
-#include "olap/wal_writer.h"
+#include "olap/wal/wal_reader.h"
+#include "olap/wal/wal_writer.h"
 #include "runtime/exec_env.h"
 #include "service/brpc.h"
 #include "testutil/test_util.h"
@@ -45,12 +46,13 @@ class WalReaderWriterTest : public testing::Test {
 public:
     // create a mock cgroup folder
     virtual void SetUp() {
-        auto st = io::global_local_filesystem()->create_directory(_s_test_data_path);
-        ASSERT_TRUE(st.ok()) << st;
+        static_cast<void>(io::global_local_filesystem()->create_directory(_s_test_data_path));
     }
 
     // delete the mock cgroup folder
-    virtual void TearDown() { io::global_local_filesystem()->delete_directory(_s_test_data_path); }
+    virtual void TearDown() {
+        static_cast<void>(io::global_local_filesystem()->delete_directory(_s_test_data_path));
+    }
 
     static std::string _s_test_data_path;
 };
@@ -89,7 +91,7 @@ void generate_block(PBlock& pblock, int row_index) {
 TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
     std::string file_name = _s_test_data_path + "/abcd123.txt";
     auto wal_writer = WalWriter(file_name);
-    wal_writer.init();
+    static_cast<void>(wal_writer.init());
     size_t file_len = 0;
     int64_t file_size = -1;
     // add 1 block
@@ -98,33 +100,28 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
         generate_block(pblock, 0);
 
         EXPECT_EQ(Status::OK(), wal_writer.append_blocks(std::vector<PBlock*> {&pblock}));
-        file_len += WalWriter::VERSION_SIZE + pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE +
-                    WalWriter::CHECKSUM_SIZE;
-        auto st = io::global_local_filesystem()->file_size(file_name, &file_size);
-        ASSERT_TRUE(st.ok()) << st;
+        file_len += pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE + WalWriter::CHECKSUM_SIZE;
+        EXPECT_TRUE(io::global_local_filesystem()->file_size(file_name, &file_size).ok());
         EXPECT_EQ(file_len, file_size);
     }
     // add 2 block
     {
         PBlock pblock;
         generate_block(pblock, 1024);
-        file_len += WalWriter::VERSION_SIZE + pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE +
-                    WalWriter::CHECKSUM_SIZE;
+        file_len += pblock.ByteSizeLong() + WalWriter::LENGTH_SIZE + WalWriter::CHECKSUM_SIZE;
 
         PBlock pblock1;
         generate_block(pblock1, 2048);
-        file_len += WalWriter::VERSION_SIZE + pblock1.ByteSizeLong() + WalWriter::LENGTH_SIZE +
-                    WalWriter::CHECKSUM_SIZE;
+        file_len += pblock1.ByteSizeLong() + WalWriter::LENGTH_SIZE + WalWriter::CHECKSUM_SIZE;
 
         EXPECT_EQ(Status::OK(), wal_writer.append_blocks(std::vector<PBlock*> {&pblock, &pblock1}));
-        auto st = io::global_local_filesystem()->file_size(file_name, &file_size);
-        ASSERT_TRUE(st.ok()) << st;
+        EXPECT_TRUE(io::global_local_filesystem()->file_size(file_name, &file_size).ok());
         EXPECT_EQ(file_len, file_size);
     }
-    wal_writer.finalize();
+    static_cast<void>(wal_writer.finalize());
     // read block
     auto wal_reader = WalReader(file_name);
-    wal_reader.init();
+    static_cast<void>(wal_reader.init());
     auto block_count = 0;
     while (true) {
         doris::PBlock pblock;
@@ -139,7 +136,7 @@ TEST_F(WalReaderWriterTest, TestWriteAndRead1) {
         EXPECT_TRUE(block.deserialize(pblock).ok());
         EXPECT_EQ(block_rows, block.rows());
     }
-    wal_reader.finalize();
+    static_cast<void>(wal_reader.finalize());
     EXPECT_EQ(3, block_count);
 }
 } // namespace doris

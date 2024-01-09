@@ -635,6 +635,7 @@ struct TStreamLoadPutRequest {
     // only valid when file type is CSV
     52: optional i8 escape
     53: optional i64 table_id
+    54: optional string group_commit_mode
 
     // selectdb cloud
     1000: optional string cloud_cluster
@@ -645,6 +646,13 @@ struct TStreamLoadPutResult {
     // valid when status is OK
     2: optional PaloInternalService.TExecPlanFragmentParams params
     3: optional PaloInternalService.TPipelineFragmentParams pipeline_params
+    // used for group commit
+    4: optional i64 base_schema_version
+    5: optional i64 db_id
+    6: optional i64 table_id
+    7: optional bool wait_internal_group_commit_finish = false
+    8: optional i64 group_commit_interval_ms
+    9: optional i64 group_commit_data_bytes
 }
 
 struct TStreamLoadMultiTablePutResult {
@@ -1128,6 +1136,9 @@ struct TRequestGroupCommitFragmentResult {
     // valid when status is OK
     3: optional PaloInternalService.TExecPlanFragmentParams params
     4: optional PaloInternalService.TPipelineFragmentParams pipeline_params
+    5: optional bool wait_internal_group_commit_finish = false
+    6: optional i64 group_commit_interval_ms
+    7: optional i64 group_commit_data_bytes
 }
 
 struct TInvalidateFollowerStatsCacheRequest {
@@ -1243,6 +1254,21 @@ struct TGetBackendMetaResult {
     3: optional Types.TNetworkAddress master_address
 }
 
+struct TColumnInfo {
+  1: optional string column_name
+  2: optional i64 column_id
+}
+
+struct TGetColumnInfoRequest {
+    1: optional i64 db_id
+    2: optional i64 table_id
+}
+
+struct TGetColumnInfoResult {
+    1: optional Status.TStatus status
+    2: optional list<TColumnInfo> columns
+}
+
 service FrontendService {
     TGetDbsResult getDbNames(1: TGetDbsParams params)
     TGetTablesResult getTableNames(1: TGetTablesParams params)
@@ -1316,6 +1342,8 @@ service FrontendService {
     TGetMetaResult getMeta(1: TGetMetaRequest request)
 
     TGetBackendMetaResult getBackendMeta(1: TGetBackendMetaRequest request)
+
+    TGetColumnInfoResult getColumnInfo(1: TGetColumnInfoRequest request)
 
     Status.TStatus invalidateStatsCache(1: TInvalidateFollowerStatsCacheRequest request)
 }

@@ -84,6 +84,13 @@ public class StructLiteral extends LiteralExpr {
     }
 
     @Override
+    public String getStringValueInFe() {
+        List<String> list = new ArrayList<>(children.size());
+        children.forEach(v -> list.add(getStringLiteralForComplexType(v)));
+        return "{" + StringUtils.join(list, ", ") + "}";
+    }
+
+    @Override
     protected void toThrift(TExprNode msg) {
         msg.node_type = TExprNodeType.STRUCT_LITERAL;
     }

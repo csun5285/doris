@@ -86,7 +86,6 @@ import org.apache.doris.system.Backend;
 import org.apache.doris.system.Frontend;
 import org.apache.doris.system.SystemInfoService;
 import org.apache.doris.tablefunction.MetadataGenerator;
-import org.apache.doris.task.LoadTaskInfo;
 import org.apache.doris.task.StreamLoadTask;
 import org.apache.doris.thrift.FrontendService;
 import org.apache.doris.thrift.FrontendServiceVersion;
@@ -101,6 +100,7 @@ import org.apache.doris.thrift.TCheckAuthResult;
 import org.apache.doris.thrift.TColumn;
 import org.apache.doris.thrift.TColumnDef;
 import org.apache.doris.thrift.TColumnDesc;
+import org.apache.doris.thrift.TColumnInfo;
 import org.apache.doris.thrift.TCommitTxnRequest;
 import org.apache.doris.thrift.TCommitTxnResult;
 import org.apache.doris.thrift.TConfirmUnusedRemoteFilesRequest;
@@ -126,6 +126,8 @@ import org.apache.doris.thrift.TGetBackendMetaResult;
 import org.apache.doris.thrift.TGetBinlogLagResult;
 import org.apache.doris.thrift.TGetBinlogRequest;
 import org.apache.doris.thrift.TGetBinlogResult;
+import org.apache.doris.thrift.TGetColumnInfoRequest;
+import org.apache.doris.thrift.TGetColumnInfoResult;
 import org.apache.doris.thrift.TGetDbsParams;
 import org.apache.doris.thrift.TGetDbsResult;
 import org.apache.doris.thrift.TGetMasterTokenRequest;
@@ -209,6 +211,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.thrift.TException;
@@ -2200,16 +2203,18 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             }
             StreamLoadPlanner planner = new StreamLoadPlanner(db, table, streamLoadTask);
             TExecPlanFragmentParams plan = planner.plan(streamLoadTask.getId(), multiTableFragmentInstanceIdIndex);
-            // add table indexes to transaction state
-            TransactionState txnState = Env.getCurrentGlobalTransactionMgr()
-                    .getTransactionState(db.getId(), request.getTxnId());
-            if (txnState == null) {
-                throw new UserException("txn does not exist: " + request.getTxnId());
+            if (StringUtils.isEmpty(streamLoadTask.getGroupCommit())) {
+                // add table indexes to transaction state
+                TransactionState txnState = Env.getCurrentGlobalTransactionMgr()
+                        .getTransactionState(db.getId(), request.getTxnId());
+                if (txnState == null) {
+                    throw new UserException("txn does not exist: " + request.getTxnId());
+                }
+                if (request.isPartialUpdate()) {
+                    txnState.setSchemaForPartialUpdate(table);
+                }
+                txnState.addTableIndexes(table);
             }
-            if (request.isPartialUpdate()) {
-                txnState.setSchemaForPartialUpdate(table);
-            }
-            txnState.addTableIndexes(table);
             plan.setTableName(table.getName());
             plan.setIsMowTable(table.getEnableUniqueKeyMergeOnWrite());
             return plan;
@@ -2264,16 +2269,18 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             StreamLoadPlanner planner = new StreamLoadPlanner(db, table, streamLoadTask);
             TPipelineFragmentParams plan = planner.planForPipeline(streamLoadTask.getId(),
                     multiTableFragmentInstanceIdIndex);
-            // add table indexes to transaction state
-            TransactionState txnState = Env.getCurrentGlobalTransactionMgr()
-                    .getTransactionState(db.getId(), request.getTxnId());
-            if (txnState == null) {
-                throw new UserException("txn does not exist: " + request.getTxnId());
+            if (StringUtils.isEmpty(streamLoadTask.getGroupCommit())) {
+                // add table indexes to transaction state
+                TransactionState txnState = Env.getCurrentGlobalTransactionMgr()
+                        .getTransactionState(db.getId(), request.getTxnId());
+                if (txnState == null) {
+                    throw new UserException("txn does not exist: " + request.getTxnId());
+                }
+                if (request.isPartialUpdate()) {
+                    txnState.setSchemaForPartialUpdate(table);
+                }
+                txnState.addTableIndexes(table);
             }
-            if (request.isPartialUpdate()) {
-                txnState.setSchemaForPartialUpdate(table);
-            }
-            txnState.addTableIndexes(table);
             plan.setIsMowTable(table.getEnableUniqueKeyMergeOnWrite());
             return plan;
         } finally {
@@ -3201,7 +3208,8 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         try {
             requestGroupCommitFragmentImpl(request, result);
         } catch (UserException e) {
-            LOG.warn("failed to get group commit fragment", e);
+            LOG.warn("failed to get group commit plan fragment", e);
+            status.setStatusCode(TStatusCode.INTERNAL_ERROR);
             status.addToErrorMsgs(Strings.nullToEmpty(e.getMessage()));
         }
         return result;
@@ -3323,6 +3331,44 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
     }
 
+    @Override
+    public TGetColumnInfoResult getColumnInfo(TGetColumnInfoRequest request) {
+        TGetColumnInfoResult result = new TGetColumnInfoResult();
+        TStatus status = new TStatus(TStatusCode.OK);
+        result.setStatus(status);
+        long dbId = request.getDbId();
+        long tableId = request.getTableId();
+        if (!Env.getCurrentEnv().isMaster()) {
+            status.setStatusCode(TStatusCode.NOT_MASTER);
+            status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
+            LOG.error("failed to getColumnInfo: {}", NOT_MASTER_ERR_MSG);
+            return result;
+        }
+
+        Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
+        if (db == null) {
+            status.setStatusCode(TStatusCode.NOT_FOUND);
+            status.setErrorMsgs(Lists.newArrayList(String.format("dbId=%d is not exists", dbId)));
+            return result;
+        }
+        Table table = db.getTableNullable(tableId);
+        if (table == null) {
+            status.setStatusCode(TStatusCode.NOT_FOUND);
+            status.setErrorMsgs(
+                    (Lists.newArrayList(String.format("dbId=%d tableId=%d is not exists", dbId, tableId))));
+            return result;
+        }
+        List<TColumnInfo> columnsResult = Lists.newArrayList();
+        for (Column column : table.getBaseSchema(true)) {
+            final TColumnInfo info = new TColumnInfo();
+            info.setColumnName(column.getName());
+            info.setColumnId(column.getUniqueId());
+            columnsResult.add(info);
+        }
+        result.setColumns(columnsResult);
+        return result;
+    }
+
     public TGetBackendMetaResult getBackendMeta(TGetBackendMetaRequest request) throws TException {
         String clientAddr = getClientAddrAsString();
         LOG.debug("receive get backend meta request: {}", request);
@@ -3381,9 +3427,25 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                     Lists.newArrayList(olapTable.getId()), label.getLabelName(),
                     new TxnCoordinator(TxnSourceType.FE, FrontendOptions.getLocalHostAddress()),
                     TransactionState.LoadJobSourceType.INSERT_STREAMING, 3600L);
-            LoadTaskInfo taskInfo = new StreamLoadTask(loadId, txnId, TFileType.FILE_STREAM,
-                    TFileFormatType.FORMAT_CSV_PLAIN, TFileCompressType.PLAIN);
-            GroupCommitLoadPlanner planner = new GroupCommitLoadPlanner(db, olapTable, taskInfo);
+            TStreamLoadPutRequest streamLoadPutRequest = new TStreamLoadPutRequest();
+            streamLoadPutRequest.setLabel(label.getLabelName());
+            streamLoadPutRequest.setFormatType(TFileFormatType.FORMAT_CSV_PLAIN);
+            streamLoadPutRequest.setCompressType(TFileCompressType.PLAIN);
+            streamLoadPutRequest.setFileType(TFileType.FILE_STREAM);
+            streamLoadPutRequest.setTxnId(txnId);
+            streamLoadPutRequest.setLoadId(loadId);
+            List<String> fileColumns = new ArrayList<>();
+            List<Column> tableColumns = table.getBaseSchema(true);
+            for (int i = 1; i <= tableColumns.size(); i++) {
+                Column column = tableColumns.get(i - 1);
+                fileColumns.add("`" + column.getName() + "`");
+                if (column.isSequenceColumn()) {
+                    streamLoadPutRequest.setSequenceCol(column.getName());
+                }
+            }
+            streamLoadPutRequest.setColumns(String.join(",", fileColumns));
+            StreamLoadTask streamLoadTask = StreamLoadTask.fromTStreamLoadPutRequest(streamLoadPutRequest);
+            GroupCommitLoadPlanner planner = new GroupCommitLoadPlanner(db, olapTable, streamLoadTask);
             if (Config.enable_pipeline_load) {
                 TPipelineFragmentParams pipelineFragmentParams = planner.planForPipeline(loadId);
                 Preconditions.checkState(pipelineFragmentParams.getLocalParams().size() == 1);
@@ -3402,6 +3464,10 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 result.setParams(execPlanFragmentParams);
             }
             result.setBaseSchemaVersion(olapTable.getBaseSchemaVersion());
+            result.setGroupCommitIntervalMs(olapTable.getGroupCommitIntervalMs());
+            // TODO data size
+            result.setGroupCommitDataBytes(134217728L);
+            result.setWaitInternalGroupCommitFinish(Config.wait_internal_group_commit_finish);
         } finally {
             table.readUnlock();
         }

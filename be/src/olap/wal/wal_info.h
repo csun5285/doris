@@ -14,31 +14,25 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+#pragma once
+#include "runtime/exec_env.h"
 
-#include "vec/core/future_block.h"
+namespace doris {
+class WalInfo {
+public:
+    WalInfo(int64_t wal_id, std::string wal_path, int64_t retry_num, int64_t start_time_ms);
+    ~WalInfo() = default;
+    int64_t get_wal_id();
+    int64_t get_retry_num();
+    int64_t get_start_time_ms();
+    std::string get_wal_path();
+    void add_retry_num();
 
-#include <tuple>
+private:
+    int64_t _wal_id;
+    std::string _wal_path;
+    int64_t _retry_num;
+    int64_t _start_time_ms;
+};
 
-namespace doris::vectorized {
-
-void FutureBlock::set_info(int64_t schema_version, const TUniqueId& load_id, bool first, bool eos) {
-    this->_schema_version = schema_version;
-    this->_load_id = load_id;
-    this->_first = first;
-    this->_eos = eos;
-}
-
-void FutureBlock::set_result(Status status, int64_t total_rows, int64_t loaded_rows) {
-    auto result = std::make_tuple(true, status, total_rows, loaded_rows);
-    result.swap(*_result);
-}
-
-void FutureBlock::swap_future_block(std::shared_ptr<FutureBlock> other) {
-    Block::swap(*other.get());
-    set_info(other->_schema_version, other->_load_id, other->_first, other->_eos);
-    lock = other->lock;
-    cv = other->cv;
-    _result = other->_result;
-}
-
-} // namespace doris::vectorized
+} // namespace doris

@@ -246,6 +246,11 @@ public class DecimalLiteral extends LiteralExpr {
     }
 
     @Override
+    public String getStringValueInFe() {
+        return value.toPlainString();
+    }
+
+    @Override
     public String toSqlImpl() {
         return getStringValue();
     }

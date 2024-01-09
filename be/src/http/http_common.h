@@ -63,9 +63,11 @@ static const std::string HTTP_TXN_ID_KEY = "txn_id";
 static const std::string HTTP_TXN_OPERATION_KEY = "txn_operation";
 
 static const std::string HTTP_CLOUD_CLUSTER = "cloud_cluster";
-static const std::string HTTP_AUTH_CODE = "auto_code";
+static const std::string HTTP_AUTH_CODE = "auth_code";
+static const std::string HTTP_GROUP_COMMIT = "group_commit";
 static const std::string HTTP_DB_ID_KY = "db_id";
 static const std::string HTTP_TABLE_ID_KY = "table_id";
 static const std::string HTTP_WAL_ID_KY = "wal_id";
-
+// will remove
+static const std::string HTTP_SQL = "sql";
 } // namespace doris

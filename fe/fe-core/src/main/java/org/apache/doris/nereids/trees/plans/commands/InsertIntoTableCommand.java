@@ -19,6 +19,7 @@ package org.apache.doris.nereids.trees.plans.commands;
 
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.util.ProfileManager.ProfileType;
 import org.apache.doris.nereids.NereidsPlanner;
@@ -32,9 +33,12 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalOlapTableSink;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
 import org.apache.doris.nereids.txn.Transaction;
+import org.apache.doris.planner.DataSink;
 import org.apache.doris.planner.OlapTableSink;
+import org.apache.doris.planner.UnionNode;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.QueryState.MysqlStateType;
+import org.apache.doris.qe.SqlModeHelper;
 import org.apache.doris.qe.StmtExecutor;
 import org.apache.doris.transaction.TransactionState;
 
@@ -113,6 +117,11 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
 
         OlapTableSink sink = ((OlapTableSink) planner.getFragments().get(0).getSink());
 
+        // group commit
+        if (analyzeGroupCommit(ctx, sink, physicalOlapTableSink)) {
+            throw new AnalysisException("group commit is not supported in nereids now");
+        }
+
         Preconditions.checkArgument(!isTxnBegin, "an insert command cannot create more than one txn");
         Transaction txn = new Transaction(ctx,
                 physicalOlapTableSink.getDatabase(),
@@ -167,5 +176,17 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
     @Override
     public <R, C> R accept(PlanVisitor<R, C> visitor, C context) {
         return visitor.visitInsertIntoCommand(this, context);
+    }
+
+    private boolean analyzeGroupCommit(ConnectContext ctx, DataSink sink,
+            PhysicalOlapTableSink<?> physicalOlapTableSink) {
+        if (!(sink instanceof OlapTableSink) || !ctx.getSessionVariable().isEnableInsertGroupCommit()
+                || ctx.getSessionVariable().isEnableUniqueKeyPartialUpdate()) {
+            return false;
+        }
+        return ConnectContext.get().getSessionVariable().getSqlMode() != SqlModeHelper.MODE_NO_BACKSLASH_ESCAPES
+                && physicalOlapTableSink.getTargetTable() instanceof OlapTable && !ConnectContext.get().isTxnModel()
+                && sink.getFragment().getPlanRoot() instanceof UnionNode && physicalOlapTableSink.getPartitionIds()
+                .isEmpty();
     }
 }

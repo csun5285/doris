@@ -45,7 +45,7 @@
 #include "olap/rowset/segment_v2/inverted_index_cache.h"
 #include "olap/schema_cache.h"
 #include "olap/segment_loader.h"
-#include "olap/wal_manager.h"
+#include "olap/wal/wal_manager.h"
 #include "pipeline/task_queue.h"
 #include "pipeline/task_scheduler.h"
 #include "runtime/block_spill_manager.h"
@@ -202,7 +202,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _small_file_mgr = new SmallFileMgr(this, config::small_file_dir);
     _block_spill_mgr = new BlockSpillManager(_store_paths);
     _group_commit_mgr = new GroupCommitMgr(this);
-    _wal_manager = WalManager::create_shared(this, config::group_commit_replay_wal_dir);
+    _wal_manager = WalManager::create_shared(this, config::group_commit_wal_path);
     _file_meta_cache = new FileMetaCache(config::max_external_file_meta_cache_num);
 
     _backend_client_cache->init_metrics("backend");

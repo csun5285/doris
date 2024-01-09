@@ -23,23 +23,31 @@
 
 namespace doris {
 
-class WalReader {
+using PBlockArray = std::vector<PBlock*>;
+extern const char* k_wal_magic;
+extern const uint32_t k_wal_magic_length;
+
+class WalWriter {
 public:
-    explicit WalReader(const std::string& file_name);
-    ~WalReader();
+    explicit WalWriter(const std::string& file_name);
+    ~WalWriter();
 
     Status init();
     Status finalize();
 
-    Status read_block(PBlock& block);
+    Status append_blocks(const PBlockArray& blocks);
+    Status append_header(uint32_t version, std::string col_ids);
+
+    std::string file_name() { return _file_name; };
+
+public:
+    static const int64_t LENGTH_SIZE = 8;
+    static const int64_t CHECKSUM_SIZE = 4;
+    static const int64_t VERSION_SIZE = 4;
 
 private:
-    Status _deserialize(PBlock& block, std::string& buf);
-    Status _check_checksum(const char* binary, size_t size, uint32_t checksum);
-
     std::string _file_name;
-    size_t _offset;
-    io::FileReaderSPtr file_reader;
+    io::FileWriterPtr _file_writer;
 };
 
 } // namespace doris

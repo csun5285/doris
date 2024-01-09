@@ -1108,6 +1108,14 @@ public class OlapTable extends Table {
         return null;
     }
 
+    public void setGroupCommitIntervalMs(int groupCommitInterValMs) {
+        getOrCreatTableProperty().setGroupCommitIntervalMs(groupCommitInterValMs);
+    }
+
+    public int getGroupCommitIntervalMs() {
+        return getOrCreatTableProperty().getGroupCommitIntervalMs();
+    }
+
     public Boolean hasSequenceCol() {
         return getSequenceCol() != null;
     }

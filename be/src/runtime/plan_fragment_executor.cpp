@@ -58,7 +58,6 @@
 #include "util/time.h"
 #include "util/uid_util.h"
 #include "vec/core/block.h"
-#include "vec/core/future_block.h"
 #include "vec/exec/scan/new_es_scan_node.h"
 #include "vec/exec/scan/new_file_scan_node.h"
 #include "vec/exec/scan/new_jdbc_scan_node.h"
@@ -112,7 +111,6 @@ Status PlanFragmentExecutor::prepare(const TExecPlanFragmentParams& request,
 
     const TPlanFragmentExecParams& params = request.params;
     _query_id = params.query_id;
-    _group_commit = params.group_commit;
 
     LOG_INFO("PlanFragmentExecutor::prepare")
             .tag("query_id", print_id(_query_id))
@@ -316,9 +314,7 @@ Status PlanFragmentExecutor::open_vectorized_internal() {
             return Status::OK();
         }
         RETURN_IF_ERROR(_sink->open(runtime_state()));
-        std::unique_ptr<doris::vectorized::Block> block =
-                _group_commit ? doris::vectorized::FutureBlock::create_unique()
-                              : doris::vectorized::Block::create_unique();
+        std::unique_ptr <doris::vectorized::Block> block = doris::vectorized::Block::create_unique();
         bool eos = false;
 
         while (!eos) {
@@ -332,17 +328,6 @@ Status PlanFragmentExecutor::open_vectorized_internal() {
 
             if (!eos || block->rows() > 0) {
                 auto st = _sink->send(runtime_state(), block.get());
-                if (UNLIKELY(!st.ok() || block->rows() == 0)) {
-                    // Used for group commit insert
-                    if (_group_commit) {
-                        auto* future_block = dynamic_cast<vectorized::FutureBlock*>(block.get());
-                        std::unique_lock<doris::Mutex> l(*(future_block->lock));
-                        if (!future_block->is_handled()) {
-                            future_block->set_result(st, 0, 0);
-                            future_block->cv->notify_all();
-                        }
-                    }
-                }
                 if (st.is<END_OF_FILE>()) {
                     break;
                 }

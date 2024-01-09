@@ -123,6 +123,22 @@ public class ArrayLiteral extends LiteralExpr {
     }
 
     @Override
+    public String getStringValueInFe() {
+        List<String> list = new ArrayList<>(children.size());
+        children.forEach(v -> {
+            String stringLiteral;
+            if (v instanceof NullLiteral) {
+                stringLiteral = "null";
+            } else {
+                stringLiteral = getStringLiteralForComplexType(v);
+            }
+            // we should use type to decide we output array is suitable for json format
+            list.add(stringLiteral);
+        });
+        return "[" + StringUtils.join(list, ", ") + "]";
+    }
+
+    @Override
     protected void toThrift(TExprNode msg) {
         msg.node_type = TExprNodeType.ARRAY_LITERAL;
         msg.setChildType(((ArrayType) type).getItemType().getPrimitiveType().toThrift());

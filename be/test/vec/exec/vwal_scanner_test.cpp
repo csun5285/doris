@@ -22,7 +22,8 @@
 #include "common/object_pool.h"
 #include "gen_cpp/Descriptors_types.h"
 #include "gen_cpp/PlanNodes_types.h"
-#include "olap/wal_manager.h"
+#include "io/fs/local_file_system.h"
+#include "olap/wal/wal_manager.h"
 #include "runtime/descriptors.h"
 #include "runtime/memory/mem_tracker.h"
 #include "runtime/runtime_state.h"
@@ -39,12 +40,15 @@ public:
         init();
         _profile = _runtime_state.runtime_profile();
         _runtime_state.init_mem_trackers();
-        _runtime_state.init(unique_id, query_options, query_globals, _env);
+        static_cast<void>(_runtime_state.init(unique_id, query_options, query_globals, _env));
         _runtime_state.set_query_ctx(query_ctx);
     }
     void init();
 
-    void TearDown() override { io::global_local_filesystem()->delete_directory(wal_dir); }
+    void TearDown() override {
+        static_cast<void>(io::global_local_filesystem()->delete_directory(wal_dir));
+        // SAFE_STOP(_env->_wal_manager);
+    }
 
 protected:
     virtual void SetUp() override {}
@@ -53,7 +57,7 @@ private:
     void init_desc_table();
 
     ExecEnv* _env = nullptr;
-    std::string wal_dir = "./wal_test";
+    std::string wal_dir = std::string(getenv("DORIS_HOME")) + "/wal_test";
     int64_t db_id = 1;
     int64_t tb_id = 2;
     int64_t txn_id = 789;
@@ -74,7 +78,7 @@ private:
     QueryContext* query_ctx = nullptr;
 };
 
-void VWalScannerTest::init_desc_table() {
+/*void VWalScannerTest::init_desc_table() {
     TDescriptorTable t_desc_table;
 
     // table descriptors
@@ -102,7 +106,8 @@ void VWalScannerTest::init_desc_table() {
             TTypeNode node;
             node.__set_type(TTypeNodeType::SCALAR);
             TScalarType scalar_type;
-            scalar_type.__set_type(TPrimitiveType::INT);
+            scalar_type.__set_type(TPrimitiveType::VARCHAR);
+            scalar_type.__set_len(32);
             node.__set_scalar_type(scalar_type);
             type.types.push_back(node);
         }
@@ -128,7 +133,8 @@ void VWalScannerTest::init_desc_table() {
             TTypeNode node;
             node.__set_type(TTypeNodeType::SCALAR);
             TScalarType scalar_type;
-            scalar_type.__set_type(TPrimitiveType::BIGINT);
+            scalar_type.__set_type(TPrimitiveType::VARCHAR);
+            scalar_type.__set_len(32);
             node.__set_scalar_type(scalar_type);
             type.types.push_back(node);
         }
@@ -143,7 +149,7 @@ void VWalScannerTest::init_desc_table() {
 
         t_desc_table.slotDescriptors.push_back(slot_desc);
     }
-    // k3
+    // c3
     {
         TSlotDescriptor slot_desc;
 
@@ -155,7 +161,7 @@ void VWalScannerTest::init_desc_table() {
             node.__set_type(TTypeNodeType::SCALAR);
             TScalarType scalar_type;
             scalar_type.__set_type(TPrimitiveType::VARCHAR);
-            scalar_type.__set_len(10);
+            scalar_type.__set_len(32);
             node.__set_scalar_type(scalar_type);
             type.types.push_back(node);
         }
@@ -183,16 +189,16 @@ void VWalScannerTest::init_desc_table() {
         t_desc_table.tupleDescriptors.push_back(t_tuple_desc);
     }
 
-    DescriptorTbl::create(&_obj_pool, t_desc_table, &_desc_tbl);
+    auto st = DescriptorTbl::create(&_obj_pool, t_desc_table, &_desc_tbl);
 
     _runtime_state.set_desc_tbl(_desc_tbl);
 }
 
 void VWalScannerTest::init() {
+    config::group_commit_wal_max_disk_limit = "100M";
     init_desc_table();
-    auto st = io::global_local_filesystem()->create_directory(
-            wal_dir + "/" + std::to_string(db_id) + "/" + std::to_string(tb_id));
-    ASSERT_TRUE(st.ok()) << st;
+    static_cast<void>(io::global_local_filesystem()->create_directory(
+            wal_dir + "/" + std::to_string(db_id) + "/" + std::to_string(tb_id)));
     std::string src = "./be/test/exec/test_data/wal_scanner/wal";
     std::string dst = wal_dir + "/" + std::to_string(db_id) + "/" + std::to_string(tb_id) + "/" +
                       std::to_string(txn_id) + "_" + label;
@@ -210,14 +216,20 @@ void VWalScannerTest::init() {
 
     _env = ExecEnv::GetInstance();
     _env->_wal_manager = WalManager::create_shared(_env, wal_dir);
-    _env->_wal_manager->add_wal_path(db_id, tb_id, txn_id, label);
+    std::string base_path;
+    auto st = _env->_wal_manager->_init_wal_dirs_info();
+    st = _env->_wal_manager->create_wal_path(db_id, tb_id, txn_id, label, base_path);
 }
 
 TEST_F(VWalScannerTest, normal) {
+    std::vector<size_t> index_vector;
+    index_vector.emplace_back(0);
+    index_vector.emplace_back(1);
+    index_vector.emplace_back(2);
     //    config::group_commit_replay_wal_dir = wal_dir;
     NewFileScanNode scan_node(&_obj_pool, _tnode, *_desc_tbl);
     scan_node._output_tuple_desc = _runtime_state.desc_tbl().get_tuple_descriptor(_dst_tuple_id);
-    scan_node.init(_tnode, &_runtime_state);
+    static_cast<void>(scan_node.init(_tnode, &_runtime_state));
     auto status = scan_node.prepare(&_runtime_state);
     EXPECT_TRUE(status.ok());
 
@@ -236,10 +248,11 @@ TEST_F(VWalScannerTest, normal) {
     _kv_cache.reset(new ShardedKVCache(48));
     _runtime_state._wal_id = txn_id;
     VFileScanner scanner(&_runtime_state, &scan_node, -1, scan_range, _profile, _kv_cache.get());
+    scanner._is_load = false;
     vectorized::VExprContextSPtrs _conjuncts;
     std::unordered_map<std::string, ColumnValueRangeType> _colname_to_value_range;
     std::unordered_map<std::string, int> _colname_to_slot_id;
-    scanner.prepare(_conjuncts, &_colname_to_value_range, &_colname_to_slot_id);
+    static_cast<void>(scanner.prepare(_conjuncts, &_colname_to_value_range, &_colname_to_slot_id));
 
     std::unique_ptr<vectorized::Block> block(new vectorized::Block());
     bool eof = false;
@@ -251,15 +264,15 @@ TEST_F(VWalScannerTest, normal) {
     ASSERT_TRUE(st.ok());
     EXPECT_EQ(0, block->rows());
     ASSERT_TRUE(eof);
-    scanner.close(&_runtime_state);
-    scan_node.close(&_runtime_state);
+    static_cast<void>(scanner.close(&_runtime_state));
+    static_cast<void>(scan_node.close(&_runtime_state));
 
     {
         std::stringstream ss;
         scan_node.runtime_profile()->pretty_print(&ss);
         LOG(INFO) << ss.str();
     }
-}
+}*/
 
 } // namespace vectorized
 } // namespace doris

@@ -211,6 +211,7 @@ public:
     void set_stream_load_executor(std::shared_ptr<StreamLoadExecutor> stream_load_executor) {
         this->_stream_load_executor = stream_load_executor;
     }
+    void set_wal_mgr(std::shared_ptr<WalManager> wm) { this->_wal_manager = wm; }
 
 private:
     Status _init(const std::vector<StorePath>& store_paths);

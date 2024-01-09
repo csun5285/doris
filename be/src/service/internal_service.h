@@ -37,6 +37,7 @@ namespace doris {
 class ExecEnv;
 class PHandShakeRequest;
 class PHandShakeResponse;
+class RuntimeState;
 
 class PInternalServiceImpl : public PBackendService {
 public:
@@ -196,7 +197,9 @@ private:
                                         google::protobuf::Closure* done);
 
     Status _exec_plan_fragment_impl(const std::string& s_request, PFragmentRequestVersion version,
-                                    bool compact);
+                                    bool compact,
+                                    const std::function<void(RuntimeState*, Status*)>& cb =
+                                    std::function<void(RuntimeState*, Status*)>());
 
     Status _fold_constant_expr(const std::string& ser_request, PConstantExprResult* response);
 

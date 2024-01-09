@@ -431,5 +431,19 @@ Status LocalFileSystem::_glob(const std::string& pattern, std::vector<std::strin
     return Status::OK();
 }
 
+Status LocalFileSystem::directory_size(const Path& dir_path, size_t* dir_size) {
+    *dir_size = 0;
+    if (std::filesystem::exists(dir_path) && std::filesystem::is_directory(dir_path)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(dir_path)) {
+            if (std::filesystem::is_regular_file(entry)) {
+                *dir_size += std::filesystem::file_size(entry);
+            }
+        }
+        return Status::OK();
+    }
+    // TODO(plat1ko): Use error code according to std::error_code
+    return Status::InternalError("faile to get dir size {}", dir_path.native());
+}
+
 } // namespace io
 } // namespace doris

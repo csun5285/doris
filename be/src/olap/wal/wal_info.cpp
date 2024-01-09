@@ -15,36 +15,32 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#pragma once
-
-#include "common/status.h"
-#include "gen_cpp/internal_service.pb.h"
-#include "io/fs/file_reader_writer_fwd.h"
+#include "olap/wal/wal_info.h"
 
 namespace doris {
+WalInfo::WalInfo(int64_t wal_id, std::string wal_path, int64_t retry_num, int64_t start_time_ms)
+        : _wal_id(wal_id),
+          _wal_path(wal_path),
+          _retry_num(retry_num),
+          _start_time_ms(start_time_ms) {}
 
-using PBlockArray = std::vector<PBlock*>;
+int64_t WalInfo::get_wal_id() {
+    return _wal_id;
+}
 
-class WalWriter {
-public:
-    explicit WalWriter(const std::string& file_name);
-    ~WalWriter();
+std::string WalInfo::get_wal_path() {
+    return _wal_path;
+}
 
-    Status init();
-    Status finalize();
+int64_t WalInfo::get_retry_num() {
+    return _retry_num;
+}
 
-    Status append_blocks(const PBlockArray& blocks);
+int64_t WalInfo::get_start_time_ms() {
+    return _start_time_ms;
+}
 
-    std::string file_name() { return _file_name; };
-    static const int64_t LENGTH_SIZE = 8;
-    static const int64_t CHECKSUM_SIZE = 4;
-    static const int64_t VERSION_SIZE = 4;
-
-private:
-    std::string _file_name;
-    io::FileWriterPtr _file_writer;
-    int64_t _count;
-    int64_t _batch;
-};
-
+void WalInfo::add_retry_num() {
+    _retry_num++;
+}
 } // namespace doris
