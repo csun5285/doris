@@ -19,6 +19,7 @@
 #include "exec/data_sink.h"
 #include "vec/exprs/vexpr_fwd.h"
 #include "vec/sink/vtablet_sink.h"
+#include "vec/sink/vtablet_validator.h"
 
 namespace doris {
 
@@ -64,7 +65,7 @@ private:
     RuntimeProfile* _profile = nullptr;
     // this is tuple descriptor of destination OLAP table
     TupleDescriptor* _output_tuple_desc = nullptr;
-    // std::unique_ptr<vectorized::OlapTableBlockConvertor> _block_convertor;
+    std::unique_ptr<stream_load::OlapTableValidator> _validator = nullptr;
 
     int64_t _db_id;
     int64_t _table_id;
@@ -76,7 +77,7 @@ private:
     std::vector<std::shared_ptr<vectorized::Block>> _blocks;
     bool _is_block_appended = false;
     double _max_filter_ratio = 0.0;
-
+    std::vector<char> _filter_bitmap;
 };
 
 } // namespace vectorized

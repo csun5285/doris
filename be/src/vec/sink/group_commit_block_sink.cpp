@@ -23,7 +23,7 @@
 #include "util/doris_metrics.h"
 #include "vec/exprs/vexpr.h"
 #include "vec/core/block.h"
-// #include "vec/sink/vtablet_finder.h"
+#include "vec/exprs/vexpr_context.h"
 
 namespace doris {
 
@@ -31,7 +31,7 @@ namespace vectorized {
 
 GroupCommitBlockSink::GroupCommitBlockSink(ObjectPool* pool, const RowDescriptor& row_desc,
                                            const std::vector<TExpr>& texprs, Status* status)
-        : _input_row_desc(row_desc) {
+        : _input_row_desc(row_desc), _filter_bitmap(1024) {
     // From the thrift expressions create the real exprs.
     *status = vectorized::VExpr::create_expr_trees(texprs, _output_vexpr_ctxs);
     _name = "GroupCommitBlockSink";
@@ -76,10 +76,7 @@ Status GroupCommitBlockSink::prepare(RuntimeState* state) {
         LOG(WARNING) << "unknown destination tuple descriptor, id=" << _tuple_desc_id;
         return Status::InternalError("unknown destination tuple descriptor");
     }
-
-    /*_block_convertor = std::make_unique<vectorized::OlapTableBlockConvertor>(_output_tuple_desc);
-    _block_convertor->init_autoinc_info(_schema->db_id(), _schema->table_id(),
-                                        _state->batch_size());*/
+    _validator = std::make_unique<stream_load::OlapTableValidator>(_output_tuple_desc);
     // Prepare the exprs to run.
     return vectorized::VExpr::prepare(_output_vexpr_ctxs, state, _input_row_desc);
 }
@@ -140,23 +137,33 @@ Status GroupCommitBlockSink::send(RuntimeState* state, vectorized::Block* input_
     DorisMetrics::instance()->load_rows->increment(rows);
     DorisMetrics::instance()->load_bytes->increment(bytes);
 
-    std::shared_ptr<vectorized::Block> block = nullptr;
-    /*bool has_filtered_rows = false;
-    RETURN_IF_ERROR(_block_convertor->validate_and_convert_block(
-            state, input_block, block, _output_vexpr_ctxs, rows, has_filtered_rows));
-    if (_block_convertor->num_filtered_rows() > 0) {
-        auto cloneBlock = block->clone_without_columns();
-        auto res_block = vectorized::MutableBlock::build_mutable_block(&cloneBlock);
-        for (int i = 0; i < rows; ++i) {
-            if (_block_convertor->filter_map()[i]) {
-                continue;
-            }
-            res_block.add_row(block.get(), i);
+    // call vtablet_sink::_validate_data
+    vectorized::Block block(input_block->get_columns_with_type_and_name());
+    if (!_output_vexpr_ctxs.empty()) {
+        // Do vectorized expr here to speed up load
+        RETURN_IF_ERROR(vectorized::VExprContext::get_output_block_after_execute_exprs(
+                _output_vexpr_ctxs, *input_block, &block));
+    }
+
+    int filtered_rows = 0;
+    {
+        // SCOPED_RAW_TIMER(&_validate_data_ns);
+        _filter_bitmap.clear();
+        _filter_bitmap.resize(block.rows(), 0);
+        bool stop_processing = false;
+        RETURN_IF_ERROR(_validator->validate_data(state, &block, _filter_bitmap, &filtered_rows,
+                                                  &stop_processing));
+        state->update_num_rows_load_filtered(filtered_rows);
+        if (stop_processing) {
+            // should be returned after updating "_number_filtered_rows", to make sure that load job can be cancelled
+            // because of "data unqualified"
+            return Status::EndOfFile("Encountered unqualified data, stop processing");
         }
-        block->swap(res_block.to_block());
-    }*/
+        _validator->convert_to_dest_desc_block(&block);
+    }
+
     // add block into block queue
-    return _add_block(state, input_block);
+    return _add_block(state, &block);
 }
 
 Status GroupCommitBlockSink::_add_block(RuntimeState* state, vectorized::Block* block) {
@@ -177,6 +184,9 @@ Status GroupCommitBlockSink::_add_block(RuntimeState* state, vectorized::Block* 
     {
         vectorized::IColumn::Selector selector;
         for (auto i = 0; i < block->rows(); i++) {
+            if (_filter_bitmap[i]) {
+                continue;
+            }
             selector.emplace_back(i);
         }
         block->append_block_by_selector(cur_mutable_block.get(), selector);

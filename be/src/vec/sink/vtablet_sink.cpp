@@ -1389,7 +1389,6 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
 
     auto num_rows = block.rows();
     int filtered_rows = 0;
-    auto number_filtered_rows0 = _number_filtered_rows;
     {
         SCOPED_RAW_TIMER(&_validate_data_ns);
         _filter_bitmap.clear();
@@ -1460,8 +1459,6 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
                     vectorized::Block::filter_block_internal(&block, filter_col, block.columns()));
         }
     }
-    handle_block(input_block, rows, _number_filtered_rows - number_filtered_rows0, _state, &block,
-                 _filter_bitmap);
     // Add block to node channel
     for (size_t i = 0; i < _channels.size(); i++) {
         for (const auto& entry : channel_to_payload[i]) {
