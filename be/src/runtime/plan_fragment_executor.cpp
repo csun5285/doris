@@ -314,7 +314,7 @@ Status PlanFragmentExecutor::open_vectorized_internal() {
             return Status::OK();
         }
         RETURN_IF_ERROR(_sink->open(runtime_state()));
-        std::unique_ptr <doris::vectorized::Block> block = doris::vectorized::Block::create_unique();
+        std::unique_ptr<doris::vectorized::Block> block = doris::vectorized::Block::create_unique();
         bool eos = false;
 
         while (!eos) {

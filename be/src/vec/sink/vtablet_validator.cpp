@@ -14,7 +14,6 @@
 
 #include "vec/sink/vtablet_validator.h"
 
-
 #include <fmt/format.h>
 #include <gen_cpp/FrontendService.h>
 #include <google/protobuf/stubs/common.h>
@@ -49,9 +48,9 @@ namespace doris {
 namespace stream_load {
 
 Status OlapTableValidator::validate_data(RuntimeState* state, vectorized::Block* block,
-                                      std::vector<char>& filter_bitmap, int* filtered_rows,
-                                      bool* stop_processing) {
-        for (int i = 0; i < _output_tuple_desc->slots().size(); ++i) {
+                                         std::vector<char>& filter_bitmap, int* filtered_rows,
+                                         bool* stop_processing) {
+    for (int i = 0; i < _output_tuple_desc->slots().size(); ++i) {
         SlotDescriptor* desc = _output_tuple_desc->slots()[i];
         block->get_by_position(i).column =
                 block->get_by_position(i).column->convert_to_full_column_if_const();
@@ -126,10 +125,10 @@ DecimalType OlapTableValidator::_get_decimalv3_min_or_max(const TypeDescriptor& 
 }
 
 Status OlapTableValidator::_validate_column(RuntimeState* state, const TypeDescriptor& type,
-                                        bool is_nullable, vectorized::ColumnPtr column,
-                                        size_t slot_index, std::vector<char>& filter_bitmap,
-                                        bool* stop_processing, fmt::memory_buffer& error_prefix,
-                                        vectorized::IColumn::Permutation* rows) {
+                                            bool is_nullable, vectorized::ColumnPtr column,
+                                            size_t slot_index, std::vector<char>& filter_bitmap,
+                                            bool* stop_processing, fmt::memory_buffer& error_prefix,
+                                            vectorized::IColumn::Permutation* rows) {
     DCHECK((rows == nullptr) || (rows->size() == column->size()));
     fmt::memory_buffer error_msg;
     auto set_invalid_and_append_error_msg = [&](int row) {
@@ -416,5 +415,5 @@ void OlapTableValidator::convert_to_dest_desc_block(doris::vectorized::Block* bl
     }
 }
 
-} // namespace vectorized
+} // namespace stream_load
 } // namespace doris

@@ -123,12 +123,12 @@ Status StreamLoadExecutor::execute_plan_fragment(std::shared_ptr<StreamLoadConte
             }
 
             switch (ctx->load_src_type) {
-                // reset the stream load ctx's kafka commit offset
-                case TLoadSourceType::KAFKA:
-                    ctx->kafka_info->reset_offset();
-                    break;
-                default:
-                    break;
+            // reset the stream load ctx's kafka commit offset
+            case TLoadSourceType::KAFKA:
+                ctx->kafka_info->reset_offset();
+                break;
+            default:
+                break;
             }
         }
         ctx->write_data_cost_nanos = MonotonicNanos() - ctx->start_write_data_nanos;

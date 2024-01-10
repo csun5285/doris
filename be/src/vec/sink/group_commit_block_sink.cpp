@@ -21,8 +21,8 @@
 #include "runtime/group_commit_mgr.h"
 #include "runtime/runtime_state.h"
 #include "util/doris_metrics.h"
-#include "vec/exprs/vexpr.h"
 #include "vec/core/block.h"
+#include "vec/exprs/vexpr.h"
 #include "vec/exprs/vexpr_context.h"
 
 namespace doris {

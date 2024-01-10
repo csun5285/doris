@@ -438,8 +438,8 @@ void PInternalServiceImpl::tablet_writer_cancel(google::protobuf::RpcController*
 }
 
 Status PInternalServiceImpl::_exec_plan_fragment_impl(
-        const std::string &ser_request, PFragmentRequestVersion version, bool compact,
-        const std::function<void(RuntimeState * , Status * )> &cb) {
+        const std::string& ser_request, PFragmentRequestVersion version, bool compact,
+        const std::function<void(RuntimeState*, Status*)>& cb) {
     // Sometimes the BE do not receive the first heartbeat message and it receives request from FE
     // If BE execute this fragment, it will core when it wants to get some property from master info.
     if (ExecEnv::GetInstance()->master_info() == nullptr) {
@@ -451,7 +451,7 @@ Status PInternalServiceImpl::_exec_plan_fragment_impl(
         // VERSION_1 should be removed in v1.2
         TExecPlanFragmentParams t_request;
         {
-            const uint8_t *buf = (const uint8_t *) ser_request.data();
+            const uint8_t* buf = (const uint8_t*)ser_request.data();
             uint32_t len = ser_request.size();
             RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, compact, &t_request));
         }
@@ -463,15 +463,15 @@ Status PInternalServiceImpl::_exec_plan_fragment_impl(
     } else if (version == PFragmentRequestVersion::VERSION_2) {
         TExecPlanFragmentParamsList t_request;
         {
-            const uint8_t *buf = (const uint8_t *) ser_request.data();
+            const uint8_t* buf = (const uint8_t*)ser_request.data();
             uint32_t len = ser_request.size();
             RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, compact, &t_request));
         }
-        const auto &fragment_list = t_request.paramsList;
+        const auto& fragment_list = t_request.paramsList;
         MonotonicStopWatch timer;
         timer.start();
 
-        for (const TExecPlanFragmentParams &params: t_request.paramsList) {
+        for (const TExecPlanFragmentParams& params : t_request.paramsList) {
             if (cb) {
                 RETURN_IF_ERROR(_exec_env->fragment_mgr()->exec_plan_fragment(params, cb));
             } else {
@@ -491,15 +491,15 @@ Status PInternalServiceImpl::_exec_plan_fragment_impl(
     } else if (version == PFragmentRequestVersion::VERSION_3) {
         TPipelineFragmentParamsList t_request;
         {
-            const uint8_t *buf = (const uint8_t *) ser_request.data();
+            const uint8_t* buf = (const uint8_t*)ser_request.data();
             uint32_t len = ser_request.size();
             RETURN_IF_ERROR(deserialize_thrift_msg(buf, &len, compact, &t_request));
         }
 
-        const auto &fragment_list = t_request.params_list;
+        const auto& fragment_list = t_request.params_list;
         MonotonicStopWatch timer;
         timer.start();
-        for (const TPipelineFragmentParams &fragment: fragment_list) {
+        for (const TPipelineFragmentParams& fragment : fragment_list) {
             if (cb) {
                 RETURN_IF_ERROR(_exec_env->fragment_mgr()->exec_plan_fragment(fragment, cb));
             } else {

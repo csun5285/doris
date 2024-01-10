@@ -42,8 +42,8 @@ public:
     // invalid row number is set in Bitmap
     // set stop_processing if we want to stop the whole process now.
     Status validate_data(RuntimeState* state, vectorized::Block* block,
-                        std::vector<char>& filter_bitmap, int* filtered_rows,
-                        bool* stop_processing);
+                         std::vector<char>& filter_bitmap, int* filtered_rows,
+                         bool* stop_processing);
 
     // some output column of output expr may have different nullable property with dest slot desc
     // so here need to do the convert operation
@@ -75,5 +75,5 @@ private:
     std::map<int, int128_t> _min_decimal128_val;
 };
 
-} // namespace vectorized
+} // namespace stream_load
 } // namespace doris

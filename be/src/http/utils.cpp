@@ -38,9 +38,9 @@
 #include "io/fs/file_system.h"
 #include "io/fs/local_file_system.h"
 #include "olap/wal/wal_manager.h"
+#include "runtime/exec_env.h"
 #include "util/path_util.h"
 #include "util/url_coding.h"
-#include "runtime/exec_env.h"
 
 namespace doris {
 
