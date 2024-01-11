@@ -21,9 +21,7 @@
 
 #include "gutil/strings/split.h"
 #include "http/action/stream_load.h"
-#include "http/ev_http_server.h"
 #include "http/http_common.h"
-#include "http/http_headers.h"
 #include "http/utils.h"
 #include "io/fs/local_file_system.h"
 #include "io/fs/stream_load_pipe.h"
@@ -38,7 +36,7 @@ namespace doris {
 
 WalTable::WalTable(ExecEnv* exec_env, int64_t db_id, int64_t table_id)
         : _exec_env(exec_env), _db_id(db_id), _table_id(table_id) {
-    // _http_stream_action = std::make_shared<HttpStreamAction>(exec_env);
+    _stream_load_action = std::make_shared<StreamLoadAction>(exec_env);
 }
 WalTable::~WalTable() {}
 
@@ -218,47 +216,18 @@ Status WalTable::_parse_wal_path(const std::string& wal, int64_t& wal_id, std::s
     return Status::OK();
 }
 
-Status WalTable::_construct_sql_str(const std::string& wal, const std::string& label,
-                                    std::string& sql_str) {
-    std::string columns;
-    RETURN_IF_ERROR(_read_wal_header(wal, columns));
-    std::vector<std::string> column_id_vector =
-            strings::Split(columns, ",", strings::SkipWhitespace());
-    std::map<int64_t, std::string> column_info_map;
-    RETURN_IF_ERROR(_get_column_info(_db_id, _table_id, column_info_map));
-    std::stringstream ss_name;
-    for (auto column_id_str : column_id_vector) {
-        try {
-            int64_t column_id = std::strtoll(column_id_str.c_str(), NULL, 10);
-            auto it = column_info_map.find(column_id);
-            if (it != column_info_map.end()) {
-                ss_name << "`" << it->second << "`,";
-            }
-        } catch (const std::invalid_argument& e) {
-            return Status::InvalidArgument("Invalid format, {}", e.what());
-        }
-    }
-    auto name = ss_name.str().substr(0, ss_name.str().size() - 1);
-    std::stringstream ss;
-    ss << "insert into doris_internal_table_id(" << _table_id << ") WITH LABEL " << label << " ("
-       << name << ") select " << name << " from http_stream(\"format\" = \"wal\", \"table_id\" = \""
-       << std::to_string(_table_id) << "\")";
-    sql_str = ss.str().data();
-    return Status::OK();
-}
-
 Status WalTable::_handle_stream_load(int64_t wal_id, const std::string& wal,
                                      const std::string& label) {
-    std::string sql_str;
-    RETURN_IF_ERROR(_construct_sql_str(wal, label, sql_str));
     std::shared_ptr<StreamLoadContext> ctx = std::make_shared<StreamLoadContext>(_exec_env);
-    /*ctx->sql_str = sql_str;
     ctx->wal_id = wal_id;
     ctx->label = label;
+    ctx->table_id = _table_id;
     ctx->auth.token = "relay_wal"; // this is a fake, fe not check it now
     ctx->auth.user = "admin";
     ctx->group_commit = false;
-    auto st = _http_stream_action->process_put(nullptr, ctx);
+    ctx->format = TFileFormatType::FORMAT_WAL;
+    RETURN_IF_ERROR(_exec_env->stream_load_executor()->begin_txn(ctx.get()));
+    auto st = _stream_load_action->process_put(nullptr, ctx);
     if (st.ok()) {
         // wait stream load finish
         RETURN_IF_ERROR(ctx->future.get());
@@ -273,8 +242,8 @@ Status WalTable::_handle_stream_load(int64_t wal_id, const std::string& wal,
         LOG(WARNING) << "handle streaming load failed, id=" << ctx->id << ", errmsg=" << st;
         _exec_env->stream_load_executor()->rollback_txn(ctx.get());
     }
-    LOG(INFO) << "relay wal id=" << wal_id << ",st=" << st.to_string();*/
-    return Status::OK();
+    LOG(INFO) << "relay wal id=" << wal_id << ",st=" << st.to_string();
+    return st;
 }
 
 Status WalTable::_replay_one_txn_with_stremaload(int64_t wal_id, const std::string& wal,
@@ -284,7 +253,8 @@ Status WalTable::_replay_one_txn_with_stremaload(int64_t wal_id, const std::stri
     auto st = _handle_stream_load(wal_id, wal, label);
     auto msg = st.msg();
     success = st.ok() || st.is<ErrorCode::PUBLISH_TIMEOUT>() ||
-              msg.find("LabelAlreadyUsedException") != msg.npos;
+              msg.find("has already been used") != msg.npos;
+    LOG(INFO) << "handle_stream_load:" << st.to_string();
 #else
     success = k_stream_load_exec_status.ok();
 #endif
@@ -315,44 +285,6 @@ void WalTable::stop() {
 size_t WalTable::size() {
     std::lock_guard<std::mutex> lock(_replay_wal_lock);
     return _replay_wal_map.size() + _replaying_queue.size();
-}
-
-Status WalTable::_get_column_info(int64_t db_id, int64_t tb_id,
-                                  std::map<int64_t, std::string>& column_info_map) {
-    TGetColumnInfoRequest request;
-    request.__set_db_id(db_id);
-    request.__set_table_id(tb_id);
-    TGetColumnInfoResult result;
-    Status status;
-    TNetworkAddress master_addr = _exec_env->master_info()->network_address;
-    if (master_addr.hostname.empty() || master_addr.port == 0) {
-        status = Status::InternalError("Have not get FE Master heartbeat yet");
-    } else {
-        RETURN_IF_ERROR(ThriftRpcHelper::rpc<FrontendServiceClient>(
-                master_addr.hostname, master_addr.port,
-                [&request, &result](FrontendServiceConnection& client) {
-                    client->getColumnInfo(result, request);
-                }));
-        status = Status::create(result.status);
-        if (!status.ok()) {
-            return status;
-        }
-        std::vector<TColumnInfo> column_element = result.columns;
-        for (auto column : column_element) {
-            auto column_name = column.column_name;
-            auto column_id = column.column_id;
-            column_info_map.emplace(column_id, column_name);
-        }
-    }
-    return status;
-}
-
-Status WalTable::_read_wal_header(const std::string& wal_path, std::string& columns) {
-    std::shared_ptr<doris::WalReader> wal_reader = std::make_shared<WalReader>(wal_path);
-    RETURN_IF_ERROR(wal_reader->init());
-    RETURN_IF_ERROR(wal_reader->read_header(columns));
-    RETURN_IF_ERROR(wal_reader->finalize());
-    return Status::OK();
 }
 
 } // namespace doris

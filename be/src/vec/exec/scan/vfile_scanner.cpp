@@ -113,7 +113,8 @@ VFileScanner::VFileScanner(RuntimeState* state, NewFileScanNode* parent, int64_t
     // For query scanner, there is only output tuple
     _input_tuple_desc = state->desc_tbl().get_tuple_descriptor(_params->src_tuple_id);
     _real_tuple_desc = _input_tuple_desc == nullptr ? _output_tuple_desc : _input_tuple_desc;
-    _is_load = (_input_tuple_desc != nullptr);
+    _is_load =
+            (_input_tuple_desc != nullptr) && (_params->format_type != TFileFormatType::FORMAT_WAL);
 }
 
 Status VFileScanner::prepare(
@@ -282,10 +283,6 @@ Status VFileScanner::_get_block_impl(RuntimeState* state, Block* block, bool* eo
             // Some of column in block may not be filled (column not exist in file)
             RETURN_IF_ERROR(
                     _cur_reader->get_next_block(_src_block_ptr, &read_rows, &_cur_reader_eof));
-        }
-        if (_params->format_type == TFileFormatType::FORMAT_WAL) {
-            block->swap(*_src_block_ptr);
-            break;
         }
         // use read_rows instead of _src_block_ptr->rows(), because the first column of _src_block_ptr
         // may not be filled after calling `get_next_block()`, so _src_block_ptr->rows() may return wrong result.
@@ -822,7 +819,8 @@ Status VFileScanner::_get_next_reader() {
         }
         case TFileFormatType::FORMAT_WAL: {
             _cur_reader.reset(new WalReader(_state));
-            init_status = ((WalReader*)(_cur_reader.get()))->init_reader(_output_tuple_desc);
+            init_status = ((WalReader*)(_cur_reader.get()))
+                                  ->init_reader(_output_tuple_desc, _col_default_value_ctx);
             break;
         }
         default:
@@ -845,7 +843,7 @@ Status VFileScanner::_get_next_reader() {
 
         _name_to_col_type.clear();
         _missing_cols.clear();
-        _cur_reader->get_columns(&_name_to_col_type, &_missing_cols);
+        RETURN_IF_ERROR(_cur_reader->get_columns(&_name_to_col_type, &_missing_cols));
         _cur_reader->set_push_down_agg_type(_parent->get_push_down_agg_type());
         RETURN_IF_ERROR(_generate_fill_columns());
         if (VLOG_NOTICE_IS_ON && !_missing_cols.empty() && _is_load) {

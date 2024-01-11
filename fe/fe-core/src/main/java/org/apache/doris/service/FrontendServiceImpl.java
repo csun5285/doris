@@ -100,7 +100,6 @@ import org.apache.doris.thrift.TCheckAuthResult;
 import org.apache.doris.thrift.TColumn;
 import org.apache.doris.thrift.TColumnDef;
 import org.apache.doris.thrift.TColumnDesc;
-import org.apache.doris.thrift.TColumnInfo;
 import org.apache.doris.thrift.TCommitTxnRequest;
 import org.apache.doris.thrift.TCommitTxnResult;
 import org.apache.doris.thrift.TConfirmUnusedRemoteFilesRequest;
@@ -126,8 +125,6 @@ import org.apache.doris.thrift.TGetBackendMetaResult;
 import org.apache.doris.thrift.TGetBinlogLagResult;
 import org.apache.doris.thrift.TGetBinlogRequest;
 import org.apache.doris.thrift.TGetBinlogResult;
-import org.apache.doris.thrift.TGetColumnInfoRequest;
-import org.apache.doris.thrift.TGetColumnInfoResult;
 import org.apache.doris.thrift.TGetDbsParams;
 import org.apache.doris.thrift.TGetDbsResult;
 import org.apache.doris.thrift.TGetMasterTokenRequest;
@@ -3329,44 +3326,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         } catch (Throwable e) {
             throw e;
         }
-    }
-
-    @Override
-    public TGetColumnInfoResult getColumnInfo(TGetColumnInfoRequest request) {
-        TGetColumnInfoResult result = new TGetColumnInfoResult();
-        TStatus status = new TStatus(TStatusCode.OK);
-        result.setStatus(status);
-        long dbId = request.getDbId();
-        long tableId = request.getTableId();
-        if (!Env.getCurrentEnv().isMaster()) {
-            status.setStatusCode(TStatusCode.NOT_MASTER);
-            status.addToErrorMsgs(NOT_MASTER_ERR_MSG);
-            LOG.error("failed to getColumnInfo: {}", NOT_MASTER_ERR_MSG);
-            return result;
-        }
-
-        Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
-        if (db == null) {
-            status.setStatusCode(TStatusCode.NOT_FOUND);
-            status.setErrorMsgs(Lists.newArrayList(String.format("dbId=%d is not exists", dbId)));
-            return result;
-        }
-        Table table = db.getTableNullable(tableId);
-        if (table == null) {
-            status.setStatusCode(TStatusCode.NOT_FOUND);
-            status.setErrorMsgs(
-                    (Lists.newArrayList(String.format("dbId=%d tableId=%d is not exists", dbId, tableId))));
-            return result;
-        }
-        List<TColumnInfo> columnsResult = Lists.newArrayList();
-        for (Column column : table.getBaseSchema(true)) {
-            final TColumnInfo info = new TColumnInfo();
-            info.setColumnName(column.getName());
-            info.setColumnId(column.getUniqueId());
-            columnsResult.add(info);
-        }
-        result.setColumns(columnsResult);
-        return result;
     }
 
     public TGetBackendMetaResult getBackendMeta(TGetBackendMetaRequest request) throws TException {

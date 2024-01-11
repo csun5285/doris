@@ -27,7 +27,9 @@ class WalReader : public GenericReader {
 public:
     WalReader(RuntimeState* state);
     ~WalReader() override;
-    Status init_reader(const TupleDescriptor* tuple_descriptor);
+    Status init_reader(
+            const TupleDescriptor* tuple_descriptor,
+            std::unordered_map<std::string, vectorized::VExprContextSPtr>& col_default_value_ctx);
     Status get_next_block(Block* block, size_t* read_rows, bool* eof) override;
     Status get_columns(std::unordered_map<std::string, TypeDescriptor>* name_to_type,
                        std::unordered_set<std::string>* missing_cols) override;
@@ -38,6 +40,7 @@ private:
     std::string _wal_path;
     std::shared_ptr<doris::WalReader> _wal_reader = nullptr;
     const TupleDescriptor* _tuple_descriptor = nullptr;
+    std::unordered_map<std::string, vectorized::VExprContextSPtr> _col_default_value_ctx;
     // column_id, column_pos
     std::map<int64_t, int64_t> _column_pos_map;
 };

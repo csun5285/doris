@@ -22,7 +22,6 @@
 #include "io/fs/local_file_system.h"
 #include "io/fs/path.h"
 #include "olap/storage_engine.h"
-#include "olap/wal/wal_manager.h"
 #include "util/crc32c.h"
 
 namespace doris {

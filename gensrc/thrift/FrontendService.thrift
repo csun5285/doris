@@ -1254,21 +1254,6 @@ struct TGetBackendMetaResult {
     3: optional Types.TNetworkAddress master_address
 }
 
-struct TColumnInfo {
-  1: optional string column_name
-  2: optional i64 column_id
-}
-
-struct TGetColumnInfoRequest {
-    1: optional i64 db_id
-    2: optional i64 table_id
-}
-
-struct TGetColumnInfoResult {
-    1: optional Status.TStatus status
-    2: optional list<TColumnInfo> columns
-}
-
 service FrontendService {
     TGetDbsResult getDbNames(1: TGetDbsParams params)
     TGetTablesResult getTableNames(1: TGetTablesParams params)
@@ -1342,8 +1327,6 @@ service FrontendService {
     TGetMetaResult getMeta(1: TGetMetaRequest request)
 
     TGetBackendMetaResult getBackendMeta(1: TGetBackendMetaRequest request)
-
-    TGetColumnInfoResult getColumnInfo(1: TGetColumnInfoRequest request)
 
     Status.TStatus invalidateStatsCache(1: TInvalidateFollowerStatsCacheRequest request)
 }

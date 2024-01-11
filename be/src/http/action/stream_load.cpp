@@ -20,7 +20,6 @@
 // use string iequal
 #include <event2/buffer.h>
 #include <event2/http.h>
-#include <gen_cpp/FrontendService.h>
 #include <gen_cpp/FrontendService_types.h>
 #include <gen_cpp/HeartbeatService_types.h>
 #include <gen_cpp/PaloInternalService_types.h>
@@ -328,7 +327,7 @@ Status StreamLoadAction::_on_header(HttpRequest* http_req, std::shared_ptr<Strea
     }
 
     // process put file
-    return _process_put(http_req, ctx);
+    return process_put(http_req, ctx);
 }
 
 void StreamLoadAction::on_chunk_data(HttpRequest* req) {
@@ -371,8 +370,8 @@ void StreamLoadAction::free_handler_ctx(std::shared_ptr<void> param) {
     ctx->exec_env()->new_load_stream_mgr()->remove(ctx->id);
 }
 
-Status StreamLoadAction::_process_put(HttpRequest* http_req,
-                                      std::shared_ptr<StreamLoadContext> ctx) {
+Status StreamLoadAction::process_put(HttpRequest* http_req,
+                                     std::shared_ptr<StreamLoadContext> ctx) {
     // Now we use stream
     ctx->use_streaming = LoadUtil::is_format_support_streaming(ctx->format);
 
@@ -406,7 +405,9 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
         ctx->pipe = pipe;
         RETURN_IF_ERROR(_exec_env->new_load_stream_mgr()->put(ctx->id, ctx));
     } else {
-        RETURN_IF_ERROR(_data_saved_path(http_req, &request.path));
+        if (http_req != nullptr) {
+            RETURN_IF_ERROR(_data_saved_path(http_req, &request.path));
+        }
         auto file_sink = std::make_shared<MessageBodyFileSink>(request.path);
         RETURN_IF_ERROR(file_sink->open());
         request.__isset.path = true;
@@ -414,6 +415,128 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
         request.__set_file_size(ctx->body_bytes);
         ctx->body_sink = file_sink;
     }
+    if (http_req != nullptr) {
+        RETURN_IF_ERROR(_process_http_request(http_req, request, ctx));
+    }
+
+#ifndef BE_TEST
+    // plan this load
+    TNetworkAddress master_addr = _exec_env->master_info()->network_address;
+    int64_t stream_load_put_start_time = MonotonicNanos();
+    RETURN_IF_ERROR(ThriftRpcHelper::rpc<FrontendServiceClient>(
+            master_addr.hostname, master_addr.port,
+            [&request, ctx](FrontendServiceConnection& client) {
+                client->streamLoadPut(ctx->put_result, request);
+            }));
+    ctx->stream_load_put_cost_nanos = MonotonicNanos() - stream_load_put_start_time;
+#else
+    ctx->put_result = k_stream_load_put_result;
+#endif
+    Status plan_status(Status::create(ctx->put_result.status));
+    if (!plan_status.ok()) {
+        LOG(WARNING) << "plan streaming load failed. errmsg=" << plan_status << ctx->brief();
+        return plan_status;
+    }
+
+#ifdef CLOUD_MODE
+    if (ctx->two_phase_commit && ctx->is_mow_table()) {
+        return Status::NotSupported("stream load 2pc is unsupported for mow table");
+    }
+#endif
+
+    ctx->put_result.params.__set_wal_id(ctx->wal_id);
+
+    VLOG_NOTICE << "params is " << apache::thrift::ThriftDebugString(ctx->put_result.params);
+    // if we not use streaming, we must download total content before we begin
+    // to process this load
+    if (!ctx->use_streaming) {
+        return Status::OK();
+    }
+
+    return _exec_env->stream_load_executor()->execute_plan_fragment(ctx);
+}
+
+Status StreamLoadAction::_data_saved_path(HttpRequest* req, std::string* file_path) {
+    std::string prefix;
+    RETURN_IF_ERROR(_exec_env->load_path_mgr()->allocate_dir(req->param(HTTP_DB_KEY), "", &prefix));
+    timeval tv;
+    gettimeofday(&tv, nullptr);
+    struct tm tm;
+    time_t cur_sec = tv.tv_sec;
+    localtime_r(&cur_sec, &tm);
+    char buf[64];
+    strftime(buf, 64, "%Y%m%d%H%M%S", &tm);
+    std::stringstream ss;
+    ss << prefix << "/" << req->param(HTTP_TABLE_KEY) << "." << buf << "." << tv.tv_usec;
+    *file_path = ss.str();
+    return Status::OK();
+}
+
+void StreamLoadAction::_save_stream_load_record(std::shared_ptr<StreamLoadContext> ctx,
+                                                const std::string& str) {
+    auto stream_load_recorder = StorageEngine::instance()->get_stream_load_recorder();
+    if (stream_load_recorder != nullptr) {
+        std::string key =
+                std::to_string(ctx->start_millis + ctx->load_cost_millis) + "_" + ctx->label;
+        auto st = stream_load_recorder->put(key, str);
+        if (st.ok()) {
+            LOG(INFO) << "put stream_load_record rocksdb successfully. label: " << ctx->label
+                      << ", key: " << key;
+        }
+    } else {
+        LOG(WARNING) << "put stream_load_record rocksdb failed. stream_load_recorder is null.";
+    }
+}
+
+Status StreamLoadAction::_handle_group_commit(HttpRequest* req,
+                                              std::shared_ptr<StreamLoadContext> ctx) {
+    std::string group_commit_mode = req->header(HTTP_GROUP_COMMIT);
+    if (!group_commit_mode.empty() && !iequal(group_commit_mode, "sync_mode") &&
+        !iequal(group_commit_mode, "async_mode") && !iequal(group_commit_mode, "off_mode")) {
+        return Status::InternalError("group_commit can only be [async_mode, sync_mode, off_mode]");
+    }
+    if (config::wait_internal_group_commit_finish) {
+        group_commit_mode = "sync_mode";
+    }
+    if (group_commit_mode.empty() || iequal(group_commit_mode, "off_mode")) {
+        // off_mode and empty
+        ctx->group_commit = false;
+        return Status::OK();
+    }
+
+    auto partial_columns = !req->header(HTTP_PARTIAL_COLUMNS).empty() &&
+                           iequal(req->header(HTTP_PARTIAL_COLUMNS), "true");
+    auto temp_partitions = !req->header(HTTP_TEMP_PARTITIONS).empty();
+    auto partitions = !req->header(HTTP_PARTITIONS).empty();
+    if (!partial_columns && !partitions && !temp_partitions && !ctx->two_phase_commit) {
+        if (!config::wait_internal_group_commit_finish && !ctx->label.empty()) {
+            return Status::InternalError("label and group_commit can't be set at the same time");
+        }
+        ctx->group_commit = true;
+        if (iequal(group_commit_mode, "async_mode")) {
+            group_commit_mode = load_size_smaller_than_wal_limit(req) ? "async_mode" : "sync_mode";
+            if (iequal(group_commit_mode, "sync_mode")) {
+                size_t max_available_size =
+                        ExecEnv::GetInstance()->wal_mgr()->get_max_available_size();
+                LOG(INFO) << "When enable group commit, the data size can't be too large or "
+                             "unknown. The data size for this stream load("
+                          << (req->header(HttpHeaders::CONTENT_LENGTH).empty()
+                                      ? 0
+                                      : req->header(HttpHeaders::CONTENT_LENGTH))
+                          << " Bytes) exceeds the WAL (Write-Ahead Log) limit ("
+                          << max_available_size
+                          << " Bytes). So we set this load to \"group commit\"=sync_mode\" "
+                             "automatically.";
+                return Status::Error<EXCEEDED_LIMIT>("Stream load size too large.");
+            }
+        }
+    }
+    return Status::OK();
+}
+
+Status StreamLoadAction::_process_http_request(HttpRequest* http_req,
+                                               TStreamLoadPutRequest& request,
+                                               std::shared_ptr<StreamLoadContext> ctx) {
     if (!http_req->header(HTTP_COLUMNS).empty()) {
         request.__set_columns(http_req->header(HTTP_COLUMNS));
     }
@@ -618,119 +741,6 @@ Status StreamLoadAction::_process_put(HttpRequest* http_req,
         } else {
             // used for config::wait_internal_group_commit_finish
             request.__set_group_commit_mode("sync_mode");
-        }
-    }
-
-#ifndef BE_TEST
-    // plan this load
-    TNetworkAddress master_addr = _exec_env->master_info()->network_address;
-    int64_t stream_load_put_start_time = MonotonicNanos();
-    RETURN_IF_ERROR(ThriftRpcHelper::rpc<FrontendServiceClient>(
-            master_addr.hostname, master_addr.port,
-            [&request, ctx](FrontendServiceConnection& client) {
-                client->streamLoadPut(ctx->put_result, request);
-            }));
-    ctx->stream_load_put_cost_nanos = MonotonicNanos() - stream_load_put_start_time;
-#else
-    ctx->put_result = k_stream_load_put_result;
-#endif
-    Status plan_status(Status::create(ctx->put_result.status));
-    if (!plan_status.ok()) {
-        LOG(WARNING) << "plan streaming load failed. errmsg=" << plan_status << ctx->brief();
-        return plan_status;
-    }
-
-#ifdef CLOUD_MODE
-    if (ctx->two_phase_commit && ctx->is_mow_table()) {
-        return Status::NotSupported("stream load 2pc is unsupported for mow table");
-    }
-#endif
-
-    ctx->put_result.params.__set_wal_id(ctx->wal_id);
-
-    VLOG_NOTICE << "params is " << apache::thrift::ThriftDebugString(ctx->put_result.params);
-    // if we not use streaming, we must download total content before we begin
-    // to process this load
-    if (!ctx->use_streaming) {
-        return Status::OK();
-    }
-
-    return _exec_env->stream_load_executor()->execute_plan_fragment(ctx);
-}
-
-Status StreamLoadAction::_data_saved_path(HttpRequest* req, std::string* file_path) {
-    std::string prefix;
-    RETURN_IF_ERROR(_exec_env->load_path_mgr()->allocate_dir(req->param(HTTP_DB_KEY), "", &prefix));
-    timeval tv;
-    gettimeofday(&tv, nullptr);
-    struct tm tm;
-    time_t cur_sec = tv.tv_sec;
-    localtime_r(&cur_sec, &tm);
-    char buf[64];
-    strftime(buf, 64, "%Y%m%d%H%M%S", &tm);
-    std::stringstream ss;
-    ss << prefix << "/" << req->param(HTTP_TABLE_KEY) << "." << buf << "." << tv.tv_usec;
-    *file_path = ss.str();
-    return Status::OK();
-}
-
-void StreamLoadAction::_save_stream_load_record(std::shared_ptr<StreamLoadContext> ctx,
-                                                const std::string& str) {
-    auto stream_load_recorder = StorageEngine::instance()->get_stream_load_recorder();
-    if (stream_load_recorder != nullptr) {
-        std::string key =
-                std::to_string(ctx->start_millis + ctx->load_cost_millis) + "_" + ctx->label;
-        auto st = stream_load_recorder->put(key, str);
-        if (st.ok()) {
-            LOG(INFO) << "put stream_load_record rocksdb successfully. label: " << ctx->label
-                      << ", key: " << key;
-        }
-    } else {
-        LOG(WARNING) << "put stream_load_record rocksdb failed. stream_load_recorder is null.";
-    }
-}
-
-Status StreamLoadAction::_handle_group_commit(HttpRequest* req,
-                                              std::shared_ptr<StreamLoadContext> ctx) {
-    std::string group_commit_mode = req->header(HTTP_GROUP_COMMIT);
-    if (!group_commit_mode.empty() && !iequal(group_commit_mode, "sync_mode") &&
-        !iequal(group_commit_mode, "async_mode") && !iequal(group_commit_mode, "off_mode")) {
-        return Status::InternalError("group_commit can only be [async_mode, sync_mode, off_mode]");
-    }
-    if (config::wait_internal_group_commit_finish) {
-        group_commit_mode = "sync_mode";
-    }
-    if (group_commit_mode.empty() || iequal(group_commit_mode, "off_mode")) {
-        // off_mode and empty
-        ctx->group_commit = false;
-        return Status::OK();
-    }
-
-    auto partial_columns = !req->header(HTTP_PARTIAL_COLUMNS).empty() &&
-                           iequal(req->header(HTTP_PARTIAL_COLUMNS), "true");
-    auto temp_partitions = !req->header(HTTP_TEMP_PARTITIONS).empty();
-    auto partitions = !req->header(HTTP_PARTITIONS).empty();
-    if (!partial_columns && !partitions && !temp_partitions && !ctx->two_phase_commit) {
-        if (!config::wait_internal_group_commit_finish && !ctx->label.empty()) {
-            return Status::InternalError("label and group_commit can't be set at the same time");
-        }
-        ctx->group_commit = true;
-        if (iequal(group_commit_mode, "async_mode")) {
-            group_commit_mode = load_size_smaller_than_wal_limit(req) ? "async_mode" : "sync_mode";
-            if (iequal(group_commit_mode, "sync_mode")) {
-                size_t max_available_size =
-                        ExecEnv::GetInstance()->wal_mgr()->get_max_available_size();
-                LOG(INFO) << "When enable group commit, the data size can't be too large or "
-                             "unknown. The data size for this stream load("
-                          << (req->header(HttpHeaders::CONTENT_LENGTH).empty()
-                                      ? 0
-                                      : req->header(HttpHeaders::CONTENT_LENGTH))
-                          << " Bytes) exceeds the WAL (Write-Ahead Log) limit ("
-                          << max_available_size
-                          << " Bytes). So we set this load to \"group commit\"=sync_mode\" "
-                             "automatically.";
-                return Status::Error<EXCEEDED_LIMIT>("Stream load size too large.");
-            }
         }
     }
     return Status::OK();

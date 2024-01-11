@@ -85,7 +85,7 @@ public class SystemHandler extends AlterHandler {
             }
 
             List<Long> backendTabletIds = invertedIndex.getTabletIdsByBackendId(beId);
-            if (Config.drop_backend_after_decommission && checkTablets(beId, backendTabletIds)) {
+            if (Config.drop_backend_after_decommission && checkTablets(beId, backendTabletIds) && checkWal(backend)) {
                 try {
                     systemInfoService.dropBackend(beId);
                     LOG.info("no available tablet on decommission backend {}, drop it", beId);
@@ -190,6 +190,11 @@ public class SystemHandler extends AlterHandler {
             return true;
         }
         return false;
+    }
+
+    private boolean checkWal(Backend backend) {
+        return Env.getCurrentEnv().getGroupCommitManager()
+                .getAllWalQueueSize(backend) == 0;
     }
 
     private List<Backend> checkDecommission(DecommissionBackendClause decommissionBackendClause)

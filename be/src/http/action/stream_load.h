@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <gen_cpp/FrontendService.h>
+
 #include <memory>
 #include <string>
 
@@ -43,14 +45,16 @@ public:
 
     void on_chunk_data(HttpRequest* req) override;
     void free_handler_ctx(std::shared_ptr<void> ctx) override;
+    Status process_put(HttpRequest* http_req, std::shared_ptr<StreamLoadContext> ctx);
 
 private:
     Status _on_header(HttpRequest* http_req, std::shared_ptr<StreamLoadContext> ctx);
     Status _handle(std::shared_ptr<StreamLoadContext> ctx);
     Status _data_saved_path(HttpRequest* req, std::string* file_path);
-    Status _process_put(HttpRequest* http_req, std::shared_ptr<StreamLoadContext> ctx);
     void _save_stream_load_record(std::shared_ptr<StreamLoadContext> ctx, const std::string& str);
     Status _handle_group_commit(HttpRequest* http_req, std::shared_ptr<StreamLoadContext> ctx);
+    Status _process_http_request(HttpRequest* http_req, TStreamLoadPutRequest& request,
+                                 std::shared_ptr<StreamLoadContext> ctx);
 
 private:
     ExecEnv* _exec_env;

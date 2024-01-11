@@ -21,7 +21,9 @@
 #include "gutil/strings/split.h"
 #include "olap/wal/wal_manager.h"
 #include "runtime/runtime_state.h"
+#include "vec/data_types/data_type_factory.hpp"
 #include "vec/data_types/data_type_string.h"
+#include "vec/exprs/vexpr_context.h"
 
 namespace doris::vectorized {
 WalReader::WalReader(RuntimeState* state) : _state(state) {
@@ -34,8 +36,11 @@ WalReader::~WalReader() {
     }
 }
 
-Status WalReader::init_reader(const TupleDescriptor* tuple_descriptor) {
+Status WalReader::init_reader(
+        const TupleDescriptor* tuple_descriptor,
+        std::unordered_map<std::string, vectorized::VExprContextSPtr>& col_default_value_ctx) {
     _tuple_descriptor = tuple_descriptor;
+    _col_default_value_ctx = col_default_value_ctx;
     RETURN_IF_ERROR(_state->exec_env()->wal_mgr()->get_wal_path(_wal_id, _wal_path));
     _wal_reader = std::make_shared<doris::WalReader>(_wal_path);
     RETURN_IF_ERROR(_wal_reader->init());
@@ -62,16 +67,37 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
     vectorized::Block dst_block;
     int index = 0;
     auto columns = block->get_columns_with_type_and_name();
-    CHECK(columns.size() == _tuple_descriptor->slots().size());
+    if (columns.size() != _tuple_descriptor->slots().size()) {
+        return Status::InternalError(
+                "not equal columns size=" + std::to_string(columns.size()) + " vs " +
+                "tuple_descriptor size=" + std::to_string(_tuple_descriptor->slots().size()));
+    }
+    vectorized::ColumnPtr column_ptr = nullptr;
     for (auto slot_desc : _tuple_descriptor->slots()) {
-        auto pos = _column_pos_map[slot_desc->col_unique_id()];
-        vectorized::ColumnPtr column_ptr = src_block.get_by_position(pos).column;
-        if (column_ptr != nullptr && slot_desc->is_nullable()) {
-            column_ptr = make_nullable(column_ptr);
+        auto it = _column_pos_map.find(slot_desc->col_unique_id());
+        if (it != _column_pos_map.end()) {
+            auto pos = it->second;
+            column_ptr = src_block.get_by_position(pos).column;
+        } else {
+            auto default_it = _col_default_value_ctx.find(slot_desc->col_name());
+            if (default_it != _col_default_value_ctx.end()) {
+                int result_column_id = -1;
+                st = default_it->second->execute(&src_block, &result_column_id);
+                column_ptr = src_block.get_by_position(result_column_id).column;
+                column_ptr = column_ptr->convert_to_full_column_if_const();
+                if (column_ptr != nullptr && slot_desc->is_nullable()) {
+                    column_ptr = make_nullable(column_ptr);
+                }
+            } else {
+                return Status::InternalError("can't find default_value for column " +
+                                             slot_desc->col_name());
+            }
         }
-        dst_block.insert(
-                index, vectorized::ColumnWithTypeAndName(std::move(column_ptr), columns[index].type,
-                                                         columns[index].name));
+        DataTypePtr data_type;
+        RETURN_IF_CATCH_EXCEPTION(data_type = DataTypeFactory::instance().create_data_type(
+                                          slot_desc->type(), slot_desc->is_nullable()));
+        dst_block.insert(index, vectorized::ColumnWithTypeAndName(std::move(column_ptr), data_type,
+                                                                  slot_desc->col_name()));
         index++;
     }
     block->swap(dst_block);

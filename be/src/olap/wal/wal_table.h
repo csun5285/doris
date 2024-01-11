@@ -24,7 +24,7 @@
 #include "gen_cpp/FrontendService.h"
 #include "gen_cpp/FrontendService_types.h"
 #include "gen_cpp/HeartbeatService_types.h"
-// #include "http/action/http_stream.h"
+#include "http/action/stream_load.h"
 #include "olap/wal/wal_info.h"
 #include "runtime/exec_env.h"
 #include "runtime/stream_load/stream_load_context.h"
@@ -48,21 +48,16 @@ private:
     Status _replay_wal_internal(const std::string& wal);
     Status _parse_wal_path(const std::string& wal, int64_t& wal_id, std::string& label);
     Status _try_abort_txn(int64_t db_id, int64_t wal_id);
-    Status _get_column_info(int64_t db_id, int64_t tb_id,
-                            std::map<int64_t, std::string>& column_info_map);
 
     Status _replay_one_txn_with_stremaload(int64_t wal_id, const std::string& wal,
                                            const std::string& label);
     Status _handle_stream_load(int64_t wal_id, const std::string& wal, const std::string& label);
-    Status _construct_sql_str(const std::string& wal, const std::string& label,
-                              std::string& sql_str);
-    Status _read_wal_header(const std::string& wal, std::string& columns);
 
 private:
     ExecEnv* _exec_env;
     int64_t _db_id;
     int64_t _table_id;
-    // std::shared_ptr<HttpStreamAction> _http_stream_action;
+    std::shared_ptr<StreamLoadAction> _stream_load_action;
     mutable std::mutex _replay_wal_lock;
     // key is wal_path
     std::map<std::string, std::shared_ptr<WalInfo>> _replay_wal_map;

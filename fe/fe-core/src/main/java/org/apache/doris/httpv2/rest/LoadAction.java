@@ -17,7 +17,9 @@
 
 package org.apache.doris.httpv2.rest;
 
+import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
+import org.apache.doris.catalog.Table;
 import org.apache.doris.cluster.ClusterNamespace;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
@@ -41,6 +43,7 @@ import io.netty.handler.codec.http.HttpHeaderNames;
 import org.apache.commons.validator.routines.InetAddressValidator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.thrift.TException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -79,7 +82,7 @@ public class LoadAction extends RestBaseController {
             return entity;
         } else {
             executeCheckPassword(request, response);
-            return executeWithoutPassword(request, response, db, table, false);
+            return executeWithoutPassword(request, response, db, table, false, false);
         }
     }
 
@@ -87,6 +90,20 @@ public class LoadAction extends RestBaseController {
     public Object streamLoad(HttpServletRequest request,
                              HttpServletResponse response,
                              @PathVariable(value = DB_KEY) String db, @PathVariable(value = TABLE_KEY) String table) {
+        boolean groupCommit = false;
+        String groupCommitStr = request.getHeader("group_commit");
+        if (groupCommitStr != null && groupCommitStr.equals("async_mode")) {
+            groupCommit = true;
+            try {
+                if (isGroupCommitBlock(db, table)) {
+                    String msg = "insert table " + table + " is blocked on schema change";
+                    return new RestBaseResult(msg);
+                }
+            } catch (Exception e) {
+                LOG.info("exception:" + e);
+                return new RestBaseResult(e.getMessage());
+            }
+        }
         if (needRedirect(request.getScheme())) {
             return redirectToHttps(request);
         }
@@ -105,7 +122,15 @@ public class LoadAction extends RestBaseController {
             }
         }
 
-        return executeWithoutPassword(request, response, db, table, true);
+        return executeWithoutPassword(request, response, db, table, true, groupCommit);
+    }
+
+    private boolean isGroupCommitBlock(String db, String table) throws TException {
+        String fullDbName = getFullDbName(db);
+        Database dbObj = Env.getCurrentInternalCatalog()
+                .getDbOrException(fullDbName, s -> new TException("database is invalid for dbName: " + s));
+        Table tblObj = dbObj.getTableOrException(table, s -> new TException("table is invalid: " + s));
+        return Env.getCurrentEnv().getGroupCommitManager().isBlock(tblObj.getId());
     }
 
     @RequestMapping(path = "/api/{" + DB_KEY + "}/_stream_load_2pc", method = RequestMethod.PUT)
@@ -136,7 +161,7 @@ public class LoadAction extends RestBaseController {
     // Same as Multi load, to be compatible with http v1's response body,
     // we return error by using RestBaseResult.
     private Object executeWithoutPassword(HttpServletRequest request,
-                                          HttpServletResponse response, String db, String table, boolean isStreamLoad) {
+            HttpServletResponse response, String db, String table, boolean isStreamLoad, boolean groupCommit) {
         try {
             String dbName = db;
             String tableName = table;
@@ -198,7 +223,7 @@ public class LoadAction extends RestBaseController {
                     LOG.info("host header {}", reqHostStr);
                     redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr);
                 } else {
-                    redirectAddr = selectRedirectBackend(clusterName);
+                    redirectAddr = selectRedirectBackend(clusterName, groupCommit);
                 }
             }
 
@@ -245,7 +270,7 @@ public class LoadAction extends RestBaseController {
                 LOG.info("host header {}", reqHostStr);
                 redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr);
             } else {
-                redirectAddr = selectRedirectBackend(clusterName);
+                redirectAddr = selectRedirectBackend(clusterName, false);
             }
 
             LOG.info("redirect stream load 2PC action to destination={}, db: {}, txn: {}, operation: {}",
@@ -279,18 +304,33 @@ public class LoadAction extends RestBaseController {
         return "";
     }
 
-    private TNetworkAddress selectRedirectBackend(String clusterName) throws LoadException {
+    private TNetworkAddress selectRedirectBackend(String clusterName, boolean groupCommit) throws LoadException {
+        Backend backend = null;
         String qualifiedUser = ConnectContext.get().getQualifiedUser();
         Set<Tag> userTags = Env.getCurrentEnv().getAuth().getResourceTags(qualifiedUser);
         BeSelectionPolicy policy = new BeSelectionPolicy.Builder()
                 .addTags(userTags)
                 .needLoadAvailable().build();
-        List<Long> backendIds = Env.getCurrentSystemInfo().selectBackendIdsByPolicy(policy, 1);
+        List<Long> backendIds;
+        if (groupCommit) {
+            backendIds = Env.getCurrentSystemInfo().selectBackendIdsByPolicy(policy, -1);
+        } else {
+            backendIds = Env.getCurrentSystemInfo().selectBackendIdsByPolicy(policy, 1);
+        }
         if (backendIds.isEmpty()) {
             throw new LoadException(SystemInfoService.NO_BACKEND_LOAD_AVAILABLE_MSG + ", policy: " + policy);
         }
-
-        Backend backend = Env.getCurrentSystemInfo().getBackend(backendIds.get(0));
+        if (groupCommit) {
+            for (Long backendId : backendIds) {
+                Backend candidateBe = Env.getCurrentSystemInfo().getBackend(backendId);
+                if (!candidateBe.isDecommissioned()) {
+                    backend = candidateBe;
+                    break;
+                }
+            }
+        } else {
+            backend = Env.getCurrentSystemInfo().getBackend(backendIds.get(0));
+        }
         if (backend == null) {
             throw new LoadException(SystemInfoService.NO_BACKEND_LOAD_AVAILABLE_MSG + ", policy: " + policy);
         }
@@ -477,7 +517,7 @@ public class LoadAction extends RestBaseController {
                 return new RestBaseResult("No label selected.");
             }
 
-            TNetworkAddress redirectAddr = selectRedirectBackend(clusterName);
+            TNetworkAddress redirectAddr = selectRedirectBackend(clusterName, false);
 
             LOG.info("Redirect load action with auth token to destination={},"
                         + "stream: {}, db: {}, tbl: {}, label: {}",

@@ -1844,6 +1844,24 @@ void PInternalServiceImpl::group_commit_insert(google::protobuf::RpcController* 
         offer_failed(response, done, _light_work_pool);
         return;
     }
-};
+}
+
+void PInternalServiceImpl::get_wal_queue_size(google::protobuf::RpcController* controller,
+                                              const PGetWalQueueSizeRequest* request,
+                                              PGetWalQueueSizeResponse* response,
+                                              google::protobuf::Closure* done) {
+    bool ret = _light_work_pool.try_offer([this, request, response, done]() {
+        brpc::ClosureGuard closure_guard(done);
+        Status st = Status::OK();
+        auto table_id = request->table_id();
+        auto count = _exec_env->wal_mgr()->get_wal_queue_size(table_id);
+        response->set_size(count);
+        response->mutable_status()->set_status_code(st.code());
+    });
+    if (!ret) {
+        offer_failed(response, done, _light_work_pool);
+        return;
+    }
+}
 
 } // namespace doris
