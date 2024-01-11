@@ -28,7 +28,9 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.UserException;
 import org.apache.doris.proto.InternalService;
 import org.apache.doris.proto.InternalService.PGroupCommitInsertRequest;
@@ -55,6 +57,7 @@ import com.google.common.base.Preconditions;
 import com.google.protobuf.ByteString;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.parquet.Strings;
 import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 
@@ -63,6 +66,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
@@ -129,27 +133,7 @@ public class GroupCommitPlanner {
     public PGroupCommitInsertResponse executeGroupCommitInsert(ConnectContext ctx,
             List<InternalService.PDataRow> rows)
             throws DdlException, RpcException, ExecutionException, InterruptedException {
-        backend = ctx.getInsertGroupCommit(this.table.getId());
-        if (backend == null || !backend.isAlive() || backend.isDecommissioned()) {
-            List<Long> allBackendIds = Env.getCurrentSystemInfo().getAllBackendIds(true);
-            if (allBackendIds.isEmpty()) {
-                throw new DdlException("No alive backend");
-            }
-            Collections.shuffle(allBackendIds);
-            boolean find = false;
-            for (Long beId : allBackendIds) {
-                backend = Env.getCurrentSystemInfo().getBackend(beId);
-                if (!backend.isDecommissioned()) {
-                    ctx.setInsertGroupCommit(this.table.getId(), backend);
-                    find = true;
-                    LOG.debug("choose new be {}", backend.getId());
-                    break;
-                }
-            }
-            if (!find) {
-                throw new DdlException("No suitable backend");
-            }
-        }
+        selectBackend(ctx);
         PGroupCommitInsertRequest request = PGroupCommitInsertRequest.newBuilder()
                 .setDbId(db.getId())
                 .setTableId(table.getId())
@@ -231,6 +215,61 @@ public class GroupCommitPlanner {
             rows.add(data);
         }
         return rows;
+    }
+
+    private void selectBackend(ConnectContext ctx) throws DdlException {
+        backend = ctx.getInsertGroupCommit(this.table.getId());
+        if (Config.isCloudMode()) {
+            if (backend == null || !backend.isAlive() || backend.isDecommissioned() || !backend.getCloudClusterName()
+                    .equals(ctx.getCloudCluster())) {
+                // get cloud cluster name
+                String cluster = ctx.getCloudCluster();
+                if (Strings.isNullOrEmpty(cluster)) {
+                    ctx.setCloudCluster();
+                    if (ctx.getState().getErrorCode() == ErrorCode.ERR_NO_CLUSTER_ERROR) {
+                        throw new DdlException(ctx.getState().getErrorMessage());
+                    }
+                    cluster = ctx.getCloudCluster();
+                }
+                if (backend != null && backend.getCloudClusterName().equals(ctx.getCloudCluster())) {
+                    return;
+                }
+                // select be
+                List<Backend> backends = Env.getCurrentSystemInfo().getCloudIdToBackend(cluster).entrySet().stream()
+                        .map(Entry::getValue).collect(Collectors.toList());
+                Collections.shuffle(backends);
+                for (Backend backend : backends) {
+                    if (backend.isActive() && !backend.isDecommissioned()) {
+                        this.backend = backend;
+                        ctx.setInsertGroupCommit(this.table.getId(), backend);
+                        LOG.debug("choose new be {}", backend.getId());
+                        return;
+                    }
+                }
+                throw new DdlException("No suitable backend for cloud cluster=" + cluster);
+            }
+        } else {
+            if (backend == null || !backend.isAlive() || backend.isDecommissioned()) {
+                List<Long> allBackendIds = Env.getCurrentSystemInfo().getAllBackendIds(true);
+                if (allBackendIds.isEmpty()) {
+                    throw new DdlException("No alive backend");
+                }
+                Collections.shuffle(allBackendIds);
+                boolean find = false;
+                for (Long beId : allBackendIds) {
+                    backend = Env.getCurrentSystemInfo().getBackend(beId);
+                    if (!backend.isDecommissioned()) {
+                        ctx.setInsertGroupCommit(this.table.getId(), backend);
+                        find = true;
+                        LOG.debug("choose new be {}", backend.getId());
+                        break;
+                    }
+                }
+                if (!find) {
+                    throw new DdlException("No suitable backend");
+                }
+            }
+        }
     }
 }
 
