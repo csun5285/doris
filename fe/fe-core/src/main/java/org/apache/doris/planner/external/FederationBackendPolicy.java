@@ -30,7 +30,13 @@ import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TScanRangeLocations;
 
 import com.google.common.base.Preconditions;
+<<<<<<< HEAD
 import com.google.common.base.Strings;
+=======
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+>>>>>>> selectdb-doris-2.0.4-b01
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -47,7 +53,9 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 public class FederationBackendPolicy {
@@ -59,6 +67,53 @@ public class FederationBackendPolicy {
 
     private int nextBe = 0;
     private boolean initialized = false;
+
+    // Create a ConsistentHash ring may be a time-consuming operation, so we cache it.
+    private static LoadingCache<HashCacheKey, ConsistentHash<TScanRangeLocations, Backend>> consistentHashCache;
+
+    static {
+        consistentHashCache = CacheBuilder.newBuilder().maximumSize(5)
+                .build(new CacheLoader<HashCacheKey, ConsistentHash<TScanRangeLocations, Backend>>() {
+                    @Override
+                    public ConsistentHash<TScanRangeLocations, Backend> load(HashCacheKey key) {
+                        return new ConsistentHash<>(Hashing.murmur3_128(), new ScanRangeHash(),
+                                new BackendHash(), key.bes, Config.virtual_node_number);
+                    }
+                });
+    }
+
+    private static class HashCacheKey {
+        // sorted backend ids as key
+        private List<Long> beIds;
+        // backends is not part of key, just an attachment
+        private List<Backend> bes;
+
+        HashCacheKey(List<Backend> backends) {
+            this.bes = backends;
+            this.beIds = backends.stream().map(b -> b.getId()).sorted().collect(Collectors.toList());
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof HashCacheKey)) {
+                return false;
+            }
+            return Objects.equals(beIds, ((HashCacheKey) obj).beIds);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(beIds);
+        }
+
+        @Override
+        public String toString() {
+            return "HashCache{" + "beIds=" + beIds + '}';
+        }
+    }
 
     public void init() throws UserException {
         if (!initialized) {
@@ -102,8 +157,11 @@ public class FederationBackendPolicy {
             throw new UserException("No available backends");
         }
         backendMap.putAll(backends.stream().collect(Collectors.groupingBy(Backend::getHost)));
-        consistentHash = new ConsistentHash<>(Hashing.murmur3_128(), new ScanRangeHash(),
-                new BackendHash(), backends, Config.virtual_node_number);
+        try {
+            consistentHash = consistentHashCache.get(new HashCacheKey(backends));
+        } catch (ExecutionException e) {
+            throw new UserException("failed to get consistent hash", e);
+        }
     }
 
     public void cloudInit() throws UserException {
@@ -145,7 +203,7 @@ public class FederationBackendPolicy {
     }
 
     // Try to find a local BE, if not exists, use `getNextBe` instead
-    public Backend getNextLocalBe(List<String> hosts) {
+    public Backend getNextLocalBe(List<String> hosts, TScanRangeLocations scanRangeLocations) {
         List<Backend> candidateBackends = Lists.newArrayListWithCapacity(hosts.size());
         for (String host : hosts) {
             List<Backend> backends = backendMap.get(host);
@@ -155,7 +213,7 @@ public class FederationBackendPolicy {
         }
 
         return CollectionUtils.isEmpty(candidateBackends)
-                    ? getNextBe()
+                    ? getNextConsistentBe(scanRangeLocations)
                     : candidateBackends.get(random.nextInt(candidateBackends.size()));
     }
 

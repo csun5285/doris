@@ -101,6 +101,10 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
         return literalExpr;
     }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> selectdb-doris-2.0.4-b01
     public static String getStringLiteralForComplexType(Expr v) {
         if (!(v instanceof NullLiteral) && v.getType().isScalarType()
                 && (Type.getNumericTypes().contains((ScalarType) v.getActualScalarType(v.getType()))
@@ -114,6 +118,10 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
         }
     }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> selectdb-doris-2.0.4-b01
     /**
      * Init LiteralExpr's Type information
      * only use in rewrite alias function
@@ -238,6 +246,10 @@ public abstract class LiteralExpr extends Expr implements Comparable<LiteralExpr
     // method unescapes string values.
     @Override
     public abstract String getStringValue();
+
+    public String getStringValueInFe() {
+        return getStringValue();
+    }
 
     @Override
     public abstract String getStringValueForArray();

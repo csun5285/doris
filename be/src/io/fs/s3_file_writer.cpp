@@ -296,10 +296,15 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 
             // if the buffer has memory buf inside, the data would be written into memory first then S3 then file cache
             // it would be written to cache then S3 if the buffer doesn't have memory preserved
+<<<<<<< HEAD
             RETURN_IF_ERROR(
                     _pending_buf->append_data(Slice {slice.get_data(), data_size_to_append}));
             slice.remove_prefix(data_size_to_append);
             TEST_SYNC_POINT_CALLBACK("s3_file_writer::appenv_1", &_pending_buf, _cur_part_num);
+=======
+            RETURN_IF_ERROR(_pending_buf->append_data(
+                    Slice {data[i].get_data() + pos, data_size_to_append}));
+>>>>>>> selectdb-doris-2.0.4-b01
 
             // if it's the last part, it could be less than 5MB, or it must
             // satisfy that the size is larger than or euqal to 5MB

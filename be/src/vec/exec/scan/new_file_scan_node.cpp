@@ -64,6 +64,10 @@ void NewFileScanNode::set_scan_ranges(RuntimeState* state,
     parallel_inst = parallel_inst <= 0 ? 1 : parallel_inst;
     int max_scanners = config::doris_scanner_thread_pool_thread_num / parallel_inst;
     max_scanners = max_scanners == 0 ? 1 : max_scanners;
+    // For select * from table limit 10; should just use one thread.
+    if (should_run_serial()) {
+        max_scanners = 1;
+    }
     if (scan_ranges.size() <= max_scanners) {
         _scan_ranges = scan_ranges;
     } else {

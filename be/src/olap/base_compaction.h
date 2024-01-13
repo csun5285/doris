@@ -43,8 +43,11 @@ public:
     Status prepare_compact() override;
     Status execute_compact_impl() override;
 
+<<<<<<< HEAD
     const std::vector<RowsetSharedPtr>& get_input_rowsets() { return _input_rowsets; }
 
+=======
+>>>>>>> selectdb-doris-2.0.4-b01
 protected:
     Status pick_rowsets_to_compact() override;
     std::string compaction_name() const override { return "base compaction"; }

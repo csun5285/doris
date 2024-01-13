@@ -225,6 +225,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_timezone_shanghai "select * from ${tableName1} order by k00,k01"
@@ -266,6 +267,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_timezone_Abidjan "select * from ${tableName1} order by k00,k01"
@@ -310,6 +312,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_strict_mode "select * from ${tableName1} order by k00,k01"
@@ -353,6 +356,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_max_filter_ratio "select * from ${tableName1} order by k00,k01"
@@ -424,6 +428,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             qt_sql_squence "select * from stream_load_uniq_tbl_basic_sequence order by k00,k01"
     } finally {
         sql new File("""${context.file.parent}/ddl/uniq_tbl_basic_drop_sequence.sql""").text
@@ -456,6 +461,7 @@ suite("test_stream_load_properties", "p0") {
                 assertEquals(0, json.NumberUnselectedRows)
             }
         }
+        sql "sync"
 
         streamLoad {
             table "stream_load_" + tableName
@@ -478,6 +484,7 @@ suite("test_stream_load_properties", "p0") {
                 assertEquals(0, json.NumberUnselectedRows)
             }
         }
+        sql "sync"
         def tableName1 = "stream_load_" + tableName
         qt_sql_merge_type "select * from ${tableName1} order by k00,k01"                  
     } finally {
@@ -556,6 +563,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
 
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
@@ -565,6 +573,7 @@ suite("test_stream_load_properties", "p0") {
             }
 
             do_streamload_2pc.call(txnId, "abort", tableName1)
+            sql "sync"
 
             if (i <= 3) {
                 qt_sql_2pc_abort "select * from ${tableName1} order by k00,k01"
@@ -594,8 +603,10 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
 
             do_streamload_2pc.call(txnId, "commit", tableName1)
+            sql "sync"
 
             def count = 0
             while (true) {
@@ -710,6 +721,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_skip_lines "select * from ${tableName1} order by k00,k01"
@@ -829,6 +841,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_json_strip_outer_array "select * from ${tableName1} order by k00,k01"
@@ -875,6 +888,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_json_jsonpath "select * from ${tableName1} order by k00,k01"
@@ -920,6 +934,7 @@ suite("test_stream_load_properties", "p0") {
                     assertEquals(0, json.NumberUnselectedRows)
                 }
             }
+            sql "sync"
             def tableName1 =  "stream_load_" + tableName
             if (i <= 3) {
                 qt_sql_json_read_by_line "select * from ${tableName1} order by k00,k01"

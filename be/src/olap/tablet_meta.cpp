@@ -39,6 +39,7 @@
 #include "olap/tablet.h"
 #include "olap/tablet_meta_manager.h"
 #include "olap/utils.h"
+#include "util/debug_points.h"
 #include "util/string_util.h"
 #include "util/time.h"
 #include "util/uid_util.h"
@@ -71,7 +72,8 @@ Status TabletMeta::create(const TCreateTabletReq& request, const TabletUid& tabl
             std::move(binlog_config), request.compaction_policy,
             request.time_series_compaction_goal_size_mbytes,
             request.time_series_compaction_file_count_threshold,
-            request.time_series_compaction_time_threshold_seconds);
+            request.time_series_compaction_time_threshold_seconds,
+            request.time_series_compaction_empty_rowsets_threshold);
     return Status::OK();
 }
 
@@ -91,7 +93,8 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
                        std::optional<TBinlogConfig> binlog_config, std::string compaction_policy,
                        int64_t time_series_compaction_goal_size_mbytes,
                        int64_t time_series_compaction_file_count_threshold,
-                       int64_t time_series_compaction_time_threshold_seconds)
+                       int64_t time_series_compaction_time_threshold_seconds,
+                       int64_t time_series_compaction_empty_rowsets_threshold)
         : _tablet_uid(0, 0),
           _schema(new TabletSchema),
           _delete_bitmap(new DeleteBitmap(tablet_id)) {
@@ -121,6 +124,8 @@ TabletMeta::TabletMeta(int64_t table_id, int64_t partition_id, int64_t tablet_id
             time_series_compaction_file_count_threshold);
     tablet_meta_pb.set_time_series_compaction_time_threshold_seconds(
             time_series_compaction_time_threshold_seconds);
+    tablet_meta_pb.set_time_series_compaction_empty_rowsets_threshold(
+            time_series_compaction_empty_rowsets_threshold);
     TabletSchemaPB* schema = tablet_meta_pb.mutable_schema();
     schema->set_num_short_key_columns(tablet_schema.short_key_column_count);
     schema->set_num_rows_per_row_block(config::default_num_rows_per_column_file_block);
@@ -325,10 +330,22 @@ TabletMeta::TabletMeta(const TabletMeta& b)
           _cooldown_meta_id(b._cooldown_meta_id),
           _enable_unique_key_merge_on_write(b._enable_unique_key_merge_on_write),
           _delete_bitmap(b._delete_bitmap),
+<<<<<<< HEAD
           _is_in_memory(b._is_in_memory),
           _is_persistent(b._is_persistent),
           _table_name(b._table_name),
           _binlog_config(b._binlog_config) {}
+=======
+          _binlog_config(b._binlog_config),
+          _compaction_policy(b._compaction_policy),
+          _time_series_compaction_goal_size_mbytes(b._time_series_compaction_goal_size_mbytes),
+          _time_series_compaction_file_count_threshold(
+                  b._time_series_compaction_file_count_threshold),
+          _time_series_compaction_time_threshold_seconds(
+                  b._time_series_compaction_time_threshold_seconds),
+          _time_series_compaction_empty_rowsets_threshold(
+                  b._time_series_compaction_empty_rowsets_threshold) {};
+>>>>>>> selectdb-doris-2.0.4-b01
 
 void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tcolumn,
                                           ColumnPB* column) {
@@ -476,6 +493,16 @@ Status TabletMeta::_save_meta(DataDir* data_dir) {
 Status TabletMeta::serialize(string* meta_binary) {
     TabletMetaPB tablet_meta_pb;
     to_meta_pb(&tablet_meta_pb);
+    if (tablet_meta_pb.partition_id() <= 0) {
+        LOG(WARNING) << "invalid partition id " << tablet_meta_pb.partition_id() << " tablet "
+                     << tablet_meta_pb.tablet_id();
+    }
+    DBUG_EXECUTE_IF("TabletMeta::serialize::zero_partition_id", {
+        long partition_id = tablet_meta_pb.partition_id();
+        tablet_meta_pb.set_partition_id(0);
+        LOG(WARNING) << "set debug point TabletMeta::serialize::zero_partition_id old="
+                     << partition_id << " new=" << tablet_meta_pb.DebugString();
+    });
     bool serialize_success = tablet_meta_pb.SerializeToString(meta_binary);
     if (!serialize_success) {
         LOG(FATAL) << "failed to serialize meta " << full_name();
@@ -621,6 +648,8 @@ void TabletMeta::init_from_pb(const TabletMetaPB& tablet_meta_pb) {
             tablet_meta_pb.time_series_compaction_file_count_threshold();
     _time_series_compaction_time_threshold_seconds =
             tablet_meta_pb.time_series_compaction_time_threshold_seconds();
+    _time_series_compaction_empty_rowsets_threshold =
+            tablet_meta_pb.time_series_compaction_empty_rowsets_threshold();
 }
 
 void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
@@ -709,6 +738,8 @@ void TabletMeta::to_meta_pb(TabletMetaPB* tablet_meta_pb) {
             time_series_compaction_file_count_threshold());
     tablet_meta_pb->set_time_series_compaction_time_threshold_seconds(
             time_series_compaction_time_threshold_seconds());
+    tablet_meta_pb->set_time_series_compaction_empty_rowsets_threshold(
+            time_series_compaction_empty_rowsets_threshold());
 }
 
 void TabletMeta::cloud_add_rs_metas(const std::vector<RowsetSharedPtr>& to_add) {
@@ -943,6 +974,9 @@ bool operator==(const TabletMeta& a, const TabletMeta& b) {
         return false;
     if (a._time_series_compaction_time_threshold_seconds !=
         b._time_series_compaction_time_threshold_seconds)
+        return false;
+    if (a._time_series_compaction_empty_rowsets_threshold !=
+        b._time_series_compaction_empty_rowsets_threshold)
         return false;
     return true;
 }

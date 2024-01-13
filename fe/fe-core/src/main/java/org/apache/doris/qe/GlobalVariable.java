@@ -50,8 +50,13 @@ public final class GlobalVariable {
     public static final long VALIDATE_PASSWORD_POLICY_STRONG = 2;
 
     @VariableMgr.VarAttr(name = VERSION_COMMENT, flag = VariableMgr.READ_ONLY)
+<<<<<<< HEAD
     public static String versionComment = "SelectDB Core version: " + Version.DORIS_BUILD_VERSION
                                             + " (based on Apache Doris " + Version.BASE_BUILD_VERSION + ')';
+=======
+    public static String versionComment =
+            Version.DORIS_BUILD_VERSION + "-" + Version.DORIS_BUILD_SHORT_HASH;
+>>>>>>> selectdb-doris-2.0.4-b01
 
     @VariableMgr.VarAttr(name = VERSION, flag = VariableMgr.READ_ONLY)
     public static String version = MysqlHandshakePacket.SERVER_VERSION;

@@ -73,10 +73,15 @@ public class StatementSubmitter {
     private static final String JDBC_DRIVER = "org.mariadb.jdbc.Driver";
     private static final String DB_URL_PATTERN = "jdbc:mariadb://127.0.0.1:%d/%s";
 
+<<<<<<< HEAD
     private static final String[] copyResult = {"id", "state", "type", "msg", "loadedRows", "filterRows",
             "unselectRows", "url"};
 
     private ThreadPoolExecutor executor = ThreadPoolManager.newDaemonCacheThreadPool(2, "SQL submitter", true);
+=======
+    private ThreadPoolExecutor executor = ThreadPoolManager.newDaemonCacheThreadPoolThrowException(
+                        Config.http_sql_submitter_max_worker_threads, "SQL submitter", true);
+>>>>>>> selectdb-doris-2.0.4-b01
 
     private ThreadPoolExecutor executorBlockPolicy = ThreadPoolManager.newDaemonCacheThreadPoolUseBlockedPolicy(
             Config.statement_submitter_threads_num, "SQL submitter with block policy", true);
