@@ -52,6 +52,7 @@ Status FileCacheFactory::create_file_cache(const std::string& cache_base_path,
     if (!exists) {
         RETURN_IF_ERROR(fs->create_directory(cache_base_path));
     } else if (config::clear_file_cache) {
+        LOG(INFO) << "[FileCache] clear file cache path: " << cache_base_path;
         RETURN_IF_ERROR(fs->delete_directory(cache_base_path));
         RETURN_IF_ERROR(fs->create_directory(cache_base_path));
     }
