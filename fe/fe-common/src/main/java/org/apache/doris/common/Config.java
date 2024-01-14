@@ -2597,8 +2597,6 @@ public class Config extends ConfigBase {
             "Whether to enable the function of getting log files through http interface"})
     public static boolean enable_get_log_file_api = false;
 
-<<<<<<< HEAD
-=======
     @ConfField(mutable = false, masterOnly = false, description = {
         "http请求处理/api/query中sql任务的最大线程池。",
         "The max number work threads of http sql submitter."
@@ -2610,5 +2608,5 @@ public class Config extends ConfigBase {
         "The max number work threads of http upload submitter."
     })
     public static int http_load_submitter_max_worker_threads = 2;
->>>>>>> selectdb-doris-2.0.4-b01
+
 }

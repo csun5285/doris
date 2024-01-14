@@ -374,8 +374,6 @@ elif [[ "${HYPERSCAN_SOURCE}" == "vectorscan-vectorscan-5.4.7" ]]; then
 fi
 echo "Finished patching ${HYPERSCAN_SOURCE}"
 
-<<<<<<< HEAD
-=======
 cd "${TP_SOURCE_DIR}/${AWS_SDK_SOURCE}"
 if [[ ! -f "${PATCHED_MARK}" ]]; then
     if [[ "${AWS_SDK_SOURCE}" == "aws-sdk-cpp-1.11.119" ]]; then
@@ -393,7 +391,6 @@ fi
 cd -
 echo "Finished patching ${AWS_SDK_SOURCE}"
 
->>>>>>> selectdb-doris-2.0.4-b01
 # patch jemalloc, change simdjson::dom::element_type::BOOL to BOOLEAN to avoid conflict with odbc macro BOOL
 if [[ "${SIMDJSON_SOURCE}" = "simdjson-3.0.1" ]]; then
     cd "${TP_SOURCE_DIR}/${SIMDJSON_SOURCE}"
@@ -438,18 +435,6 @@ if [[ "${BRPC_SOURCE}" == 'brpc-1.4.0' ]]; then
     cd -
 fi
 echo "Finished patching ${BRPC_SOURCE}"
-
-# patch aws sdk
-if [[ "${AWS_SDK_SOURCE}" = "aws-sdk-cpp-1.11.119" ]]; then
-    cd "${TP_SOURCE_DIR}/${AWS_SDK_SOURCE}"
-    if [[ ! -f "${PATCHED_MARK}" ]]; then
-        patch -p1 <"${TP_PATCH_DIR}/aws-sdk-cpp-1.11.119.patch"
-        touch "${PATCHED_MARK}"
-    fi
-    cd -
-fi
-echo "Finished patching ${AWS_SDK_SOURCE}"
-
 
 # patch ali sdk
 if [[ "${ALI_SDK_SOURCE}" = "aliyun-openapi-cpp-sdk-1.36.1586" ]]; then

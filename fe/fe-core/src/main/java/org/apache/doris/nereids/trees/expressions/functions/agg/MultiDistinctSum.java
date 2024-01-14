@@ -73,14 +73,11 @@ public class MultiDistinctSum extends NullableAggregateFunction implements Unary
     }
 
     @Override
-<<<<<<< HEAD
-=======
     public NullableAggregateFunction withAlwaysNullable(boolean alwaysNullable) {
         return new MultiDistinctSum(distinct, alwaysNullable, children.get(0));
     }
 
     @Override
->>>>>>> selectdb-doris-2.0.4-b01
     public MultiDistinctSum withDistinctAndChildren(boolean distinct, List<Expression> children) {
         Preconditions.checkArgument(children.size() == 1);
         return new MultiDistinctSum(distinct, children.get(0));

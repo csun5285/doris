@@ -130,10 +130,8 @@ Status NewOlapScanNode::_init_profile() {
     _block_init_seek_timer = ADD_TIMER(_segment_profile, "BlockInitSeekTime");
     _block_init_seek_counter = ADD_COUNTER(_segment_profile, "BlockInitSeekCount", TUnit::UNIT);
     _block_conditions_filtered_timer = ADD_TIMER(_segment_profile, "BlockConditionsFilteredTime");
-<<<<<<< HEAD
     _block_init_iters_timer = ADD_TIMER(_segment_profile, "BlockInitItersTime");
     _block_init_prefetch_timer = ADD_TIMER(_segment_profile, "BlockInitPrefetchTime");
-=======
     _block_conditions_filtered_bf_timer =
             ADD_TIMER(_segment_profile, "BlockConditionsFilteredBloomFilterTime");
     _block_conditions_filtered_zonemap_timer =
@@ -142,7 +140,6 @@ Status NewOlapScanNode::_init_profile() {
             ADD_TIMER(_segment_profile, "BlockConditionsFilteredZonemapRuntimePredicateTime");
     _block_conditions_filtered_dict_timer =
             ADD_TIMER(_segment_profile, "BlockConditionsFilteredDictTime");
->>>>>>> selectdb-doris-2.0.4-b01
 
     _rows_vec_cond_filtered_counter =
             ADD_COUNTER(_segment_profile, "RowsVectorPredFiltered", TUnit::UNIT);

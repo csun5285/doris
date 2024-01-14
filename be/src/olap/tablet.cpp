@@ -79,11 +79,8 @@
 #include "io/fs/file_writer.h"
 #include "io/fs/path.h"
 #include "io/fs/remote_file_system.h"
-<<<<<<< HEAD
 #include "io/fs/s3_file_system.h"
-=======
 #include "io/io_common.h"
->>>>>>> selectdb-doris-2.0.4-b01
 #include "olap/base_compaction.h"
 #include "olap/base_tablet.h"
 #include "olap/binlog.h"
@@ -158,10 +155,9 @@ using io::FileSystemSPtr;
 
 namespace {
 
-<<<<<<< HEAD
 constexpr std::chrono::seconds TRACE_TABLET_LOCK_THRESHOLD = 1s;
 static constexpr int COMPACTION_DELETE_BITMAP_LOCK_ID = -1;
-=======
+
 bvar::LatencyRecorder g_tablet_lookup_rowkey_latency("doris_pk", "tablet_lookup_rowkey");
 bvar::LatencyRecorder g_tablet_commit_phase_update_delete_bitmap_latency(
         "doris_pk", "commit_phase_update_delete_bitmap");
@@ -169,7 +165,6 @@ bvar::LatencyRecorder g_tablet_update_delete_bitmap_latency("doris_pk", "update_
 bvar::Adder<uint64_t> g_tablet_pk_not_found("doris_pk", "lookup_not_found");
 bvar::PerSecond<bvar::Adder<uint64_t>> g_tablet_pk_not_found_per_second(
         "doris_pk", "lookup_not_found_per_second", &g_tablet_pk_not_found, 60);
->>>>>>> selectdb-doris-2.0.4-b01
 
 DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_bytes, MetricUnit::BYTES);
 DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_finish_count, MetricUnit::OPERATIONS);
@@ -2221,17 +2216,13 @@ void Tablet::generate_tablet_meta_copy_unlocked(TabletMetaSharedPtr new_tablet_m
 }
 
 Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compaction_type,
-<<<<<<< HEAD
-                                                        TabletSharedPtr tablet, int64_t* permits) {
-#ifdef CLOUD_MODE
-    CHECK(false) << "Should not call prepare_compaction_and_calculate_permits in CLOUD MODE";
-#else
-    std::vector<RowsetSharedPtr> compaction_rowsets;
-=======
                                                         const TabletSharedPtr& tablet,
                                                         std::shared_ptr<Compaction>& compaction,
                                                         int64_t& permits) {
->>>>>>> selectdb-doris-2.0.4-b01
+#ifdef CLOUD_MODE
+    CHECK(false) << "Should not call prepare_compaction_and_calculate_permits in CLOUD MODE";
+#endif // CLOUD_MODE
+    std::vector<RowsetSharedPtr> compaction_rowsets;
     if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
         MonotonicStopWatch watch;
         watch.start();
@@ -2306,19 +2297,12 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
             return Status::OK();
         }
     }
-<<<<<<< HEAD
-    *permits = 0;
-    for (auto& rowset : compaction_rowsets) {
-        *permits += rowset->rowset_meta()->get_compaction_score();
-=======
 
     permits = 0;
     for (auto&& rowset : compaction->input_rowsets()) {
         permits += rowset->rowset_meta()->get_compaction_score();
->>>>>>> selectdb-doris-2.0.4-b01
     }
     return Status::OK();
-#endif
 }
 
 <<<<<<< HEAD

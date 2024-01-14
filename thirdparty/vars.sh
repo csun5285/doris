@@ -336,17 +336,10 @@ BOOTSTRAP_TABLE_CSS_FILE="bootstrap-table.min.css"
 BOOTSTRAP_TABLE_CSS_MD5SUM="23389d4456da412e36bae30c469a766a"
 
 # aws sdk
-<<<<<<< HEAD
 AWS_SDK_DOWNLOAD="http://doris-build-1308700295.cos.ap-beijing.myqcloud.com/thirdparty/aws-sdk-cpp-1.11.119.tar.gz"
 AWS_SDK_NAME="aws-sdk-cpp-1.11.119.tar.gz"
 AWS_SDK_SOURCE="aws-sdk-cpp-1.11.119"
 AWS_SDK_MD5SUM="11ef56dc3bb8a4d020e42b6dd882ca4b"
-=======
-AWS_SDK_DOWNLOAD="https://github.com/aws/aws-sdk-cpp/archive/refs/tags/1.11.119.tar.gz"
-AWS_SDK_NAME="aws-sdk-cpp-1.11.119.tar.gz"
-AWS_SDK_SOURCE="aws-sdk-cpp-1.11.119"
-AWS_SDK_MD5SUM="3cd8bd51d39dc207a243a2074d11f439"
->>>>>>> selectdb-doris-2.0.4-b01
 
 # tsan_header
 TSAN_HEADER_DOWNLOAD="https://gcc.gnu.org/git/?p=gcc.git;a=blob_plain;f=libsanitizer/include/sanitizer/tsan_interface_atomic.h;hb=refs/heads/releases/gcc-7"

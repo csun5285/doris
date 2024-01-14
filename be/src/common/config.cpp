@@ -1073,13 +1073,8 @@ DEFINE_mInt64(s3_write_buffer_size, "5242880");
 DEFINE_mInt32(s3_task_check_interval, "60");
 DEFINE_mBool(enable_file_cache_block_prefetch, "false")
 
-<<<<<<< HEAD
-        //disable shrink memory by default
-        DEFINE_Bool(enable_shrink_memory, "false");
-=======
 //disable shrink memory by default
 DEFINE_mBool(enable_shrink_memory, "false");
->>>>>>> selectdb-doris-2.0.4-b01
 DEFINE_mInt32(schema_cache_capacity, "1024");
 DEFINE_mInt32(schema_cache_sweep_time_sec, "100");
 
@@ -1264,20 +1259,14 @@ DEFINE_Int32(ingest_binlog_work_pool_size, "-1");
 // Download binlog rate limit, unit is KB/s, 0 means no limit
 DEFINE_Int32(download_binlog_rate_limit_kbs, "0");
 
-DEFINE_mInt32(buffered_reader_read_timeout_ms, "20000");
-
 DEFINE_Bool(enable_snapshot_action, "false");
 
-<<<<<<< HEAD
 DEFINE_mBool(prioritize_query_perf_in_compaction, "false");
-=======
-DEFINE_mInt32(s3_writer_buffer_allocation_timeout_second, "60");
 
 DEFINE_mBool(enable_column_type_check, "true");
 
 // Tolerance for the number of partition id 0 in rowset, default 0
 DEFINE_Int32(ignore_invalid_partition_id_rowset_num, "0");
->>>>>>> selectdb-doris-2.0.4-b01
 
 // clang-format off
 #ifdef BE_TEST

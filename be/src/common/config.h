@@ -1277,22 +1277,15 @@ DECLARE_Int32(ingest_binlog_work_pool_size);
 // Download binlog rate limit, unit is KB/s
 DECLARE_Int32(download_binlog_rate_limit_kbs);
 
-DECLARE_mInt32(buffered_reader_read_timeout_ms);
-
 // whether to enable /api/snapshot api
 DECLARE_Bool(enable_snapshot_action);
 
-<<<<<<< HEAD
 DECLARE_mBool(prioritize_query_perf_in_compaction);
-=======
-// The timeout config for S3 write buffer allocation
-DECLARE_mInt32(s3_writer_buffer_allocation_timeout_second);
 
 DECLARE_mBool(enable_column_type_check);
 
 // Tolerance for the number of partition id 0 in rowset, default 0
 DECLARE_Int32(ignore_invalid_partition_id_rowset_num);
->>>>>>> selectdb-doris-2.0.4-b01
 
 #ifdef BE_TEST
 // test s3

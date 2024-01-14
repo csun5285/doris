@@ -322,7 +322,6 @@ message TabletMetaPB {
     optional DeleteBitmapPB delete_bitmap = 23;
     // Use primary key index to speed up tabel unique key model
     optional bool enable_unique_key_merge_on_write = 24 [default = false];
-<<<<<<< HEAD
     optional int64 index_id = 25;
     optional bool is_in_memory = 26 [default=false];
     optional bool is_persistent = 27 [default=false];
@@ -333,21 +332,12 @@ message TabletMetaPB {
     optional int64 time_series_compaction_goal_size_mbytes = 32 [default = 1024];
     optional int64 time_series_compaction_file_count_threshold = 33 [default = 2000];
     optional int64 time_series_compaction_time_threshold_seconds = 34 [default = 3600];
+    optional int64 time_series_compaction_empty_rowsets_threshold = 35 [default = 5];
     
     // Use for selectdb-cloud
     optional string table_name = 101;
     optional int64 ttl_seconds = 102;
     optional int32 schema_version = 103; // index_id, schema_version -> schema
-=======
-    optional int64 storage_policy_id = 25;
-    optional PUniqueId cooldown_meta_id = 26;
-    optional BinlogConfigPB binlog_config = 27;
-    optional string compaction_policy = 28 [default = "size_based"];
-    optional int64 time_series_compaction_goal_size_mbytes = 29 [default = 1024];
-    optional int64 time_series_compaction_file_count_threshold = 30 [default = 2000];
-    optional int64 time_series_compaction_time_threshold_seconds = 31 [default = 3600];
-    optional int64 time_series_compaction_empty_rowsets_threshold = 32 [default = 5];
->>>>>>> selectdb-doris-2.0.4-b01
 }
 
 message OLAPRawDeltaHeaderMessage {

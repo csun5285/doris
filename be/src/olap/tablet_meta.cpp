@@ -330,12 +330,9 @@ TabletMeta::TabletMeta(const TabletMeta& b)
           _cooldown_meta_id(b._cooldown_meta_id),
           _enable_unique_key_merge_on_write(b._enable_unique_key_merge_on_write),
           _delete_bitmap(b._delete_bitmap),
-<<<<<<< HEAD
           _is_in_memory(b._is_in_memory),
           _is_persistent(b._is_persistent),
           _table_name(b._table_name),
-          _binlog_config(b._binlog_config) {}
-=======
           _binlog_config(b._binlog_config),
           _compaction_policy(b._compaction_policy),
           _time_series_compaction_goal_size_mbytes(b._time_series_compaction_goal_size_mbytes),
@@ -345,7 +342,6 @@ TabletMeta::TabletMeta(const TabletMeta& b)
                   b._time_series_compaction_time_threshold_seconds),
           _time_series_compaction_empty_rowsets_threshold(
                   b._time_series_compaction_empty_rowsets_threshold) {};
->>>>>>> selectdb-doris-2.0.4-b01
 
 void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tcolumn,
                                           ColumnPB* column) {

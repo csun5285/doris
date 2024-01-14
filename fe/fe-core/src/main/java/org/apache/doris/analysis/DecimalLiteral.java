@@ -272,11 +272,6 @@ public class DecimalLiteral extends LiteralExpr {
     }
 
     @Override
-    public String getStringValueInFe() {
-        return value.toPlainString();
-    }
-
-    @Override
     public String getStringValueForArray() {
         return "\"" + getStringValue() + "\"";
     }

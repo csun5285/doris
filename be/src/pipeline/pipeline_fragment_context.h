@@ -122,17 +122,13 @@ public:
         return _task_group_entity;
     }
 
-<<<<<<< HEAD
     bool is_group_commit() { return _group_commit; }
 
-private:
-=======
     void set_query_statistics(std::shared_ptr<QueryStatistics> query_statistics) {
         _query_statistics = query_statistics;
     }
 
 protected:
->>>>>>> selectdb-doris-2.0.4-b01
     Status _create_sink(int sender_id, const TDataSink& t_data_sink, RuntimeState* state);
     Status _build_pipelines(ExecNode*, PipelinePtr);
     Status _build_pipeline_tasks(const doris::TPipelineFragmentParams& request);

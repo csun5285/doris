@@ -77,30 +77,16 @@ class IOContext {
 public:
     IOContext() = default;
 
-<<<<<<< HEAD
-=======
-    IOContext(const TUniqueId* query_id, FileCacheStatistics* stats, bool use_disposable_cache,
-              bool read_segment_index)
-            : query_id(query_id),
-              is_disposable(use_disposable_cache),
-              read_segment_index(read_segment_index),
-              should_stop(false),
-              file_cache_stats(stats) {}
->>>>>>> selectdb-doris-2.0.4-b01
     ReaderType reader_type = ReaderType::UNKNOWN;
     const TUniqueId* query_id = nullptr;
     bool is_disposable = false;
     bool read_segment_index = false;
-<<<<<<< HEAD
     uint64_t expiration_time = 0;
     bool disable_file_cache = false;
     FileCacheStatistics* file_cache_stats = nullptr; // Ref
     AsyncIOStatistics* async_io_stats = nullptr;     // Ref
-=======
     // stop reader when reading, used in some interrupted operations
     bool should_stop = false;
-    FileCacheStatistics* file_cache_stats = nullptr;
->>>>>>> selectdb-doris-2.0.4-b01
 };
 
 } // namespace io

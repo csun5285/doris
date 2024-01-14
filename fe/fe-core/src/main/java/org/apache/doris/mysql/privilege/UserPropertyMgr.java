@@ -121,7 +121,6 @@ public class UserPropertyMgr implements Writable {
         return existProperty.getMaxQueryInstances();
     }
 
-<<<<<<< HEAD
     public String getDefaultCloudCluster(String user) throws DdlException {
         UserProperty property = propertyMap.get(user);
         if (property == null) {
@@ -144,7 +143,8 @@ public class UserPropertyMgr implements Writable {
                 }
         );
         return ret;
-=======
+    }
+
     public int getParallelFragmentExecInstanceNum(String qualifiedUser) {
         UserProperty existProperty = propertyMap.get(qualifiedUser);
         existProperty = getLdapPropertyIfNull(qualifiedUser, existProperty);
@@ -152,7 +152,6 @@ public class UserPropertyMgr implements Writable {
             return -1;
         }
         return existProperty.getParallelFragmentExecInstanceNum();
->>>>>>> selectdb-doris-2.0.4-b01
     }
 
     public Set<Tag> getResourceTags(String qualifiedUser) {

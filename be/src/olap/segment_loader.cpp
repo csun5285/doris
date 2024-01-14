@@ -79,11 +79,7 @@ Status SegmentLoader::load_segments(const BetaRowsetSharedPtr& rowset,
     // Todo: How to handle the space size of lazy open segments in cache
     RETURN_IF_ERROR(rowset->load_segments(&segments, is_lazy_open, disable_file_cache));
 
-<<<<<<< HEAD
-    if (use_cache && !disable_file_cache) {
-=======
-    if (use_cache && !config::disable_segment_cache) {
->>>>>>> selectdb-doris-2.0.4-b01
+    if (use_cache && !disable_file_cache && !config::disable_segment_cache) {
         // memory of SegmentCache::CacheValue will be handled by SegmentCache
         SegmentCache::CacheValue* cache_value = new SegmentCache::CacheValue();
         cache_value->segments = std::move(segments);

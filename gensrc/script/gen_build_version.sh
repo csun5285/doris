@@ -27,20 +27,12 @@
 
 set -eo pipefail
 
-<<<<<<< HEAD
 # selectdb version
 build_version_prefix="selectdb"
 build_version_major=0
 build_version_minor=0
 build_version_patch=0
 build_version_rc_version="dev"
-=======
-build_version_prefix="selectdb-doris"
-build_version_major=2
-build_version_minor=0
-build_version_patch=4
-build_version_rc_version="b01"
->>>>>>> selectdb-doris-2.0.4-b01
 
 build_version="${build_version_major}.${build_version_minor}.${build_version_patch}"
 

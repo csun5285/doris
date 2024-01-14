@@ -1589,13 +1589,8 @@ public class InternalCatalog implements CatalogIf<Database> {
                     }
                     if (!hashDistributionInfo.sameDistributionColumns((HashDistributionInfo) defaultDistributionInfo)) {
                         throw new DdlException("Cannot assign hash distribution with different distribution cols. "
-<<<<<<< HEAD
-                            + "new is: " + hashDistributionInfo.getDistributionColumns() + " default is: "
-                            + ((HashDistributionInfo) defaultDistributionInfo).getDistributionColumns());
-=======
                                 + "new is: " + hashDistributionInfo.getDistributionColumns() + " default is: "
                                 + ((HashDistributionInfo) defaultDistributionInfo).getDistributionColumns());
->>>>>>> selectdb-doris-2.0.4-b01
                     }
                 } else if (distributionInfo.getType() == DistributionInfoType.RANDOM) {
                     RandomDistributionInfo randomDistributionInfo = (RandomDistributionInfo) distributionInfo;
@@ -1666,9 +1661,10 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.skipWriteIndexOnLoad(), olapTable.getCompactionPolicy(),
                     olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
                     olapTable.getTimeSeriesCompactionFileCountThreshold(),
-<<<<<<< HEAD
-                    olapTable.getTimeSeriesCompactionTimeThresholdSeconds(), olapTable.storeRowColumn(),
-                    olapTable.isDynamicSchema(), binlogConfig, dataProperty.isStorageMediumSpecified());
+                    olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                    olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                    olapTable.storeRowColumn(), olapTable.isDynamicSchema(),
+                    binlogConfig, dataProperty.isStorageMediumSpecified());
             } else {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
@@ -1685,13 +1681,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn());
                 commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
             }
-=======
-                    olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
-                    olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
-                    olapTable.storeRowColumn(), olapTable.isDynamicSchema(),
-                    binlogConfig, dataProperty.isStorageMediumSpecified());
 
->>>>>>> selectdb-doris-2.0.4-b01
             // check again
             olapTable = db.getOlapTableOrDdlException(tableName);
             olapTable.writeLockOrDdlException();
@@ -3137,14 +3127,11 @@ public class InternalCatalog implements CatalogIf<Database> {
         // tabletIdSet to save all newly created tablet ids.
         Set<Long> tabletIdSet = Sets.newHashSet();
         try {
-<<<<<<< HEAD
             Map<Long, Long> oldToNewPartitionId = new HashMap<Long, Long>();
             List<Long> newPartitionIds = new ArrayList<Long>();
-=======
             long bufferSize = IdGeneratorUtil.getBufferSizeForTruncateTable(copiedTbl, origPartitions.values());
             IdGeneratorBuffer idGeneratorBuffer =
                     origPartitions.isEmpty() ? null : Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
->>>>>>> selectdb-doris-2.0.4-b01
             for (Map.Entry<String, Long> entry : origPartitions.entrySet()) {
                 long oldPartitionId = entry.getValue();
                 long newPartitionId = idGeneratorBuffer.getNextId();

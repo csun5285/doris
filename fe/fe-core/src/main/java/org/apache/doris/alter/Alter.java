@@ -520,7 +520,6 @@ public class Alter {
 
             } else if (alterClause instanceof ModifyTablePropertiesClause) {
                 Map<String, String> properties = alterClause.getProperties();
-<<<<<<< HEAD
                 if (Config.isCloudMode()) {
                     Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
@@ -539,33 +538,12 @@ public class Alter {
                                 .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
                             || properties
                                 .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
-                            || properties
-                                .containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS)
-                            || properties
-                                .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
-                            || properties
-                                .containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD));
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD)
+                            || properties.containsKey(
+                                PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD));
                     ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
                 }
-=======
-                // currently, only in memory and storage policy property could reach here
-                Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY)
-                        || properties.containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD)
-                        || properties
-                            .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD));
-                ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
->>>>>>> selectdb-doris-2.0.4-b01
             } else {
                 throw new DdlException("Invalid alter operation: " + alterClause.getOpType());
             }

@@ -33,27 +33,8 @@ jobs:
       - name: "Checkout ${{ github.ref }} ( ${{ github.sha }} )"
         uses: actions/checkout@v3
         with:
-<<<<<<< HEAD
           persist-credentials: true
           submodules: recursive
-=======
-          persist-credentials: false
-
-      - name: Checkout ${{ github.ref }} ( ${{ github.event.pull_request.head.sha }} )
-        if: ${{ github.event_name == 'pull_request_target' }}
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Checkout paths-filter
-        run: |
-          rm -rf ./.github/actions/paths-filter
-          git clone https://github.com/dorny/paths-filter .github/actions/paths-filter
-
-          pushd .github/actions/paths-filter &>/dev/null
-          git checkout 4512585405083f25c027a35db413c2b3b9006d50
-          popd &>/dev/null
->>>>>>> selectdb-doris-2.0.4-b01
 
       - name: Paths filter
         uses: ./.github/actions/paths-filter

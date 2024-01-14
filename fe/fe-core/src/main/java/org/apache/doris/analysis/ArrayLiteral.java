@@ -129,7 +129,6 @@ public class ArrayLiteral extends LiteralExpr {
     public String getStringValueInFe() {
         List<String> list = new ArrayList<>(children.size());
         children.forEach(v -> {
-<<<<<<< HEAD
             String stringLiteral;
             if (v instanceof NullLiteral) {
                 stringLiteral = "null";
@@ -138,10 +137,6 @@ public class ArrayLiteral extends LiteralExpr {
             }
             // we should use type to decide we output array is suitable for json format
             list.add(stringLiteral);
-=======
-            // we should use type to decide we output array is suitable for json format
-            list.add(getStringLiteralForComplexType(v));
->>>>>>> selectdb-doris-2.0.4-b01
         });
         return "[" + StringUtils.join(list, ", ") + "]";
     }

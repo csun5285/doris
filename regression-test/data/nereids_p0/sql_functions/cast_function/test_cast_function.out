@@ -6,12 +6,9 @@
 11
 
 -- !sql --
-<<<<<<< HEAD
-=======
 \N
 
 -- !sql --
->>>>>>> selectdb-doris-2.0.4-b01
 \N
 
 -- !sql --
@@ -34,4 +31,5 @@ true
 
 -- !sql_to_big --
 \N
+
 

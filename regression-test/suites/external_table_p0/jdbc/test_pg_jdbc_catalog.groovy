@@ -32,11 +32,6 @@ suite("test_pg_jdbc_catalog", "p0,external,pg,external_docker,external_docker_pg
         String test_all_types = "test_all_types";
         String test_insert_all_types = "test_pg_insert_all_types";
         String test_ctas = "test_pg_ctas";
-<<<<<<< HEAD
-
-        sql """create database if not exists ${internal_db_name}; """
-=======
->>>>>>> selectdb-doris-2.0.4-b01
 
         sql """create database if not exists ${internal_db_name}; """
 

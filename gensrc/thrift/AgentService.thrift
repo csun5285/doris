@@ -141,7 +141,6 @@ struct TCreateTabletReq {
     17: optional Types.TReplicaId replica_id = 0
     // 18: optional string storage_policy
     19: optional bool enable_unique_key_merge_on_write = false
-<<<<<<< HEAD
     20: optional bool is_in_memory = false
     21: optional bool is_persistent = false
     22: optional i64 storage_policy_id
@@ -150,15 +149,7 @@ struct TCreateTabletReq {
     25: optional i64 time_series_compaction_goal_size_mbytes = 1024
     26: optional i64 time_series_compaction_file_count_threshold = 2000
     27: optional i64 time_series_compaction_time_threshold_seconds = 3600
-=======
-    20: optional i64 storage_policy_id
-    21: optional TBinlogConfig binlog_config
-    22: optional string compaction_policy = "size_based"
-    23: optional i64 time_series_compaction_goal_size_mbytes = 1024
-    24: optional i64 time_series_compaction_file_count_threshold = 2000
-    25: optional i64 time_series_compaction_time_threshold_seconds = 3600
-    26: optional i64 time_series_compaction_empty_rowsets_threshold = 5
->>>>>>> selectdb-doris-2.0.4-b01
+    28: optional i64 time_series_compaction_empty_rowsets_threshold = 5
 }
 
 struct TDropTabletReq {

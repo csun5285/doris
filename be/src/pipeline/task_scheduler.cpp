@@ -351,13 +351,10 @@ void TaskScheduler::_try_close_task(PipelineTask* task, PipelineTaskState state)
         return;
     }
 
-<<<<<<< HEAD
-=======
     status = task->close();
     if (!status.ok() && state != PipelineTaskState::CANCELED) {
         cancel();
     }
->>>>>>> selectdb-doris-2.0.4-b01
     task->set_state(state);
     task->set_close_pipeline_time();
     task->fragment_context()->close_a_pipeline();

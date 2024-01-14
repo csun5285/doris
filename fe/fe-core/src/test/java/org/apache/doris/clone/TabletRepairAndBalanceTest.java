@@ -417,7 +417,6 @@ public class TabletRepairAndBalanceTest {
         ExceptionChecker.expectThrowsNoException(() -> dropTable(dropStmt1));
         ExceptionChecker.expectThrowsNoException(() -> dropTable(dropStmt2));
         ExceptionChecker.expectThrowsNoException(() -> dropTable(dropStmt3));
-<<<<<<< HEAD
         Assert.assertNull(db.getTableNullable("tbl1"));
         Assert.assertNull(db.getTableNullable("col_tbl1"));
         Assert.assertNull(db.getTableNullable("col_tbl2"));
@@ -426,9 +425,7 @@ public class TabletRepairAndBalanceTest {
             Thread.sleep(1000);
         }
 
-=======
         Assert.assertEquals(0, invertedIndex.getReplicaMetaTable().size());
->>>>>>> selectdb-doris-2.0.4-b01
 
         // set all backends' tag to default
         for (int i = 0; i < backends.size(); ++i) {

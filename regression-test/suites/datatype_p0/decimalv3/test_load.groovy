@@ -103,9 +103,5 @@ suite("test_load") {
         """
         exception "error"
     }
-<<<<<<< HEAD
-    qt_decimalv3_insert "select * from test_decimalv3_insert order by 1;"
-=======
     qt_decimalv3_insert "select * from test_decimalv3_insert order by 1, 2;"
->>>>>>> selectdb-doris-2.0.4-b01
 }

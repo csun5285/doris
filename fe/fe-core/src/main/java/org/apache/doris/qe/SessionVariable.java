@@ -1823,10 +1823,7 @@ public class SessionVariable implements Serializable, Writable {
         this.enableFoldConstantByBe = foldConstantByBe;
     }
 
-<<<<<<< HEAD
     public int getParallelExecInstanceNum(String cloudCluster) {
-=======
-    public int getParallelExecInstanceNum() {
         ConnectContext connectContext = ConnectContext.get();
         if (connectContext != null && connectContext.getEnv() != null && connectContext.getEnv().getAuth() != null) {
             int userParallelExecInstanceNum = connectContext.getEnv().getAuth()
@@ -1835,7 +1832,6 @@ public class SessionVariable implements Serializable, Writable {
                 return userParallelExecInstanceNum;
             }
         }
->>>>>>> selectdb-doris-2.0.4-b01
         if (enablePipelineEngine && parallelPipelineTaskNum == 0) {
             int size = Env.getCurrentSystemInfo().getMinPipelineExecutorSize(cloudCluster);
             int autoInstance = (size + 1) / 2;

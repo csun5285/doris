@@ -377,13 +377,11 @@ protected:
                             std::chrono::steady_clock::now().time_since_epoch())
                             .count();
     std::atomic<uint64_t> _delayed_expired_timestamp = 0;
-<<<<<<< HEAD
+
     std::atomic<bool> _is_publish_running {false};
-=======
 
     // <column_uniq_id>, skip index compaction
     std::set<int32_t> skip_index_compaction;
->>>>>>> selectdb-doris-2.0.4-b01
 };
 
 } // namespace doris

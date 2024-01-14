@@ -528,10 +528,8 @@ void NewOlapScanner::_update_counters_before_close() {
     COUNTER_UPDATE(olap_parent->_block_init_seek_counter, stats.block_init_seek_num);
     COUNTER_UPDATE(olap_parent->_block_conditions_filtered_timer,
                    stats.block_conditions_filtered_ns);
-<<<<<<< HEAD
     COUNTER_UPDATE(olap_parent->_block_init_iters_timer, stats.block_init_iters_ns);
     COUNTER_UPDATE(olap_parent->_block_init_prefetch_timer, stats.block_init_prefetch_ns);
-=======
     COUNTER_UPDATE(olap_parent->_block_conditions_filtered_bf_timer,
                    stats.block_conditions_filtered_bf_ns);
     COUNTER_UPDATE(olap_parent->_block_conditions_filtered_zonemap_timer,
@@ -540,7 +538,6 @@ void NewOlapScanner::_update_counters_before_close() {
                    stats.block_conditions_filtered_zonemap_rp_ns);
     COUNTER_UPDATE(olap_parent->_block_conditions_filtered_dict_timer,
                    stats.block_conditions_filtered_dict_ns);
->>>>>>> selectdb-doris-2.0.4-b01
     COUNTER_UPDATE(olap_parent->_first_read_timer, stats.first_read_ns);
     COUNTER_UPDATE(olap_parent->_second_read_timer, stats.second_read_ns);
     COUNTER_UPDATE(olap_parent->_first_read_seek_timer, stats.block_first_read_seek_ns);

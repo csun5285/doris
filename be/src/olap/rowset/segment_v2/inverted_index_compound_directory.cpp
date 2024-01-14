@@ -23,11 +23,8 @@
 #include "io/fs/file_reader.h"
 #include "io/fs/file_reader_options.h"
 #include "io/fs/file_writer.h"
-<<<<<<< HEAD
 #include "io/fs/path.h"
 #include "io/io_common.h"
-=======
->>>>>>> selectdb-doris-2.0.4-b01
 #include "util/debug_points.h"
 #include "util/slice.h"
 

@@ -1015,17 +1015,13 @@ Status SchemaChangeHandler::_get_versions_to_be_changed(
     return Status::OK();
 }
 
-<<<<<<< HEAD
-Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams& sc_params) {
-#ifdef CLOUD_MODE
-    CHECK(false) << "MUST NOT use SchemaChangeHandler in CLOUD MODE";
-#else
-=======
 // The `real_alter_version` parameter indicates that the version of [0-real_alter_version] is
 // converted from a base tablet, only used for the mow table now.
 Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams& sc_params,
                                                         int64_t* real_alter_version) {
->>>>>>> selectdb-doris-2.0.4-b01
+#ifdef CLOUD_MODE
+    CHECK(false) << "MUST NOT use SchemaChangeHandler in CLOUD MODE";
+#endif
     LOG(INFO) << "begin to convert historical rowsets for new_tablet from base_tablet."
               << " base_tablet=" << sc_params.base_tablet->full_name()
               << ", new_tablet=" << sc_params.new_tablet->full_name();
@@ -1159,7 +1155,6 @@ Status SchemaChangeHandler::_convert_historical_rowsets(const SchemaChangeParams
 
     // XXX:The SchemaChange state should not be canceled at this time, because the new Delta has to be converted to the old and new Schema version
     return process_alter_exit();
-#endif
 }
 
 // @static

@@ -30,13 +30,10 @@ import org.apache.doris.thrift.TFileRangeDesc;
 import org.apache.doris.thrift.TScanRangeLocations;
 
 import com.google.common.base.Preconditions;
-<<<<<<< HEAD
 import com.google.common.base.Strings;
-=======
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
->>>>>>> selectdb-doris-2.0.4-b01
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;

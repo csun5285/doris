@@ -56,11 +56,8 @@ public class RestBaseController extends BaseController {
     protected static final String LABEL_KEY = "label";
     protected static final String TXN_ID_KEY = "txn_id";
     protected static final String TXN_OPERATION_KEY = "txn_operation";
-<<<<<<< HEAD
     protected static final String CLOUD_CLUSTER = "cloud_cluster";
-=======
     protected static final String SINGLE_REPLICA_KEY = "single_replica";
->>>>>>> selectdb-doris-2.0.4-b01
     private static final Logger LOG = LogManager.getLogger(RestBaseController.class);
 
     public ActionAuthorizationInfo executeCheckPassword(HttpServletRequest request,

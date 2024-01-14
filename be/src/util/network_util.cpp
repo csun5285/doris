@@ -33,11 +33,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-<<<<<<< HEAD
 #include <cctype>
-=======
 #include <chrono>
->>>>>>> selectdb-doris-2.0.4-b01
 #include <sstream>
 
 #ifdef __APPLE__

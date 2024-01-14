@@ -67,27 +67,8 @@ public class FeConstants {
     public static long tablet_checker_interval_ms = 20 * 1000L;
     public static long tablet_schedule_interval_ms = 1000L;
 
-<<<<<<< HEAD
-    public static String text = "hive_text";
-
     public static int cloud_cluster_check_interval_second = 10;
 
-    public static String FS_PREFIX_S3 = "s3";
-    public static String FS_PREFIX_S3A = "s3a";
-    public static String FS_PREFIX_S3N = "s3n";
-    public static String FS_PREFIX_OSS = "oss";
-    public static String FS_PREFIX_GCS = "gs";
-    public static String FS_PREFIX_BOS = "bos";
-    public static String FS_PREFIX_COS = "cos";
-    public static String FS_PREFIX_COSN = "cosn";
-    public static String FS_PREFIX_OBS = "obs";
-    public static String FS_PREFIX_OFS = "ofs";
-    public static String FS_PREFIX_GFS = "gfs";
-    public static String FS_PREFIX_JFS = "jfs";
-    public static String FS_PREFIX_HDFS = "hdfs";
-    public static String FS_PREFIX_VIEWFS = "viewfs";
-    public static String FS_PREFIX_FILE = "file";
-=======
     public static final String FS_PREFIX_S3 = "s3";
     public static final String FS_PREFIX_S3A = "s3a";
     public static final String FS_PREFIX_S3N = "s3n";
@@ -103,7 +84,6 @@ public class FeConstants {
     public static final String FS_PREFIX_HDFS = "hdfs";
     public static final String FS_PREFIX_VIEWFS = "viewfs";
     public static final String FS_PREFIX_FILE = "file";
->>>>>>> selectdb-doris-2.0.4-b01
 
     public static final String INTERNAL_DB_NAME = "__internal_schema";
     public static String TEMP_MATERIZLIZE_DVIEW_PREFIX = "internal_tmp_materialized_view_";
