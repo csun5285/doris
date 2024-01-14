@@ -21,6 +21,9 @@
 #include <gen_cpp/types.pb.h>
 #include <stdint.h>
 
+#include <bvar/bvar.h>
+#include <bvar/status.h>
+
 #include <condition_variable>
 #include <functional>
 #include <iosfwd>
@@ -43,6 +46,8 @@ class IOBufAsZeroCopyInputStream;
 }
 
 namespace doris {
+extern bvar::Adder<uint64_t> g_fragment_executing_count;
+extern bvar::Status<uint64_t> g_fragment_last_active_time;
 
 namespace pipeline {
 class PipelineFragmentContext;

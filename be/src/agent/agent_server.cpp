@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <thrift/protocol/TDebugProtocol.h>
 
+#include <chrono>
 #include <filesystem>
 #include <ostream>
 #include <string>
@@ -36,8 +37,10 @@
 #include "gutil/strings/substitute.h"
 #include "olap/olap_define.h"
 #include "olap/options.h"
+#include "olap/schema_change.h"
 #include "olap/snapshot_manager.h"
 #include "runtime/exec_env.h"
+#include "runtime/fragment_mgr.h"
 
 namespace doris {
 class TopicListener;
@@ -228,6 +231,11 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
             break;
         case TTaskType::ALTER:
             if (task.__isset.alter_tablet_req || task.__isset.alter_tablet_req_v2) {
+                // cloud auto stop need sc jobs, a tablet's sc can also be considered a fragment
+                doris::g_fragment_executing_count << 1;
+                doris::g_alter_executing_count << 1;
+                int64 now = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                g_fragment_last_active_time.set_value(now);
                 _alter_tablet_workers->submit_task(task);
             } else {
                 ret_st = Status::InvalidArgument(

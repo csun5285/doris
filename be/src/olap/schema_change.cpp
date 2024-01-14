@@ -77,6 +77,8 @@
 #include "vec/olap/olap_data_convertor.h"
 
 namespace doris {
+bvar::Adder<uint64_t> g_alter_executing_count("alter_executing_count");
+
 class CollectionValue;
 
 using namespace ErrorCode;

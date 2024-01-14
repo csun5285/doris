@@ -56,6 +56,7 @@
 #include "olap/data_dir.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset_meta.h"
+#include "olap/schema_change.h"
 #include "olap/snapshot_manager.h"
 #include "olap/storage_policy.h"
 #include "olap/tablet.h"
@@ -73,6 +74,7 @@
 #include "olap/txn_manager.h"
 #include "olap/utils.h"
 #include "runtime/exec_env.h"
+#include "runtime/fragment_mgr.h"
 #include "runtime/snapshot_loader.h"
 #include "service/backend_options.h"
 #include "util/doris_metrics.h"
@@ -1763,6 +1765,10 @@ void AlterTableTaskPool::_alter_tablet_worker_thread_callback() {
             }
             _finish_task(finish_task_request);
         }
+        doris::g_fragment_executing_count << -1;
+        doris::g_alter_executing_count << -1;
+        int64 now = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        g_fragment_last_active_time.set_value(now);
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
     }
 }

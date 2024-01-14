@@ -50,6 +50,7 @@
 #include "vec/data_types/data_type.h"
 
 namespace doris {
+extern bvar::Adder<uint64_t> g_alter_executing_count;
 class DeleteHandler;
 class Field;
 class TAlterInvertedIndexReq;

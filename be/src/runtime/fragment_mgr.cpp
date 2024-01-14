@@ -97,7 +97,8 @@ DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(timeout_canceled_fragment_count, MetricUnit::
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(fragment_thread_pool_queue_size, MetricUnit::NOUNIT);
 bvar::LatencyRecorder g_fragmentmgr_prepare_latency("fragment_prepare_latency", "prepare");
 bvar::Adder<uint64_t> g_fragment_executing_count("fragment_executing_count");
-bvar::Status<uint64_t> g_fragment_last_active_time("fragment_last_active_time", 0);
+bvar::Status<uint64_t> g_fragment_last_active_time("fragment_last_active_time",
+    duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
 
 uint64_t get_fragment_executing_count() {
     return g_fragment_executing_count.get_value();
@@ -667,6 +668,9 @@ void FragmentMgr::remove_pipeline_context(
     auto query_id = f_context->get_query_id();
     auto* q_context = f_context->get_query_context();
     bool all_done = q_context->countdown();
+    int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count(); 
+    g_fragment_executing_count << -1;
+    g_fragment_last_active_time.set_value(now);
     _pipeline_map.erase(f_context->get_fragment_instance_id());
     if (all_done) {
         _query_ctx_map.erase(query_id);
@@ -843,11 +847,13 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params,
     std::shared_ptr<RuntimeFilterMergeControllerEntity> handler;
     _runtimefilter_controller.add_entity(params, &handler, exec_state->executor()->runtime_state());
     exec_state->set_merge_controller_handler(handler);
+    int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     {
+        g_fragment_executing_count << 1;
+        g_fragment_last_active_time.set_value(now);
         std::lock_guard<std::mutex> lock(_lock);
         _fragment_map.insert(std::make_pair(params.params.fragment_instance_id, exec_state));
         _cv.notify_all();
-        g_fragment_executing_count << 1;
     }
     auto st = _thread_pool->submit_func(
             [this, exec_state, cb, parent_span = opentelemetry::trace::Tracer::GetCurrentSpan()] {
@@ -856,7 +862,7 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params,
             });
     if (!st.ok()) {
         {
-            int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+
             // Remove the exec state added
             std::lock_guard<std::mutex> lock(_lock);
             _fragment_map.erase(params.params.fragment_instance_id);
@@ -945,8 +951,10 @@ Status FragmentMgr::exec_plan_fragment(const TPipelineFragmentParams& params,
         _runtimefilter_controller.add_entity(params, local_params, &handler,
                                              context->get_runtime_state());
         context->set_merge_controller_handler(handler);
-
+        int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
         {
+            g_fragment_executing_count << 1;
+            g_fragment_last_active_time.set_value(now);
             std::lock_guard<std::mutex> lock(_lock);
             _pipeline_map.insert(std::make_pair(fragment_instance_id, context));
             _cv.notify_all();
