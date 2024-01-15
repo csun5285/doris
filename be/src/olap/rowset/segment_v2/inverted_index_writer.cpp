@@ -165,23 +165,22 @@ public:
         }
 
         _doc = std::make_unique<lucene::document::Document>();
+        bool use_compound_file_writer = true;
+        bool can_use_ram_dir = true;
 #ifdef CLOUD_MODE
         _lfs = doris::io::LocalFileSystem::create(io::TmpFileMgr::instance()->get_tmp_file_dir(),
                                                   "");
         auto lfs_index_path = InvertedIndexDescriptor::get_temporary_index_path(
                 io::TmpFileMgr::instance()->get_tmp_file_dir() + "/" + _segment_file_name,
                 _index_meta->index_id());
-        _dir.reset(DorisCompoundDirectory::getDirectory(_lfs, lfs_index_path.c_str(), true, _fs,
-                                                        index_path.c_str()));
+        _dir.reset(DorisCompoundDirectoryFactory::getDirectory(
+                _lfs, lfs_index_path.c_str(), use_compound_file_writer, can_use_ram_dir, nullptr,
+                _fs, index_path.c_str()));
 
 #else
-        _dir.reset(DorisCompoundDirectory::getDirectory(_fs, index_path.c_str(), true));
-#endif
-        bool use_compound_file_writer = true;
-        bool can_use_ram_dir = true;
         _dir.reset(DorisCompoundDirectoryFactory::getDirectory(
                 _fs, index_path.c_str(), use_compound_file_writer, can_use_ram_dir));
-
+#endif
         if (_parser_type == InvertedIndexParserType::PARSER_STANDARD ||
             _parser_type == InvertedIndexParserType::PARSER_UNICODE) {
             _analyzer = std::make_unique<lucene::analysis::standard95::StandardAnalyzer>();
@@ -513,6 +512,8 @@ public:
             if constexpr (field_is_numeric_type(field_type)) {
                 auto index_path = InvertedIndexDescriptor::get_temporary_index_path(
                         _directory + "/" + _segment_file_name, _index_meta->index_id());
+                bool use_compound_file_writer = true;
+                bool can_use_ram_dir = true;
 #ifdef CLOUD_MODE
                 if (_lfs == nullptr) {
                     _lfs = io::LocalFileSystem::create(
@@ -521,15 +522,13 @@ public:
                 auto lfs_index_path = InvertedIndexDescriptor::get_temporary_index_path(
                         io::TmpFileMgr::instance()->get_tmp_file_dir() + "/" + _segment_file_name,
                         _index_meta->index_id());
-                dir = DorisCompoundDirectory::getDirectory(_lfs, lfs_index_path.c_str(), true, _fs,
-                                                           index_path.c_str());
+                dir = DorisCompoundDirectoryFactory::getDirectory(
+                        _lfs, lfs_index_path.c_str(), use_compound_file_writer, can_use_ram_dir,
+                        nullptr, _fs, index_path.c_str());
 #else
-                dir = DorisCompoundDirectory::getDirectory(_fs, index_path.c_str(), true);
-#endif
-                bool use_compound_file_writer = true;
-                bool can_use_ram_dir = true;
                 dir = DorisCompoundDirectoryFactory::getDirectory(
                         _fs, index_path.c_str(), use_compound_file_writer, can_use_ram_dir);
+#endif
                 write_null_bitmap(null_bitmap_out, dir);
                 _bkd_writer->max_doc_ = _rid;
                 _bkd_writer->docs_seen_ = _row_ids_seen_for_bkd;

@@ -258,17 +258,11 @@ bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, co
     if (buffer_size == -1) {
         buffer_size = CL_NS(store)::BufferedIndexOutput::BUFFER_SIZE;
     }
-<<<<<<< HEAD
-    SharedHandle* h = _CLNEW SharedHandle(path);
+    auto* h = _CLNEW SharedHandle(path);
     io::FileBlockCachePathPolicy cache_policy;
     auto type = config::enable_file_cache ? config::file_cache_type : "";
     io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
     if (!fs->open_file(path, &h->_reader, &reader_options).ok()) {
-=======
-    auto* h = _CLNEW SharedHandle(path);
-
-    if (!fs->open_file(path, &h->_reader).ok()) {
->>>>>>> selectdb-doris-2.0.4-b01
         error.set(CL_ERR_IO, "open file error");
     }
 
@@ -591,43 +585,6 @@ const char* DorisCompoundDirectory::getCfsDirName() const {
     return cfs_directory.c_str();
 }
 
-<<<<<<< HEAD
-DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(const io::FileSystemSPtr& fs,
-                                                             const char* file,
-                                                             bool use_compound_file_writer,
-                                                             const io::FileSystemSPtr& cfs_fs,
-                                                             const char* cfs_file) {
-    DorisCompoundDirectory* dir =
-            getDirectory(fs, file, (lucene::store::LockFactory*)nullptr, cfs_fs, cfs_file);
-    dir->useCompoundFileWriter = use_compound_file_writer;
-    return dir;
-}
-
-//static
-DorisCompoundDirectory* DorisCompoundDirectory::getDirectory(
-        const io::FileSystemSPtr& _fs, const char* _file, lucene::store::LockFactory* lock_factory,
-        const io::FileSystemSPtr& _cfs, const char* _cfs_file) {
-    const char* cfs_file = _cfs_file;
-    if (cfs_file == nullptr) {
-        cfs_file = _file;
-    }
-    DorisCompoundDirectory* dir = nullptr;
-    if (!_file || !*_file) {
-        _CLTHROWA(CL_ERR_IO, "Invalid directory");
-    }
-
-    const char* file = _file;
-
-    LOG_AND_THROW_IF_ERROR(_fs->create_directory(file), "Get directory create directory IO error")
-
-    dir = _CLNEW DorisCompoundDirectory();
-    dir->init(_fs, file, lock_factory, _cfs, cfs_file);
-
-    return dir;
-}
-
-=======
->>>>>>> selectdb-doris-2.0.4-b01
 int64_t DorisCompoundDirectory::fileModified(const char* name) const {
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
     struct stat buf;
@@ -715,9 +672,6 @@ lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* nam
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
     char fl[CL_MAX_DIR];
     priv_getFN(fl, name);
-<<<<<<< HEAD
-    auto ret = _CLNEW FSIndexOutput();
-=======
     bool exists = false;
     LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "Create output file exists IO error")
     if (exists) {
@@ -727,7 +681,6 @@ lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* nam
         assert(!exists);
     }
     auto* ret = _CLNEW FSIndexOutput();
->>>>>>> selectdb-doris-2.0.4-b01
     try {
         ret->init(fs, fl);
     } catch (CLuceneError& err) {
