@@ -17,12 +17,11 @@
 
 #pragma once
 
+#include <bvar/bvar.h>
+#include <bvar/status.h>
 #include <gen_cpp/Types_types.h>
 #include <gen_cpp/types.pb.h>
 #include <stdint.h>
-
-#include <bvar/bvar.h>
-#include <bvar/status.h>
 
 #include <condition_variable>
 #include <functional>

@@ -1767,7 +1767,9 @@ void AlterTableTaskPool::_alter_tablet_worker_thread_callback() {
         }
         doris::g_fragment_executing_count << -1;
         doris::g_alter_executing_count << -1;
-        int64 now = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        int64 now = duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
         g_fragment_last_active_time.set_value(now);
         _remove_task_info(agent_task_req.task_type, agent_task_req.signature);
     }

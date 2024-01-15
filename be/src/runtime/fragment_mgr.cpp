@@ -97,8 +97,9 @@ DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(timeout_canceled_fragment_count, MetricUnit::
 DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(fragment_thread_pool_queue_size, MetricUnit::NOUNIT);
 bvar::LatencyRecorder g_fragmentmgr_prepare_latency("fragment_prepare_latency", "prepare");
 bvar::Adder<uint64_t> g_fragment_executing_count("fragment_executing_count");
-bvar::Status<uint64_t> g_fragment_last_active_time("fragment_last_active_time",
-    duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+bvar::Status<uint64_t> g_fragment_last_active_time(
+        "fragment_last_active_time",
+        duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
 
 uint64_t get_fragment_executing_count() {
     return g_fragment_executing_count.get_value();
@@ -668,7 +669,7 @@ void FragmentMgr::remove_pipeline_context(
     auto query_id = f_context->get_query_id();
     auto* q_context = f_context->get_query_context();
     bool all_done = q_context->countdown();
-    int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count(); 
+    int64 now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     g_fragment_executing_count << -1;
     g_fragment_last_active_time.set_value(now);
     _pipeline_map.erase(f_context->get_fragment_instance_id());
@@ -862,7 +863,6 @@ Status FragmentMgr::exec_plan_fragment(const TExecPlanFragmentParams& params,
             });
     if (!st.ok()) {
         {
-
             // Remove the exec state added
             std::lock_guard<std::mutex> lock(_lock);
             _fragment_map.erase(params.params.fragment_instance_id);

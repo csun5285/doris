@@ -234,7 +234,9 @@ void AgentServer::submit_tasks(TAgentResult& agent_result,
                 // cloud auto stop need sc jobs, a tablet's sc can also be considered a fragment
                 doris::g_fragment_executing_count << 1;
                 doris::g_alter_executing_count << 1;
-                int64 now = duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                int64 now = duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::system_clock::now().time_since_epoch())
+                                    .count();
                 g_fragment_last_active_time.set_value(now);
                 _alter_tablet_workers->submit_task(task);
             } else {
