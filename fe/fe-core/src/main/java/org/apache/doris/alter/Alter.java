@@ -524,6 +524,7 @@ public class Alter {
                     Preconditions.checkState(properties.containsKey(PropertyAnalyzer.PROPERTIES_INMEMORY)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
                     ((SchemaChangeHandler) schemaChangeHandler).updateCloudTableProperties(db, tableName, properties);
                 } else {
@@ -540,6 +541,8 @@ public class Alter {
                                 .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
                             || properties
                                 .containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES)
                             || properties
                                 .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
                             || properties

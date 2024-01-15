@@ -509,6 +509,10 @@ public class Config extends ConfigBase {
             "Default commit interval in ms for group commit"})
     public static int group_commit_interval_ms_default_value = 10000;
 
+    @ConfField(mutable = false, masterOnly = true, description = {"攒批的默认提交数据量，单位是字节，默认128M",
+            "Default commit data bytes for group commit"})
+    public static int group_commit_data_bytes_default_value = 134217728;
+
     @ConfField(description = {"查询be wal_queue 的超时阈值(ms)",
             "the timeout threshold of checking wal_queue on be(ms)"})
     public static int check_wal_queue_timeout_threshold = 180000;   // 3 min

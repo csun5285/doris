@@ -2208,6 +2208,7 @@ public class SchemaChangeHandler extends AlterHandler {
                 && !properties.containsKey(PropertyAnalyzer.PROPERTIES_IS_BEING_SYNCED)
                 && !properties.containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
                 && !properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS)
+                && !properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES)
                 && !properties.containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD)) {
             LOG.info("Properties already up-to-date");
             return;
@@ -3164,6 +3165,38 @@ public class SchemaChangeHandler extends AlterHandler {
             }
             param.isInMemory = isInMemory;
             param.type = UpdatePartitionMetaParam.TabletMetaType.INMEMORY;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS)) {
+            long groupCommitIntervalMs = Long.parseLong(properties.get(PropertyAnalyzer
+                    .PROPERTIES_GROUP_COMMIT_INTERVAL_MS));
+            olapTable.readLock();
+            try {
+                if (groupCommitIntervalMs == olapTable.getGroupCommitIntervalMs()) {
+                    LOG.info("groupCommitIntervalMs:{} is equal with olapTable.getGroupCommitIntervalMs():{}",
+                            groupCommitIntervalMs, olapTable.getGroupCommitIntervalMs());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.groupCommitIntervalMs = groupCommitIntervalMs;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.GROUP_COMMIT_INTERVAL_MS;
+        } else if (properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES)) {
+            long groupCommitDataBytes = Long.parseLong(properties.get(PropertyAnalyzer
+                    .PROPERTIES_GROUP_COMMIT_DATA_BYTES));
+            olapTable.readLock();
+            try {
+                if (groupCommitDataBytes == olapTable.getGroupCommitDataBytes()) {
+                    LOG.info("groupCommitDataBytes:{} is equal with olapTable.getGroupCommitDataBytes():{}",
+                            groupCommitDataBytes, olapTable.getGroupCommitDataBytes());
+                    return;
+                }
+                partitions.addAll(olapTable.getPartitions());
+            } finally {
+                olapTable.readUnlock();
+            }
+            param.groupCommitDataBytes = groupCommitDataBytes;
+            param.type = UpdatePartitionMetaParam.TabletMetaType.GROUP_COMMIT_DATA_BYTES;
         } else {
             LOG.warn("invalid properties:{}", properties);
             throw new UserException("invalid properties");
@@ -3186,12 +3219,16 @@ public class SchemaChangeHandler extends AlterHandler {
             INMEMORY,
             PERSISTENT,
             TTL_SECONDS,
+            GROUP_COMMIT_INTERVAL_MS,
+            GROUP_COMMIT_DATA_BYTES,
         }
 
         TabletMetaType type;
         boolean isPersistent = false;
         boolean isInMemory = false;
         long ttlSeconds = 0;
+        long groupCommitIntervalMs = 0;
+        long groupCommitDataBytes = 0;
     }
 
     public void updateCloudPartitionMeta(Database db,
@@ -3232,6 +3269,12 @@ public class SchemaChangeHandler extends AlterHandler {
                         break;
                     case TTL_SECONDS:
                         infoBuilder.setTtlSeconds(param.ttlSeconds);
+                        break;
+                    case GROUP_COMMIT_INTERVAL_MS:
+                        infoBuilder.setGroupCommitIntervalMs(param.groupCommitIntervalMs);
+                        break;
+                    case GROUP_COMMIT_DATA_BYTES:
+                        infoBuilder.setGroupCommitDataBytes(param.groupCommitDataBytes);
                         break;
                     default:
                         throw new UserException("Unknown TabletMetaType");

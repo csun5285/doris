@@ -3452,6 +3452,10 @@ public class Env {
             sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS).append("\" = \"");
             sb.append(olapTable.getGroupCommitIntervalMs()).append("\"");
 
+            // group commit data bytes
+            sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES).append("\" = \"");
+            sb.append(olapTable.getGroupCommitDataBytes()).append("\"");
+
             // enable duplicate without keys by default
             if (olapTable.isDuplicateWithoutKey()) {
                 sb.append(",\n\"")
@@ -3897,6 +3901,10 @@ public class Env {
             // group commit interval ms
             sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS).append("\" = \"");
             sb.append(olapTable.getGroupCommitIntervalMs()).append("\"");
+
+            // group commit data bytes
+            sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES).append("\" = \"");
+            sb.append(olapTable.getGroupCommitDataBytes()).append("\"");
 
             // enable duplicate without keys by default
             if (olapTable.isDuplicateWithoutKey()) {

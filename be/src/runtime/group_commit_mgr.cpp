@@ -20,10 +20,14 @@
 #include <gen_cpp/Types_types.h>
 #include <glog/logging.h>
 
+#include <chrono>
+
 #include "client_cache.h"
+#include "common/compiler_util.h"
 #include "common/config.h"
 #include "runtime/exec_env.h"
 #include "runtime/fragment_mgr.h"
+#include "util/debug_points.h"
 #include "util/thrift_rpc_helper.h"
 
 namespace doris {
@@ -33,6 +37,9 @@ Status LoadBlockQueue::add_block(RuntimeState* runtime_state,
     std::unique_lock l(mutex);
     RETURN_IF_ERROR(status);
     auto start = std::chrono::steady_clock::now();
+    DBUG_EXECUTE_IF("LoadBlockQueue.add_block.back_pressure_time_out", {
+        start = std::chrono::steady_clock::now() - std::chrono::milliseconds(120000);
+    });
     while (!runtime_state->is_cancelled() && status.ok() &&
            _all_block_queues_bytes->load(std::memory_order_relaxed) >=
                    config::group_commit_queue_mem_limit) {
@@ -47,7 +54,7 @@ Status LoadBlockQueue::add_block(RuntimeState* runtime_state,
                     txn_id, label, load_instance_id.to_string());
         }
     }
-    if (runtime_state->is_cancelled()) {
+    if (UNLIKELY(runtime_state->is_cancelled())) {
         return Status::Cancelled("cancelled");
     }
     RETURN_IF_ERROR(status);
@@ -497,6 +504,7 @@ Status LoadBlockQueue::close_wal() {
 }
 
 bool LoadBlockQueue::has_enough_wal_disk_space(size_t pre_allocated) {
+    DBUG_EXECUTE_IF("LoadBlockQueue.has_enough_wal_disk_space.low_space", { return false; });
     auto* wal_mgr = ExecEnv::GetInstance()->wal_mgr();
     size_t available_bytes = 0;
     {

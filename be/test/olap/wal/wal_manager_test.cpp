@@ -53,7 +53,7 @@ class WalManagerTest : public testing::Test {
 public:
     WalManagerTest() {}
     virtual ~WalManagerTest() {}
-    /*void SetUp() override {
+    void SetUp() override {
         prepare();
         _env = ExecEnv::GetInstance();
         _env->_master_info = new TMasterInfo();
@@ -72,11 +72,11 @@ public:
         if (!st.ok()) {
             LOG(WARNING) << "fail to delete " << wal_dir.string();
         }
-        // SAFE_STOP(_env->_wal_manager);
+        SAFE_STOP(_env->_wal_manager);
         SAFE_DELETE(_env->_function_client_cache);
         SAFE_DELETE(_env->_internal_client_cache);
         SAFE_DELETE(_env->_master_info);
-    }*/
+    }
 
     void prepare() {
         Status st = io::global_local_filesystem()->create_directory(wal_dir);
@@ -98,7 +98,7 @@ public:
     }
 };
 
-/*TEST_F(WalManagerTest, recovery_normal) {
+TEST_F(WalManagerTest, recovery_normal) {
     _env->wal_mgr()->wal_limit_test_bytes = 1099511627776;
     k_stream_load_exec_status = Status::OK();
 
@@ -145,9 +145,9 @@ public:
     ASSERT_TRUE(!std::filesystem::exists(wal_101));
     ASSERT_TRUE(!std::filesystem::exists(wal_200));
     ASSERT_TRUE(!std::filesystem::exists(wal_201));
-}*/
+}
 
-/*TEST_F(WalManagerTest, TestDynamicWalSpaceLimt) {
+TEST_F(WalManagerTest, TestDynamicWalSpaceLimt) {
     auto wal_mgr = WalManager::create_shared(_env, config::group_commit_wal_path);
     static_cast<void>(wal_mgr->init());
     _env->set_wal_mgr(wal_mgr);
@@ -234,5 +234,5 @@ public:
     config::group_commit_wal_max_disk_limit = "-1M";
     EXPECT_EQ(_env->wal_mgr()->_init_wal_dirs_info(), Status::InternalError(""));
     EXPECT_EQ(_env->wal_mgr()->wal_limit_test_bytes, available_bytes);
-}*/
+}
 } // namespace doris

@@ -3424,8 +3424,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             }
             result.setBaseSchemaVersion(olapTable.getBaseSchemaVersion());
             result.setGroupCommitIntervalMs(olapTable.getGroupCommitIntervalMs());
-            // TODO data size
-            result.setGroupCommitDataBytes(134217728L);
+            result.setGroupCommitDataBytes(olapTable.getGroupCommitDataBytes());
             result.setWaitInternalGroupCommitFinish(Config.wait_internal_group_commit_finish);
         } finally {
             table.readUnlock();
