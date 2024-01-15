@@ -28,6 +28,10 @@ ReportAction::ReportAction(ExecEnv* exec_env, TPrivilegeHier::type hier, TPrivil
         : HttpHandlerWithAuth(exec_env, hier, type), _report_type(report_type) {}
 
 void ReportAction::handle(HttpRequest* req) {
+#ifdef CLOUD_MODE
+    (void) _report_type;
+    CHECK(false) << "unsupported in cloud mode";
+#else
     if (StorageEngine::instance()->notify_listener(_report_type)) {
         HttpChannel::send_reply(req, HttpStatus::OK, Status::OK().to_json());
     } else {
@@ -36,6 +40,7 @@ void ReportAction::handle(HttpRequest* req) {
                 Status::InternalError("unknown reporter with name: " + std::to_string(_report_type))
                         .to_json());
     }
+#endif // CLOUD_MODE
 }
 
 } // namespace doris

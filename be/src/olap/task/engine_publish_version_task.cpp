@@ -88,6 +88,10 @@ void EnginePublishVersionTask::add_error_tablet_id(int64_t tablet_id) {
 }
 
 Status EnginePublishVersionTask::finish() {
+#ifdef CLOUD_MODE
+    CHECK(false) << "unsupported in cloud mode";
+    return Status::InternalError("EnginePublishVersionTask::finish() is unsupported in cloud mode");
+#else
     Status res = Status::OK();
     int64_t transaction_id = _publish_version_req.transaction_id;
     OlapStopWatch watch;
@@ -306,6 +310,7 @@ Status EnginePublishVersionTask::finish() {
                   << ", res=" << res.to_string();
     }
     return res;
+#endif // CLOUD_MODE
 }
 
 void EnginePublishVersionTask::_calculate_tbl_num_delta_rows(
