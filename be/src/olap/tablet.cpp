@@ -155,7 +155,6 @@ using io::FileSystemSPtr;
 
 namespace {
 
-constexpr std::chrono::seconds TRACE_TABLET_LOCK_THRESHOLD = 1s;
 static constexpr int COMPACTION_DELETE_BITMAP_LOCK_ID = -1;
 
 bvar::LatencyRecorder g_tablet_lookup_rowkey_latency("doris_pk", "tablet_lookup_rowkey");
@@ -2303,71 +2302,6 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
         permits += rowset->rowset_meta()->get_compaction_score();
     }
     return Status::OK();
-}
-
-<<<<<<< HEAD
-Status Tablet::prepare_single_replica_compaction(TabletSharedPtr tablet,
-                                                 CompactionType compaction_type) {
-#ifdef CLOUD_MODE
-    return Status::NotSupported("Should not call prepare_single_replica_compaction in CLOUD MODE");
-#else
-    scoped_refptr<Trace> trace(new Trace);
-    ADOPT_TRACE(trace.get());
-
-    StorageEngine::instance()->create_single_replica_compaction(tablet, _single_replica_compaction,
-                                                                compaction_type);
-    Status res = _single_replica_compaction->prepare_compact();
-    if (!res.ok()) {
-        if (!res.is<CUMULATIVE_NO_SUITABLE_VERSION>()) {
-            return Status::InternalError("prepare single replica compaction with err: {}",
-                                         res.to_string());
-        }
-    }
-    return Status::OK();
-#endif
-}
-
-void Tablet::execute_single_replica_compaction(CompactionType compaction_type) {
-#ifdef CLOUD_MODE
-    CHECK(false) << "Should not call execute_single_replica_compaction in CLOUD MODE";
-#else
-    scoped_refptr<Trace> trace(new Trace);
-    ADOPT_TRACE(trace.get());
-    Status res = _single_replica_compaction->execute_compact();
-    if (!res.ok()) {
-        if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
-            set_last_cumu_compaction_failure_time(UnixMillis());
-        } else if (compaction_type == CompactionType::BASE_COMPACTION) {
-            set_last_base_compaction_failure_time(UnixMillis());
-        } else if (compaction_type == CompactionType::FULL_COMPACTION) {
-            set_last_full_compaction_failure_time(UnixMillis());
-        }
-=======
-void Tablet::execute_single_replica_compaction(SingleReplicaCompaction& compaction) {
-    Status res = compaction.execute_compact();
-    if (!res.ok()) {
-        set_last_failure_time(this, compaction, UnixMillis());
->>>>>>> selectdb-doris-2.0.4-b01
-        LOG(WARNING) << "failed to do single replica compaction. res=" << res
-                     << ", tablet=" << full_name();
-        return;
-    }
-<<<<<<< HEAD
-    if (compaction_type == CompactionType::CUMULATIVE_COMPACTION) {
-        set_last_cumu_compaction_failure_time(0);
-    } else if (compaction_type == CompactionType::BASE_COMPACTION) {
-        set_last_base_compaction_failure_time(0);
-    } else if (compaction_type == CompactionType::FULL_COMPACTION) {
-        set_last_full_compaction_failure_time(0);
-    }
-#endif
-}
-
-void Tablet::reset_single_replica_compaction() {
-    _single_replica_compaction.reset();
-=======
-    set_last_failure_time(this, compaction, 0);
->>>>>>> selectdb-doris-2.0.4-b01
 }
 
 std::vector<Version> Tablet::get_all_versions() {
