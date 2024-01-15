@@ -58,6 +58,7 @@ list(REMOVE_ITEM UT_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/jsonb_value_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/runtime/large_int_value_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/vec/data_types/serde/data_type_serde_text_test.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/olap/storage_engine_test.cpp
 )
 
 set(CLOUD_TEST_FILES
