@@ -27,6 +27,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "common/compiler_util.h"
+#include "common/exception.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "fmt/format.h"
@@ -403,7 +405,11 @@ struct DateTimeOp {
             // otherwise it will be implicitly converted to bool, causing the rvalue to fail to match the lvalue.
             // the same goes for the following.
             vec_to[i] = Transform::execute(vec_from0[i], vec_from1[i], invalid);
-            DCHECK(!invalid);
+
+            if (UNLIKELY(invalid)) {
+                throw Exception(ErrorCode::OUT_OF_BOUND, "Operation {} {} {} out of range",
+                                Transform::name, vec_from0[i], vec_from1[i]);
+            }
         }
     }
 
@@ -428,7 +434,11 @@ struct DateTimeOp {
         bool invalid = true;
         for (size_t i = 0; i < size; ++i) {
             vec_to[i] = Transform::execute(vec_from0[i], vec_from1[i], invalid);
-            DCHECK(!invalid);
+
+            if (UNLIKELY(invalid)) {
+                throw Exception(ErrorCode::OUT_OF_BOUND, "Operation {} {} {} out of range",
+                                Transform::name, vec_from0[i], vec_from1[i]);
+            }
         }
     }
 
@@ -452,7 +462,11 @@ struct DateTimeOp {
         bool invalid = true;
         for (size_t i = 0; i < size; ++i) {
             vec_to[i] = Transform::execute(vec_from[i], delta, invalid);
-            DCHECK(!invalid);
+
+            if (UNLIKELY(invalid)) {
+                throw Exception(ErrorCode::OUT_OF_BOUND, "Operation {} {} {} out of range",
+                                Transform::name, vec_from[i], delta);
+            }
         }
     }
 
@@ -476,7 +490,11 @@ struct DateTimeOp {
 
         for (size_t i = 0; i < size; ++i) {
             vec_to[i] = Transform::execute(vec_from[i], delta, invalid);
-            DCHECK(!invalid);
+
+            if (UNLIKELY(invalid)) {
+                throw Exception(ErrorCode::OUT_OF_BOUND, "Operation {} {} {} out of range",
+                                Transform::name, vec_from[i], delta);
+            }
         }
     }
 
@@ -500,7 +518,11 @@ struct DateTimeOp {
 
         for (size_t i = 0; i < size; ++i) {
             vec_to[i] = Transform::execute(from, delta.get_int(i), invalid);
-            DCHECK(!invalid);
+
+            if (UNLIKELY(invalid)) {
+                throw Exception(ErrorCode::OUT_OF_BOUND, "Operation {} {} {} out of range",
+                                Transform::name, from, delta.get_int(i));
+            }
         }
     }
 
@@ -514,6 +536,7 @@ struct DateTimeOp {
             vec_to[i] = Transform::execute(from, delta[i], reinterpret_cast<bool&>(null_map[i]));
         }
     }
+
     static void constant_vector(const FromType1& from, PaddedPODArray<ToType>& vec_to,
                                 const PaddedPODArray<FromType2>& delta) {
         size_t size = delta.size();
@@ -522,7 +545,11 @@ struct DateTimeOp {
 
         for (size_t i = 0; i < size; ++i) {
             vec_to[i] = Transform::execute(from, delta[i], invalid);
-            DCHECK(!invalid);
+
+            if (UNLIKELY(invalid)) {
+                throw Exception(ErrorCode::OUT_OF_BOUND, "Operation {} {} {} out of range",
+                                Transform::name, from, delta[i]);
+            }
         }
     }
 };
