@@ -85,7 +85,7 @@ suite("test_domain_connection_and_ak_sk_correction") {
         assertTrue(false. "The endpoint is wrong, so the connection test should fale")
     } catch (Exception e) {
         logger.info("the second sql exception result is {}", e.getMessage())
-        assertTrue(e.getMessage().contains("Received an UnknownHostException when attempting to interact with a service."), e.getMessage())
+        assertTrue(e.getMessage().contains("Incorrect object storage info"), e.getMessage())
     }
 
     label = UUID.randomUUID().toString().replace("-", "")

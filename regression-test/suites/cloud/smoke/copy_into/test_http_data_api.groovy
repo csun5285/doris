@@ -3,7 +3,7 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite("test_internal_stage_http_data_api", "smoke") {
     def tableName = "customer_internal_stage_http_data_api"
     def fileName = "internal_customer.csv"
-    def filePath = "${context.config.dataPath}/copy_into/" + fileName
+    def filePath = "${context.config.dataPath}/cloud/smoke/copy_into/" + fileName
     def remoteFileName = fileName + "test_http_data_api"
 
     StringBuilder strBuilder = new StringBuilder()
