@@ -1218,7 +1218,7 @@ DEFINE_Int32(group_commit_replay_wal_retry_interval_seconds, "5");
 DEFINE_Int32(group_commit_relay_wal_threads, "10");
 // This config can be set to limit thread number in group commit request fragment thread pool.
 DEFINE_Int32(group_commit_insert_threads, "10");
-DEFINE_Int32(group_commit_memory_rows_for_max_filter_ratio, "10000");
+DEFINE_mInt32(group_commit_memory_rows_for_max_filter_ratio, "10000");
 DEFINE_Bool(wait_internal_group_commit_finish, "false");
 // Max size(bytes) of group commit queues, used for mem back pressure, defult 64M.
 DEFINE_mInt32(group_commit_queue_mem_limit, "67108864");

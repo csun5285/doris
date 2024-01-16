@@ -91,19 +91,22 @@ suite("test_wal_mem_back_pressure_time_out_fault_injection","nonConcurrent") {
         }
     }
 
+    GetDebugPoint().clearDebugPointsForAllBEs()
     enable_back_pressure()
 
     sql """ set group_commit = async_mode; """
         try {
             GetDebugPoint().enableDebugPointForAllBEs("LoadBlockQueue.add_block.back_pressure_time_out")
-            sql """insert into ${tableName} values(1,1)"""
+            def out = sql_return_maparray """insert into ${tableName} values(1,1)"""
+            logger.info(out)
+            // make sure there is an exception.
+            assertFalse(true)
         } catch (Exception e) {
             logger.info(e.getMessage())
             assertTrue(e.getMessage().contains('Wal memory back pressure wait too much time!'))
         } finally {
             GetDebugPoint().disableDebugPointForAllBEs("LoadBlockQueue.add_block.back_pressure_time_out")
+            disable_back_pressure()
         }
-
-    disable_back_pressure()
 
 }

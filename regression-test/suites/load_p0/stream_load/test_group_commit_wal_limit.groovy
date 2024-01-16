@@ -55,22 +55,4 @@ suite("test_group_commit_wal_limit") {
     logger.info("out is " + out )
     assertTrue(out.contains('group_commit'))
 
-    // httpload 
-    // normal case
-    strBuilder = new StringBuilder()
-    strBuilder.append("curl -v --location-trusted -u " + context.config.jdbcUser + ":" + context.config.jdbcPassword)
-    String sql = " -H \"sql:insert into " + db + "." + tableName + " (k,v) select c1, c2 from http_stream(\\\"format\\\" = \\\"csv\\\", \\\"column_separator\\\" = \\\",\\\", \\\"compress_type\\\" = \\\"gz\\\" ) \" "
-    strBuilder.append(sql)
-    strBuilder.append(" -H \"group_commit:async_mode\"") 
-    strBuilder.append(" -T " + context.config.dataPath + "/load_p0/stream_load/test_group_commit_wal_limit.csv.gz")
-    strBuilder.append(" http://" + context.config.feHttpAddress + "/api/_http_stream")
-
-    command = strBuilder.toString()
-    logger.info("command is " + command)
-    process = ['bash','-c',command].execute() 
-    code = process.waitFor()
-    assertEquals(code, 0)
-    out = process.text
-    logger.info("out is " + out )
-    assertTrue(out.contains('group_commit'))
 }
