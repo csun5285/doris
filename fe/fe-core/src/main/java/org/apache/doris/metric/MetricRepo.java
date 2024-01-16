@@ -182,6 +182,7 @@ public final class MetricRepo {
     private static MetricCalculator metricCalculator = new MetricCalculator();
 
     private static Map<Pair<EtlJobType, JobState>, Long> loadJobNum = Maps.newHashMap();
+    private static Long lastCalcLoadJobTime = 0L;
 
     public static void registerClusterMetrics(String clusterName, String clusterId) {
         CLOUD_CLUSTER_COUNTER_REQUEST_ALL.computeIfAbsent(clusterName, key -> {
@@ -884,8 +885,18 @@ public final class MetricRepo {
     }
 
     private static void updateLoadJobMetrics() {
+        Long begin = System.currentTimeMillis();
+        if ((begin - MetricRepo.lastCalcLoadJobTime) < 10000) {
+            // ten seconds
+            return;
+        }
         LoadManager loadManager = Env.getCurrentEnv().getLoadManager();
         MetricRepo.loadJobNum = loadManager.getLoadJobNum();
+        Long delta = System.currentTimeMillis() - begin;
+        if (delta > 10000) {
+            LOG.info("updateLoadJobMetrics cost: {}ms", delta);
+        }
+        MetricRepo.lastCalcLoadJobTime = System.currentTimeMillis();
     }
 
     private static long getLoadJobNum(EtlJobType jobType, JobState jobState) {
