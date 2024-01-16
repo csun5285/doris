@@ -480,6 +480,16 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
                         tablet_meta_info.time_series_compaction_time_threshold_seconds);
                 need_to_save = true;
             }
+            if (tablet_meta_info.__isset.time_series_compaction_empty_rowsets_threshold) {
+                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                    status = Status::InvalidArgument(
+                            "only time series compaction policy support time series config");
+                    continue;
+                }
+                tablet->tablet_meta()->set_time_series_compaction_empty_rowsets_threshold(
+                        tablet_meta_info.time_series_compaction_empty_rowsets_threshold);
+                need_to_save = true;
+            }
             if (tablet_meta_info.__isset.replica_id) {
                 tablet->tablet_meta()->set_replica_id(tablet_meta_info.replica_id);
             }
@@ -1575,6 +1585,11 @@ void PublishVersionTaskPool::_publish_version_worker_thread_callback() {
             if (status.ok()) {
                 break;
             } else if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>()) {
+                // there are too many missing versions, it has been be added to async
+                // publish task, so no need to retry here.
+                if (discontinuous_version_tablets.empty()) {
+                    break;
+                }
                 int64_t time_elapsed = time(nullptr) - agent_task_req.recv_time;
                 if (time_elapsed > config::publish_version_task_timeout_s) {
                     LOG(INFO) << "task elapsed " << time_elapsed
@@ -1597,10 +1612,10 @@ void PublishVersionTaskPool::_publish_version_worker_thread_callback() {
                         .tag("retry_time", retry_time)
                         .error(status);
                 ++retry_time;
-                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         }
-        if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>() && !is_task_timeout) {
+        if (status.is<PUBLISH_VERSION_NOT_CONTINUOUS>() && !discontinuous_version_tablets.empty() &&
+            !is_task_timeout) {
             continue;
         }
 
@@ -1626,12 +1641,14 @@ void PublishVersionTaskPool::_publish_version_worker_thread_callback() {
                     TabletSharedPtr tablet =
                             StorageEngine::instance()->tablet_manager()->get_tablet(tablet_id);
                     if (tablet != nullptr) {
-                        tablet->publised_count++;
-                        if (tablet->publised_count % 10 == 0) {
-                            StorageEngine::instance()->submit_compaction_task(
-                                    tablet, CompactionType::CUMULATIVE_COMPACTION, true);
-                            LOG(INFO) << "trigger compaction succ, tablet_id:" << tablet_id
-                                      << ", publised:" << tablet->publised_count;
+                        if (!tablet->tablet_meta()->tablet_schema()->disable_auto_compaction()) {
+                            tablet->publised_count++;
+                            if (tablet->publised_count % 10 == 0) {
+                                StorageEngine::instance()->submit_compaction_task(
+                                        tablet, CompactionType::CUMULATIVE_COMPACTION, true);
+                                LOG(INFO) << "trigger compaction succ, tablet_id:" << tablet_id
+                                          << ", publised:" << tablet->publised_count;
+                            }
                         }
                     } else {
                         LOG(WARNING) << "trigger compaction failed, tablet_id:" << tablet_id;

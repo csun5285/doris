@@ -76,7 +76,8 @@ public class StatementSubmitter {
     private static final String[] copyResult = {"id", "state", "type", "msg", "loadedRows", "filterRows",
             "unselectRows", "url"};
 
-    private ThreadPoolExecutor executor = ThreadPoolManager.newDaemonCacheThreadPool(2, "SQL submitter", true);
+    private ThreadPoolExecutor executor = ThreadPoolManager.newDaemonCacheThreadPoolThrowException(
+                        Config.http_sql_submitter_max_worker_threads, "SQL submitter", true);
 
     private ThreadPoolExecutor executorBlockPolicy = ThreadPoolManager.newDaemonCacheThreadPoolUseBlockedPolicy(
             Config.statement_submitter_threads_num, "SQL submitter with block policy", true);

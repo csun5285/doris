@@ -67,7 +67,7 @@ if [[ -d '.git' ]]; then
     short_revision="$(git log -1 --pretty=format:"%h")"
     url="git://${hostname}"
 else
-    revision="Unknown"
+    revision="tag"
     short_revision="${revision}"
     url="file://${hostname}"
 fi

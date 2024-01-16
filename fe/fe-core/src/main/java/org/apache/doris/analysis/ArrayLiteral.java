@@ -44,6 +44,9 @@ public class ArrayLiteral extends LiteralExpr {
         Type itemType = Type.NULL;
         boolean containsNull = true;
         for (LiteralExpr expr : exprs) {
+            if (!ArrayType.ARRAY.supportSubType(expr.getType())) {
+                throw new AnalysisException("Invalid item type in Array, not support " + expr.getType());
+            }
             if (itemType == Type.NULL) {
                 itemType = expr.getType();
             } else {

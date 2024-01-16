@@ -25,6 +25,7 @@ import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.JdbcTable;
+import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.MysqlTable;
 import org.apache.doris.catalog.OdbcTable;
 import org.apache.doris.catalog.OlapTable;
@@ -156,6 +157,8 @@ public class NativeInsertStmt extends InsertStmt {
     private boolean isFromDeleteOrUpdateStmt = false;
 
     private InsertType insertType = InsertType.NATIVE_INSERT;
+
+    boolean hasEmptyTargetColumns = false;
 
     enum InsertType {
         NATIVE_INSERT("insert_"),
@@ -506,11 +509,7 @@ public class NativeInsertStmt extends InsertStmt {
         List<String> realTargetColumnNames;
         targetColumns.clear();
         if (targetColumnNames == null) {
-            if (!isFromDeleteOrUpdateStmt
-                    && analyzer.getContext().getSessionVariable().isEnableUniqueKeyPartialUpdate()) {
-                throw new AnalysisException("You must explicitly specify the columns to be updated when "
-                        + "updating partial columns using the INSERT statement.");
-            }
+            hasEmptyTargetColumns = true;
             // the mentioned columns are columns which are visible to user, so here we use
             // getBaseSchema(), not getFullSchema()
             for (Column col : targetTable.getBaseSchema(false)) {
@@ -612,14 +611,14 @@ public class NativeInsertStmt extends InsertStmt {
             }
         }
 
+        if (analyzer.getContext().getSessionVariable().isEnableUniqueKeyPartialUpdate()) {
+            trySetPartialUpdate();
+        }
+
         // check if size of select item equal with columns mentioned in statement
         if (mentionedColumns.size() != queryStmt.getResultExprs().size()) {
             ErrorReport.reportAnalysisException(ErrorCode.ERR_WRONG_VALUE_COUNT,
                     mentionedColumns.size(), queryStmt.getResultExprs().size());
-        }
-
-        if (analyzer.getContext().getSessionVariable().isEnableUniqueKeyPartialUpdate()) {
-            trySetPartialUpdate();
         }
 
         // Check if all columns mentioned is enough
@@ -836,7 +835,7 @@ public class NativeInsertStmt extends InsertStmt {
         }
         for (String hint : planHints) {
             if (SHUFFLE_HINT.equalsIgnoreCase(hint)) {
-                if (!targetTable.isPartitioned()) {
+                if (!targetTable.isPartitionedTable()) {
                     ErrorReport.reportAnalysisException(ErrorCode.ERR_INSERT_HINT_NOT_SUPPORT);
                 }
                 if (isRepartition != null && !isRepartition) {
@@ -844,7 +843,7 @@ public class NativeInsertStmt extends InsertStmt {
                 }
                 isRepartition = Boolean.TRUE;
             } else if (NOSHUFFLE_HINT.equalsIgnoreCase(hint)) {
-                if (!targetTable.isPartitioned()) {
+                if (!targetTable.isPartitionedTable()) {
                     ErrorReport.reportAnalysisException(ErrorCode.ERR_INSERT_HINT_NOT_SUPPORT);
                 }
                 if (isRepartition != null && isRepartition) {
@@ -946,12 +945,18 @@ public class NativeInsertStmt extends InsertStmt {
                     brokerDesc);
             dataPartition = dataSink.getOutputPartition();
         } else if (targetTable instanceof JdbcTable) {
-            //for JdbcTable,we need to pass the currently written column to `JdbcTableSink`
-            //to generate the prepare insert statment
-            List<String> insertCols = Lists.newArrayList();
-            for (Column column : targetColumns) {
-                insertCols.add(column.getName());
+            // For JdbcTable, reorder targetColumns to match the order in targetTable.getFullSchema()
+            List<String> insertCols = new ArrayList<>();
+            Set<String> targetColumnNames = targetColumns.stream()
+                    .map(Column::getName)
+                    .collect(Collectors.toSet());
+
+            for (Column column : targetTable.getFullSchema()) {
+                if (targetColumnNames.contains(column.getName())) {
+                    insertCols.add(column.getName());
+                }
             }
+
             dataSink = new JdbcTableSink((JdbcTable) targetTable, insertCols);
             dataPartition = DataPartition.UNPARTITIONED;
         } else {
@@ -971,7 +976,7 @@ public class NativeInsertStmt extends InsertStmt {
                 throw new DdlException("txn does not exist: " + transactionId);
             }
             txnState.addTableIndexes((OlapTable) targetTable);
-            if (!isFromDeleteOrUpdateStmt && isPartialUpdate) {
+            if (isPartialUpdate) {
                 txnState.setSchemaForPartialUpdate((OlapTable) targetTable);
             }
         }
@@ -1148,8 +1153,15 @@ public class NativeInsertStmt extends InsertStmt {
             return;
         }
         OlapTable olapTable = (OlapTable) targetTable;
+        if (olapTable.getKeysType() != KeysType.UNIQUE_KEYS) {
+            return;
+        }
         if (!olapTable.getEnableUniqueKeyMergeOnWrite()) {
-            throw new UserException("Partial update is only allowed in unique table with merge-on-write enabled.");
+            throw new UserException("Partial update is only allowed on unique table with merge-on-write enabled.");
+        }
+        if (hasEmptyTargetColumns) {
+            throw new AnalysisException("You must explicitly specify the columns to be updated when "
+                    + "updating partial columns using the INSERT statement.");
         }
         for (Column col : olapTable.getFullSchema()) {
             boolean exists = false;

@@ -57,6 +57,7 @@ public class RestBaseController extends BaseController {
     protected static final String TXN_ID_KEY = "txn_id";
     protected static final String TXN_OPERATION_KEY = "txn_operation";
     protected static final String CLOUD_CLUSTER = "cloud_cluster";
+    protected static final String SINGLE_REPLICA_KEY = "single_replica";
     private static final Logger LOG = LogManager.getLogger(RestBaseController.class);
 
     public ActionAuthorizationInfo executeCheckPassword(HttpServletRequest request,

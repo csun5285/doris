@@ -124,7 +124,11 @@ public:
 
     bool is_group_commit() { return _group_commit; }
 
-private:
+    void set_query_statistics(std::shared_ptr<QueryStatistics> query_statistics) {
+        _query_statistics = query_statistics;
+    }
+
+protected:
     Status _create_sink(int sender_id, const TDataSink& t_data_sink, RuntimeState* state);
     Status _build_pipelines(ExecNode*, PipelinePtr);
     Status _build_pipeline_tasks(const doris::TPipelineFragmentParams& request);
@@ -205,7 +209,15 @@ private:
     bool _is_report_on_cancel;
     bool _group_commit;
 
-    DescriptorTbl* _desc_tbl;
+    DescriptorTbl* _desc_tbl = nullptr;
+    static bool _has_inverted_index_or_partial_update(TOlapTableSink sink);
+    std::shared_ptr<QueryStatistics> _dml_query_statistics() {
+        if (_query_statistics && _query_statistics->collect_dml_statistics()) {
+            return _query_statistics;
+        }
+        return nullptr;
+    }
+    std::shared_ptr<QueryStatistics> _query_statistics = nullptr;
 };
 } // namespace pipeline
 } // namespace doris

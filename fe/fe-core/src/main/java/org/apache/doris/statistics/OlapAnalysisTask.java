@@ -33,6 +33,7 @@ import org.apache.commons.text.StringSubstitutor;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -46,8 +47,8 @@ import java.util.stream.Collectors;
 public class OlapAnalysisTask extends BaseAnalysisTask {
 
     private static final String BASIC_STATS_TEMPLATE = "SELECT "
-            + "MIN(`${colName}`) as min, "
-            + "MAX(`${colName}`) as max "
+            + "SUBSTRING(CAST(MIN(`${colName}`) AS STRING), 1, 1024) as min, "
+            + "SUBSTRING(CAST(MAX(`${colName}`) AS STRING), 1, 1024) as max "
             + "FROM `${dbName}`.`${tblName}`";
 
     @VisibleForTesting
@@ -60,10 +61,15 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
 
     public void doExecute() throws Exception {
         Set<String> partitionNames = info.colToPartitions.get(info.colName);
-        if (partitionNames.isEmpty()) {
-            LOG.debug("Skip empty empty partition task for column {} in {}.{}.{}",
-                    info.catalogId, info.dbId, info.tblId, info.colName);
-            job.appendBuf(this, Collections.emptyList());
+        if ((info.emptyJob && info.analysisMethod.equals(AnalysisInfo.AnalysisMethod.SAMPLE))
+                || partitionNames == null || partitionNames.isEmpty()) {
+            if (partitionNames == null) {
+                LOG.warn("Table {}.{}.{}, partitionNames for column {} is null. ColToPartitions:[{}]",
+                        info.catalogId, info.dbId, info.tblId, info.colName, info.colToPartitions);
+            }
+            StatsId statsId = new StatsId(concatColumnStatsId(), info.catalogId, info.dbId,
+                    info.tblId, info.indexId, info.colName, null);
+            job.appendBuf(this, Arrays.asList(new ColStatsData(statsId)));
             return;
         }
         if (tableSample != null) {
@@ -98,8 +104,10 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
             // Get basic stats, including min and max.
             ResultRow basicStats = collectBasicStat(r);
             long rowCount = tbl.getRowCount();
-            String min = StatisticsUtil.escapeSQL(basicStats.get(0));
-            String max = StatisticsUtil.escapeSQL(basicStats.get(1));
+            String min = StatisticsUtil.escapeSQL(basicStats != null && basicStats.getValues().size() > 0
+                    ? basicStats.get(0) : null);
+            String max = StatisticsUtil.escapeSQL(basicStats != null && basicStats.getValues().size() > 1
+                    ? basicStats.get(1) : null);
 
             boolean limitFlag = false;
             long rowsToSample = pair.second;
@@ -111,7 +119,7 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
             params.put("dbId", String.valueOf(db.getId()));
             params.put("tblId", String.valueOf(tbl.getId()));
             params.put("idxId", String.valueOf(info.indexId));
-            params.put("colId", String.valueOf(info.colName));
+            params.put("colId", StatisticsUtil.escapeSQL(String.valueOf(info.colName)));
             params.put("dataSizeFunction", getDataSizeFunction(col, false));
             params.put("dbName", db.getFullName());
             params.put("colName", info.colName);
@@ -160,6 +168,13 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
     }
 
     protected ResultRow collectBasicStat(AutoCloseConnectContext context) {
+        // Agg table value columns has no zone map.
+        // For these columns, skip collecting min and max value to avoid scan whole table.
+        if (((OlapTable) tbl).getKeysType().equals(KeysType.AGG_KEYS) && !col.isKey()) {
+            LOG.info("Aggregation table {} column {} is not a key column, skip collecting min and max.",
+                    tbl.getName(), col.getName());
+            return null;
+        }
         Map<String, String> params = new HashMap<>();
         params.put("dbName", db.getFullName());
         params.put("colName", info.colName);
@@ -183,7 +198,7 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
         params.put("dbId", String.valueOf(db.getId()));
         params.put("tblId", String.valueOf(tbl.getId()));
         params.put("idxId", String.valueOf(info.indexId));
-        params.put("colId", String.valueOf(info.colName));
+        params.put("colId", StatisticsUtil.escapeSQL(String.valueOf(info.colName)));
         params.put("dataSizeFunction", getDataSizeFunction(col, false));
         params.put("catalogName", catalog.getName());
         params.put("dbName", db.getFullName());
@@ -307,5 +322,15 @@ public class OlapAnalysisTask extends BaseAnalysisTask {
         return col.isKey()
             && keysNum == 1
             && (keysType.equals(KeysType.UNIQUE_KEYS) || keysType.equals(KeysType.AGG_KEYS));
+    }
+
+    protected String concatColumnStatsId() {
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append(info.tblId);
+        stringBuilder.append("-");
+        stringBuilder.append(info.indexId);
+        stringBuilder.append("-");
+        stringBuilder.append(info.colName);
+        return stringBuilder.toString();
     }
 }

@@ -72,7 +72,7 @@ public abstract class JdbcClient {
     protected final ConcurrentHashMap<String, String> lowerTableToRealTable = new ConcurrentHashMap<>();
 
     private final AtomicBoolean dbNamesLoaded = new AtomicBoolean(false);
-    private final AtomicBoolean tableNamesLoaded = new AtomicBoolean(false);
+    private final ConcurrentHashMap<String, AtomicBoolean> tableNamesLoadedMap = new ConcurrentHashMap<>();
 
     public static JdbcClient createJdbcClient(JdbcClientConfig jdbcClientConfig) {
         String dbType = parseDbType(jdbcClientConfig.getJdbcUrl());
@@ -387,7 +387,8 @@ public abstract class JdbcClient {
     }
 
     private void loadTableNamesIfNeeded(String dbName) {
-        if (tableNamesLoaded.compareAndSet(false, true)) {
+        AtomicBoolean isLoaded = tableNamesLoadedMap.computeIfAbsent(dbName, k -> new AtomicBoolean(false));
+        if (isLoaded.compareAndSet(false, true)) {
             getTablesNameList(dbName);
         }
     }
@@ -472,7 +473,7 @@ public abstract class JdbcClient {
     protected abstract Type jdbcTypeToDoris(JdbcFieldSchema fieldSchema);
 
     protected Type createDecimalOrStringType(int precision, int scale) {
-        if (precision <= ScalarType.MAX_DECIMAL128_PRECISION) {
+        if (precision <= ScalarType.MAX_DECIMAL128_PRECISION && precision > 0) {
             return ScalarType.createDecimalV3Type(precision, scale);
         }
         return ScalarType.createStringType();

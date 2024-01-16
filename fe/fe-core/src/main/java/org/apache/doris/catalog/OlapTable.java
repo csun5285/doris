@@ -1188,11 +1188,6 @@ public class OlapTable extends Table {
         if (tblStats == null) {
             return true;
         }
-        long rowCount = getRowCount();
-        // TODO: Do we need to analyze an empty table?
-        if (rowCount == 0) {
-            return false;
-        }
         if (!tblStats.analyzeColumns().containsAll(getBaseSchema()
                 .stream()
                 .filter(c -> !StatisticsUtil.isUnsupportedType(c.getType()))
@@ -1200,6 +1195,7 @@ public class OlapTable extends Table {
                 .collect(Collectors.toSet()))) {
             return true;
         }
+        long rowCount = getRowCount();
         long updateRows = tblStats.updatedRows.get();
         int tblHealth = StatisticsUtil.getTableHealth(rowCount, updateRows);
         return tblHealth < StatisticsUtil.getTableStatsHealthThreshold();
@@ -1312,7 +1308,13 @@ public class OlapTable extends Table {
     }
 
     @Override
-    public boolean isPartitioned() {
+    public boolean isPartitionedTable() {
+        return !PartitionType.UNPARTITIONED.equals(partitionInfo.getType());
+    }
+
+    // Return true if data is distributed by one more partitions or buckets.
+    @Override
+    public boolean isPartitionDistributed() {
         int numSegs = 0;
         for (Partition part : getPartitions()) {
             numSegs += part.getDistributionInfo().getBucketNum();
@@ -2052,6 +2054,20 @@ public class OlapTable extends Table {
         tableProperty.modifyTableProperties(
                 PropertyAnalyzer.PROPERTIES_DYNAMIC_SCHEMA, Boolean.valueOf(isDynamicSchema).toString());
         tableProperty.buildDynamicSchema();
+    }
+
+    public void setTimeSeriesCompactionEmptyRowsetsThreshold(long timeSeriesCompactionEmptyRowsetsThreshold) {
+        TableProperty tableProperty = getOrCreatTableProperty();
+        tableProperty.modifyTableProperties(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD,
+                                                Long.valueOf(timeSeriesCompactionEmptyRowsetsThreshold).toString());
+        tableProperty.buildTimeSeriesCompactionEmptyRowsetsThreshold();
+    }
+
+    public Long getTimeSeriesCompactionEmptyRowsetsThreshold() {
+        if (tableProperty != null) {
+            return tableProperty.timeSeriesCompactionEmptyRowsetsThreshold();
+        }
+        return null;
     }
 
     public int getBaseSchemaVersion() {

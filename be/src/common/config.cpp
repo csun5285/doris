@@ -1014,6 +1014,7 @@ DEFINE_Bool(enable_debug_points, "false");
 
 DEFINE_Int32(pipeline_executor_size, "0");
 DEFINE_mBool(enable_workload_group_for_scan, "false");
+DEFINE_mInt64(workload_group_scan_task_wait_timeout_ms, "10000");
 
 // Temp config. True to use optimization for bitmap_index apply predicate except leaf node of the and node.
 // Will remove after fully test.
@@ -1037,6 +1038,9 @@ DEFINE_String(inverted_index_query_cache_limit, "10%");
 
 // inverted index
 DEFINE_mDouble(inverted_index_ram_buffer_size, "512");
+// -1 indicates not working.
+// Normally we should not change this, it's useful for testing.
+DEFINE_mInt32(inverted_index_max_buffered_docs, "-1");
 DEFINE_Int32(query_bkd_inverted_index_limit_percent, "5"); // 5%
 // dict path for chinese analyzer
 DEFINE_String(inverted_index_dict_path, "${DORIS_HOME}/dict");
@@ -1044,7 +1048,9 @@ DEFINE_Int32(inverted_index_read_buffer_size, "4096");
 // tree depth for bkd index
 DEFINE_Int32(max_depth_in_bkd_tree, "32");
 // index compaction
-DEFINE_Bool(inverted_index_compaction_enable, "false");
+DEFINE_mBool(inverted_index_compaction_enable, "false");
+// index by RAM directory
+DEFINE_mBool(inverted_index_ram_dir_enable, "false");
 // use num_broadcast_buffer blocks as buffer to do broadcast
 DEFINE_Int32(num_broadcast_buffer, "32");
 // semi-structure configs
@@ -1067,8 +1073,8 @@ DEFINE_mInt64(s3_write_buffer_size, "5242880");
 DEFINE_mInt32(s3_task_check_interval, "60");
 DEFINE_mBool(enable_file_cache_block_prefetch, "false")
 
-        //disable shrink memory by default
-        DEFINE_Bool(enable_shrink_memory, "false");
+//disable shrink memory by default
+DEFINE_mBool(enable_shrink_memory, "false");
 DEFINE_mInt32(schema_cache_capacity, "1024");
 DEFINE_mInt32(schema_cache_sweep_time_sec, "100");
 
@@ -1205,6 +1211,9 @@ DEFINE_mInt64(LZ4_HC_compression_level, "9");
 DEFINE_mBool(enable_merge_on_write_correctness_check, "true");
 // rowid conversion correctness check when compaction for mow table
 DEFINE_mBool(enable_rowid_conversion_correctness_check, "false");
+// When the number of missing versions is more than this value, do not directly
+// retry the publish and handle it through async publish.
+DEFINE_mInt32(mow_publish_max_discontinuous_version_num, "20");
 
 // The secure path with user files, used in the `local` table function.
 DEFINE_mString(user_files_secure_path, "${DORIS_HOME}");
@@ -1253,6 +1262,11 @@ DEFINE_Int32(download_binlog_rate_limit_kbs, "0");
 DEFINE_Bool(enable_snapshot_action, "false");
 
 DEFINE_mBool(prioritize_query_perf_in_compaction, "false");
+
+DEFINE_mBool(enable_column_type_check, "true");
+
+// Tolerance for the number of partition id 0 in rowset, default 0
+DEFINE_Int32(ignore_invalid_partition_id_rowset_num, "0");
 
 // clang-format off
 #ifdef BE_TEST

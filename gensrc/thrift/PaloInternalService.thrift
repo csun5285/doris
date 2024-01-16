@@ -252,6 +252,10 @@ struct TQueryOptions {
 
   87: optional bool faster_float_convert = false;
 
+  88: optional i32 inverted_index_max_expansions = 50;
+
+  89: optional i32 inverted_index_skip_threshold = 50;
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }

@@ -12,11 +12,24 @@
 \N
 
 -- !sql --
-20
+\N
 
 -- !sql --
-1
+20
 
 -- !sql_null_cast_bitmap --
 true
+
+-- !sql_to_tiny --
+\N
+
+-- !sql_to_small --
+\N
+
+-- !sql_to_int --
+\N
+
+-- !sql_to_big --
+\N
+
 

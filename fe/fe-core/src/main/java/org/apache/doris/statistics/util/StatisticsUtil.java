@@ -153,7 +153,11 @@ public class StatisticsUtil {
             StmtExecutor stmtExecutor = new StmtExecutor(r.connectContext, sql);
             r.connectContext.setExecutor(stmtExecutor);
             stmtExecutor.execute();
-            return r.connectContext.getState();
+            QueryState state = r.connectContext.getState();
+            if (state.getStateType().equals(QueryState.MysqlStateType.ERR)) {
+                throw new Exception(state.getErrorMessage());
+            }
+            return state;
         }
     }
 
@@ -192,6 +196,8 @@ public class StatisticsUtil {
         sessionVariable.insertTimeoutS = StatisticsUtil.getAnalyzeTimeout();
         sessionVariable.enableFileCache = false;
         sessionVariable.forbidUnknownColStats = false;
+        sessionVariable.enablePushDownMinMaxOnUnique = true;
+        sessionVariable.enablePushDownStringMinMax = true;
         connectContext.setEnv(Env.getCurrentEnv());
         connectContext.setDatabase(FeConstants.INTERNAL_DB_NAME);
         connectContext.setQualifiedUser(UserIdentity.ROOT.getQualifiedUser());
@@ -555,6 +561,10 @@ public class StatisticsUtil {
      * @return Health, the value range is [0, 100], the larger the value, the healthier the statistics of the table.
      */
     public static int getTableHealth(long totalRows, long updatedRows) {
+        // Avoid analyze empty table every time.
+        if (totalRows == 0 && updatedRows == 0) {
+            return 100;
+        }
         if (updatedRows >= totalRows) {
             return 0;
         } else {
@@ -817,8 +827,7 @@ public class StatisticsUtil {
             return null;
         }
         return str.replace("'", "''")
-                .replace("\\", "\\\\")
-                .replace("\"", "\"\"");
+                .replace("\\", "\\\\");
     }
 
     public static boolean isExternalTable(String catalogName, String dbName, String tblName) {

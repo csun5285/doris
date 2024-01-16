@@ -89,10 +89,10 @@ private:
             LOG(INFO) << "[" << tag << "] " << message;
             break;
         case Aws::Utils::Logging::LogLevel::Debug:
-            VLOG_ROW << "[" << tag << "] " << message;
+            LOG(INFO) << "[" << tag << "] " << message;
             break;
         case Aws::Utils::Logging::LogLevel::Trace:
-            VLOG_ROW << "[" << tag << "] " << message;
+            LOG(INFO) << "[" << tag << "] " << message;
             break;
         default:
             break;

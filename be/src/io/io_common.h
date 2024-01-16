@@ -85,6 +85,8 @@ public:
     bool disable_file_cache = false;
     FileCacheStatistics* file_cache_stats = nullptr; // Ref
     AsyncIOStatistics* async_io_stats = nullptr;     // Ref
+    // stop reader when reading, used in some interrupted operations
+    bool should_stop = false;
 };
 
 } // namespace io

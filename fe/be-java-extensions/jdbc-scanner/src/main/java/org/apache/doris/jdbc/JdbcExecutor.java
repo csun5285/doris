@@ -413,6 +413,8 @@ public class JdbcExecutor {
 
     private void init(String driverUrl, String sql, int batchSize, String driverClass, String jdbcUrl, String jdbcUser,
             String jdbcPassword, TJdbcOperation op, TOdbcTableType tableType) throws UdfRuntimeException {
+        String druidDataSourceKey = JdbcDataSource.getDataSource().createCacheKey(jdbcUrl, jdbcUser, jdbcPassword,
+                driverUrl, driverClass);
         try {
             if (isNebula()) {
                 batchSizeNum = batchSize;
@@ -422,10 +424,10 @@ public class JdbcExecutor {
             } else {
                 ClassLoader parent = getClass().getClassLoader();
                 ClassLoader classLoader = UdfUtils.getClassLoader(driverUrl, parent);
-                druidDataSource = JdbcDataSource.getDataSource().getSource(jdbcUrl + jdbcUser + jdbcPassword);
+                druidDataSource = JdbcDataSource.getDataSource().getSource(druidDataSourceKey);
                 if (druidDataSource == null) {
                     synchronized (druidDataSourceLock) {
-                        druidDataSource = JdbcDataSource.getDataSource().getSource(jdbcUrl + jdbcUser + jdbcPassword);
+                        druidDataSource = JdbcDataSource.getDataSource().getSource(druidDataSourceKey);
                         if (druidDataSource == null) {
                             long start = System.currentTimeMillis();
                             DruidDataSource ds = new DruidDataSource();
@@ -449,7 +451,7 @@ public class JdbcExecutor {
                             // jdbcPassword) as key.
                             // and the default datasource init = 1, min = 1, max = 100, if one of connection idle
                             // time greater than 10 minutes. then connection will be retrieved.
-                            JdbcDataSource.getDataSource().putSource(jdbcUrl + jdbcUser + jdbcPassword, ds);
+                            JdbcDataSource.getDataSource().putSource(druidDataSourceKey, ds);
                             LOG.info("init datasource [" + (jdbcUrl + jdbcUser) + "] cost: " + (
                                     System.currentTimeMillis() - start) + " ms");
                         }

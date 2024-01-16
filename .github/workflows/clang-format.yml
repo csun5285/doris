@@ -47,6 +47,15 @@ jobs:
               - 'cloud/src/**'
               - 'cloud/test/**'
 
+      - name: Checkout clang-format-lint-action
+        run: |
+          rm -rf ./.github/actions/clang-format-lint-action
+          git clone https://github.com/DoozyX/clang-format-lint-action .github/actions/clang-format-lint-action
+
+          pushd .github/actions/clang-format-lint-action &>/dev/null
+          git checkout 6adbe14579e5b8e19eb3e31e5ff2479f3bd302c7
+          popd &>/dev/null
+
       - name: "Format it!"
         if: ${{ steps.filter.outputs.be_changes == 'true' }}
         uses: ./.github/actions/clang-format-lint-action

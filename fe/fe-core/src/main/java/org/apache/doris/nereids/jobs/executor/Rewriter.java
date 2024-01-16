@@ -20,7 +20,6 @@ package org.apache.doris.nereids.jobs.executor;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.jobs.rewrite.CostBasedRewriteJob;
 import org.apache.doris.nereids.jobs.rewrite.RewriteJob;
-import org.apache.doris.nereids.processor.pre.EliminateLogicalSelectHint;
 import org.apache.doris.nereids.rules.RuleSet;
 import org.apache.doris.nereids.rules.RuleType;
 import org.apache.doris.nereids.rules.analysis.AdjustAggregateNullableForEmptySet;
@@ -72,12 +71,14 @@ import org.apache.doris.nereids.rules.rewrite.InferAggNotNull;
 import org.apache.doris.nereids.rules.rewrite.InferFilterNotNull;
 import org.apache.doris.nereids.rules.rewrite.InferJoinNotNull;
 import org.apache.doris.nereids.rules.rewrite.InferPredicates;
+import org.apache.doris.nereids.rules.rewrite.JoinCommute;
 import org.apache.doris.nereids.rules.rewrite.LimitSortToTopN;
 import org.apache.doris.nereids.rules.rewrite.MergeFilters;
 import org.apache.doris.nereids.rules.rewrite.MergeOneRowRelationIntoUnion;
 import org.apache.doris.nereids.rules.rewrite.MergeProjects;
 import org.apache.doris.nereids.rules.rewrite.MergeSetOperations;
 import org.apache.doris.nereids.rules.rewrite.NormalizeSort;
+import org.apache.doris.nereids.rules.rewrite.OrExpansion;
 import org.apache.doris.nereids.rules.rewrite.PruneEmptyPartition;
 import org.apache.doris.nereids.rules.rewrite.PruneFileScanPartition;
 import org.apache.doris.nereids.rules.rewrite.PruneOlapScanPartition;
@@ -86,6 +87,7 @@ import org.apache.doris.nereids.rules.rewrite.PullUpCteAnchor;
 import org.apache.doris.nereids.rules.rewrite.PullUpProjectUnderApply;
 import org.apache.doris.nereids.rules.rewrite.PushConjunctsIntoEsScan;
 import org.apache.doris.nereids.rules.rewrite.PushConjunctsIntoJdbcScan;
+import org.apache.doris.nereids.rules.rewrite.PushConjunctsIntoOdbcScan;
 import org.apache.doris.nereids.rules.rewrite.PushFilterInsideJoin;
 import org.apache.doris.nereids.rules.rewrite.PushProjectIntoOneRowRelation;
 import org.apache.doris.nereids.rules.rewrite.PushProjectThroughUnion;
@@ -96,7 +98,6 @@ import org.apache.doris.nereids.rules.rewrite.PushdownTopNThroughJoin;
 import org.apache.doris.nereids.rules.rewrite.PushdownTopNThroughWindow;
 import org.apache.doris.nereids.rules.rewrite.ReorderJoin;
 import org.apache.doris.nereids.rules.rewrite.RewriteCteChildren;
-import org.apache.doris.nereids.rules.rewrite.SemiJoinCommute;
 import org.apache.doris.nereids.rules.rewrite.SimplifyAggGroupBy;
 import org.apache.doris.nereids.rules.rewrite.SplitLimit;
 import org.apache.doris.nereids.rules.rewrite.TransposeSemiJoinAgg;
@@ -166,8 +167,6 @@ public class Rewriter extends AbstractBatchJobExecutor {
                             new ApplyToJoin()
                     )
             ),
-            // we should eliminate hint after "Subquery unnesting" because some hint maybe exist in the CTE or subquery.
-            custom(RuleType.ELIMINATE_HINT, EliminateLogicalSelectHint::new),
             topic("Eliminate optimization",
                     bottomUp(
                             new EliminateLimit(),
@@ -217,7 +216,7 @@ public class Rewriter extends AbstractBatchJobExecutor {
                     ),
                     // push down SEMI Join
                     bottomUp(
-                            new SemiJoinCommute(),
+                            new JoinCommute(),
                             new TransposeSemiJoinLogicalJoin(),
                             new TransposeSemiJoinLogicalJoinProject(),
                             new TransposeSemiJoinAgg(),
@@ -285,6 +284,7 @@ public class Rewriter extends AbstractBatchJobExecutor {
                             new PruneEmptyPartition(),
                             new PruneFileScanPartition(),
                             new PushConjunctsIntoJdbcScan(),
+                            new PushConjunctsIntoOdbcScan(),
                             new PushConjunctsIntoEsScan()
                     )
             ),
@@ -377,6 +377,8 @@ public class Rewriter extends AbstractBatchJobExecutor {
                 topic("rewrite cte sub-tree",
                         custom(RuleType.REWRITE_CTE_CHILDREN, () -> new RewriteCteChildren(jobs))
                 ),
+                topic("or expansion",
+                        topDown(new OrExpansion())),
                 topic("whole plan check",
                         custom(RuleType.ADJUST_NULLABLE, AdjustNullable::new)
                 )

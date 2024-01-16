@@ -51,7 +51,7 @@ public final class GlobalVariable {
 
     @VariableMgr.VarAttr(name = VERSION_COMMENT, flag = VariableMgr.READ_ONLY)
     public static String versionComment = "SelectDB Core version: " + Version.DORIS_BUILD_VERSION
-                                            + " (based on Apache Doris " + Version.BASE_BUILD_VERSION + ')';
+            + "-" + Version.DORIS_BUILD_SHORT_HASH + " (based on Apache Doris " + Version.BASE_BUILD_VERSION + ')';
 
     @VariableMgr.VarAttr(name = VERSION, flag = VariableMgr.READ_ONLY)
     public static String version = MysqlHandshakePacket.SERVER_VERSION;

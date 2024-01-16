@@ -1021,6 +1021,7 @@ DECLARE_Bool(enable_debug_points);
 
 DECLARE_Int32(pipeline_executor_size);
 DECLARE_mBool(enable_workload_group_for_scan);
+DECLARE_mInt64(workload_group_scan_task_wait_timeout_ms);
 
 // Temp config. True to use optimization for bitmap_index apply predicate except leaf node of the and node.
 // Will remove after fully test.
@@ -1043,14 +1044,16 @@ DECLARE_String(inverted_index_query_cache_limit);
 
 // inverted index
 DECLARE_mDouble(inverted_index_ram_buffer_size);
-DECLARE_Int32(query_bkd_inverted_index_limit_percent); // 5%
 // dict path for chinese analyzer
 DECLARE_String(inverted_index_dict_path);
 DECLARE_Int32(inverted_index_read_buffer_size);
+DECLARE_mInt32(inverted_index_max_buffered_docs);
 // tree depth for bkd index
 DECLARE_Int32(max_depth_in_bkd_tree);
 // index compaction
-DECLARE_Bool(inverted_index_compaction_enable);
+DECLARE_mBool(inverted_index_compaction_enable);
+// index by RAM directory
+DECLARE_mBool(inverted_index_ram_dir_enable);
 // use num_broadcast_buffer blocks as buffer to do broadcast
 DECLARE_Int32(num_broadcast_buffer);
 // semi-structure configs
@@ -1071,7 +1074,7 @@ DECLARE_mInt64(row_column_page_size);
 // it must be larger than or equal to 5MB
 DECLARE_mInt64(s3_write_buffer_size);
 //enable shrink memory
-DECLARE_Bool(enable_shrink_memory);
+DECLARE_mBool(enable_shrink_memory);
 // enable cache for high concurrent point query work load
 DECLARE_mInt32(schema_cache_capacity);
 DECLARE_mInt32(schema_cache_sweep_time_sec);
@@ -1219,6 +1222,9 @@ DECLARE_mInt64(LZ4_HC_compression_level);
 DECLARE_mBool(enable_merge_on_write_correctness_check);
 // rowid conversion correctness check when compaction for mow table
 DECLARE_mBool(enable_rowid_conversion_correctness_check);
+// When the number of missing versions is more than this value, do not directly
+// retry the publish and handle it through async publish.
+DECLARE_mInt32(mow_publish_max_discontinuous_version_num);
 
 // The secure path with user files, used in the `local` table function.
 DECLARE_mString(user_files_secure_path);
@@ -1275,6 +1281,11 @@ DECLARE_Int32(download_binlog_rate_limit_kbs);
 DECLARE_Bool(enable_snapshot_action);
 
 DECLARE_mBool(prioritize_query_perf_in_compaction);
+
+DECLARE_mBool(enable_column_type_check);
+
+// Tolerance for the number of partition id 0 in rowset, default 0
+DECLARE_Int32(ignore_invalid_partition_id_rowset_num);
 
 #ifdef BE_TEST
 // test s3

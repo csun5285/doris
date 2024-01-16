@@ -75,13 +75,14 @@ public class UserPropertyMgr implements Writable {
         }
     }
 
-    public void updateUserProperty(String user, List<Pair<String, String>> properties) throws UserException {
+    public void updateUserProperty(String user, List<Pair<String, String>> properties, boolean isReplay)
+            throws UserException {
         UserProperty property = propertyMap.get(user);
         if (property == null) {
             throw new DdlException("Unknown user(" + user + ")");
         }
 
-        property.update(properties);
+        property.update(properties, isReplay);
     }
 
     public int getQueryTimeout(String qualifiedUser) {
@@ -142,6 +143,15 @@ public class UserPropertyMgr implements Writable {
                 }
         );
         return ret;
+    }
+
+    public int getParallelFragmentExecInstanceNum(String qualifiedUser) {
+        UserProperty existProperty = propertyMap.get(qualifiedUser);
+        existProperty = getLdapPropertyIfNull(qualifiedUser, existProperty);
+        if (existProperty == null) {
+            return -1;
+        }
+        return existProperty.getParallelFragmentExecInstanceNum();
     }
 
     public Set<Tag> getResourceTags(String qualifiedUser) {

@@ -282,8 +282,9 @@ public class ResourceTagQueryTest {
         List<List<String>> userProps = Env.getCurrentEnv().getAuth().getUserProperties(Auth.ROOT_USER);
 
         // cloud add default_cloud_cluster
-        // [[cpu_resource_limit, -1], [default_cloud_cluster, ], [default_load_cluster, ], [default_workload_group, normal], [exec_mem_limit, 1000000], [insert_timeout, -1], [max_query_instances, -1], [max_user_connections, 100], [query_timeout, -1], [resource_tags, {"location" : "zone1"}], [sql_block_rules, ]]
-        Assert.assertEquals(11, userProps.size());
+        // [[cpu_resource_limit, -1], [default_cloud_cluster, ], [default_load_cluster, ], [default_workload_group, normal], [exec_mem_limit, 1000000], [insert_timeout, -1], [max_query_instances, -1], [max_user_connections, 1024], [parallel_fragment_exec_instance_num, -1], [query_timeout, -1], [resource_tags, {"location" : "zone1"}], [sql_block_rules, ]]
+        System.out.println(userProps);
+        Assert.assertEquals(12, userProps.size());
 
         // now :
         // be1 be2 be3 ==>tag1;

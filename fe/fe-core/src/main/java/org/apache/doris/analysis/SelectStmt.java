@@ -504,6 +504,24 @@ public class SelectStmt extends QueryStmt {
         }
         fromClause.setNeedToSql(needToSql);
         fromClause.analyze(analyzer);
+
+        if (!isForbiddenMVRewrite()) {
+            Boolean haveMv = false;
+            for (TableRef tbl : fromClause) {
+                if (!tbl.haveDesc() || !(tbl.getTable() instanceof OlapTable)) {
+                    continue;
+                }
+                OlapTable olapTable = (OlapTable) tbl.getTable();
+                if (olapTable.getIndexIds().size() != 1) {
+                    haveMv = true;
+                }
+            }
+
+            if (!haveMv) {
+                forbiddenMVRewrite();
+            }
+        }
+
         // Generate !empty() predicates to filter out empty collections.
         // Skip this step when analyzing a WITH-clause because CollectionTableRefs
         // do not register collection slots in their parent in that context
@@ -533,8 +551,14 @@ public class SelectStmt extends QueryStmt {
             // remove excepted columns
             resultExprs.removeIf(expr -> exceptCols.contains(expr.toColumnLabel()));
             colLabels.removeIf(exceptCols::contains);
+            if (needToSql) {
+                originalExpr = Expr.cloneList(resultExprs);
+            }
 
         } else {
+            if (needToSql) {
+                originalExpr = new ArrayList<>();
+            }
             for (SelectListItem item : selectList.getItems()) {
                 if (item.isStar()) {
                     TableName tblName = item.getTblName();
@@ -544,6 +568,11 @@ public class SelectStmt extends QueryStmt {
                         expandStar(analyzer, tblName);
                     }
                 } else {
+                    // save originalExpr before being analyzed
+                    // because analyze may change the expr by adding cast or some other stuff
+                    if (needToSql) {
+                        originalExpr.add(item.getExpr().clone());
+                    }
                     // Analyze the resultExpr before generating a label to ensure enforcement
                     // of expr child and depth limits (toColumn() label may call toSql()).
                     item.getExpr().analyze(analyzer);
@@ -603,10 +632,6 @@ public class SelectStmt extends QueryStmt {
                 }
                 colLabels.add("col_" + colLabels.size());
             }
-        }
-        // analyze valueList if exists
-        if (needToSql) {
-            originalExpr = Expr.cloneList(resultExprs);
         }
 
         // analyze selectListExprs
@@ -1209,6 +1234,9 @@ public class SelectStmt extends QueryStmt {
             slot.setTable(desc.getTable());
             slot.setTupleId(desc.getId());
             resultExprs.add(rewriteQueryExprByMvColumnExpr(slot, analyzer));
+            if (needToSql) {
+                originalExpr.add(slot);
+            }
             colLabels.add(col.getName());
         }
     }
@@ -2459,6 +2487,9 @@ public class SelectStmt extends QueryStmt {
             tblRef.analyze(analyzer);
             leftTblRef = tblRef;
         }
+        if (needToSql) {
+            originalExpr = new ArrayList<>();
+        }
         // populate selectListExprs, aliasSMap, and colNames
         for (SelectListItem item : selectList.getItems()) {
             if (item.isStar()) {
@@ -2469,6 +2500,11 @@ public class SelectStmt extends QueryStmt {
                     expandStar(analyzer, tblName);
                 }
             } else {
+                if (needToSql) {
+                    // save originalExpr before being analyzed
+                    // because analyze may change the expr by adding cast or some other stuff
+                    originalExpr.add(item.getExpr().clone());
+                }
                 // to make sure the sortinfo's AnalyticExpr and resultExprs's AnalyticExpr analytic once
                 if (item.getExpr() instanceof AnalyticExpr) {
                     item.getExpr().analyze(analyzer);
@@ -2482,9 +2518,7 @@ public class SelectStmt extends QueryStmt {
                 resultExprs.add(rewriteQueryExprByMvColumnExpr(item.getExpr(), analyzer));
             }
         }
-        if (needToSql) {
-            originalExpr = Expr.cloneList(resultExprs);
-        }
+
         // substitute group by
         if (groupByClause != null) {
             boolean aliasFirst = false;
