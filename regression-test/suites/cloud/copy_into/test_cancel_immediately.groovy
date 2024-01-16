@@ -50,11 +50,11 @@ suite("test_cancel_immediately") {
     logger.info("show copy result: " + result)
     def createTime = result[0][9].toString()
     logger.info("createTime: " + createTime)
-    def createSec = createTime.split(":")[2]
+    def createSec = createTime.split(":")[2].toInteger()
     logger.info("createSec: " + createSec)
     def endTime = result[0][13].toString()
     logger.info("cendTime: " + endTime)
-    def endSec = endTime.split(":")[2]
+    def endSec = endTime.split(":")[2].toInteger()
     if (endSec == 00) {
         endSec = 60
     }
