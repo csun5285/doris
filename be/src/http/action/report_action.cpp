@@ -29,7 +29,7 @@ ReportAction::ReportAction(ExecEnv* exec_env, TPrivilegeHier::type hier, TPrivil
 
 void ReportAction::handle(HttpRequest* req) {
 #ifdef CLOUD_MODE
-    (void) _report_type;
+    (void)_report_type;
     CHECK(false) << "unsupported in cloud mode";
 #else
     if (StorageEngine::instance()->notify_listener(_report_type)) {

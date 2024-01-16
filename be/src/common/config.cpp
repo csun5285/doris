@@ -1071,10 +1071,11 @@ DEFINE_mInt64(row_column_page_size, "4096");
 // it must be larger than or equal to 5MB
 DEFINE_mInt64(s3_write_buffer_size, "5242880");
 DEFINE_mInt32(s3_task_check_interval, "60");
-DEFINE_mBool(enable_file_cache_block_prefetch, "false")
+DEFINE_mBool(enable_file_cache_block_prefetch, "false");
 
-//disable shrink memory by default
+// disable shrink memory by default
 DEFINE_mBool(enable_shrink_memory, "false");
+
 DEFINE_mInt32(schema_cache_capacity, "1024");
 DEFINE_mInt32(schema_cache_sweep_time_sec, "100");
 
