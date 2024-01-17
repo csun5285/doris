@@ -132,7 +132,7 @@ echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 # start smoke test
 
 export \$JAVA_HOME
-sh ./bin/run-regression-test.sh --run -g smoke
+sh ./bin/run-regression-test.sh --run
 EOF
 chmod +x start.sh
 
