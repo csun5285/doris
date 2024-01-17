@@ -58,7 +58,7 @@ suite("test_routine_load_with_restart_fe") {
          adminClient.close();
 
          def producer = new KafkaProducer<String, String>(props)
-         for (int i = 0; i < 30; i++) {
+         for (int i = 0; i < 100; i++) {
              String msg_key = i.toString();
              String msg_value = i.toString() + "|" + "abc" + "|" + (i * 2).toString();
              def message = new ProducerRecord<String, String>(topic, msg_key, msg_value)
@@ -104,15 +104,29 @@ suite("test_routine_load_with_restart_fe") {
         "property.kafka_default_offsets"="OFFSET_BEGINNING");
     """
 
-    sleep(5000);
+    int last_row_num = 0;
+    for (int i = 0; i < 3; ++i) {
+        sleep(20000);
+        List<List<Object>> res = sql  """ select count(*) from ${tableName} """
+        int current_row_num = res[0][0]
+        assertTrue(current_row_num> last_row_num)
+        logger.info("last row num {}, current row num {}", last_row_num, current_row_num);
+        last_row_num = current_row_num
+        logger.info("before restart fe")
+        restartProcess(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
+        logger.info("after restart fe")
+        resetConnection()
+    }
 
-    logger.info("before restart fe")
-    restartProcess(clusterMap["fe"]["node"][0]["ip"], "fe", clusterMap["fe"]["node"][0]["install_path"])
-    logger.info("after restart fe")
-    resetConnection()
-
-    while (!pool.isTerminated()){}
-    sleep(30000);
+    while (!pool.isTerminated()) { sleep(1000) }
+    sleep(10000);
     order_qt_q3 "select * from ${tableName}"
+
+    List<List<Object>> result = sql """ show routine load """
+    def json = parseJson(result[0][14])
+    assertEquals(json.loadedRows, 100)
+    assertEquals(json.totalRows, 100)
+    assertEquals(json.errorRowsAfterResumed, 0)
+    assertEquals(json.unselectedRows, 0)
 }
 

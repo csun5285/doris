@@ -298,4 +298,15 @@ public class MetaServiceClient {
         }
         return blockingStub.getInstance(request);
     }
+
+    public SelectdbCloud.GetRLTaskCommitAttachResponse
+            getRLTaskCommitAttach(SelectdbCloud.GetRLTaskCommitAttachRequest request) {
+        if (!request.hasCloudUniqueId()) {
+            SelectdbCloud.GetRLTaskCommitAttachRequest.Builder builder =
+                    SelectdbCloud.GetRLTaskCommitAttachRequest.newBuilder();
+            builder.mergeFrom(request);
+            return blockingStub.getRlTaskCommitAttach(builder.setCloudUniqueId(Config.cloud_unique_id).build());
+        }
+        return blockingStub.getRlTaskCommitAttach(request);
+    }
 }

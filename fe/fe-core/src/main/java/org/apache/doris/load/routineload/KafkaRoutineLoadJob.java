@@ -40,6 +40,7 @@ import org.apache.doris.common.util.TimeUtils;
 import org.apache.doris.load.routineload.kafka.KafkaConfiguration;
 import org.apache.doris.load.routineload.kafka.KafkaDataSourceProperties;
 import org.apache.doris.persist.AlterRoutineLoadJobOperationLog;
+import org.apache.doris.rpc.RpcException;
 import org.apache.doris.thrift.TFileCompressType;
 import org.apache.doris.transaction.TransactionState;
 import org.apache.doris.transaction.TransactionStatus;
@@ -51,6 +52,8 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.selectdb.cloud.proto.SelectdbCloud;
+import com.selectdb.cloud.rpc.MetaServiceProxy;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.BooleanUtils;
@@ -68,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
+
 
 /**
  * KafkaRoutineLoadJob is a kind of RoutineLoadJob which fetch data from kafka.
@@ -243,6 +247,35 @@ public class KafkaRoutineLoadJob extends RoutineLoadJob {
         } finally {
             writeUnlock();
         }
+    }
+
+    @Override
+    public void updateCloudProgress() throws UserException {
+        SelectdbCloud.GetRLTaskCommitAttachRequest.Builder builder =
+                SelectdbCloud.GetRLTaskCommitAttachRequest.newBuilder();
+        builder.setCloudUniqueId(Config.cloud_unique_id);
+        builder.setDbId(dbId);
+        builder.setJobId(id);
+
+        SelectdbCloud.GetRLTaskCommitAttachResponse response;
+        try {
+            response = MetaServiceProxy.getInstance().getRLTaskCommitAttach(builder.build());
+            if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
+                LOG.warn("failed to get routine load commit attach, response: {}", response);
+                if (response.getStatus().getCode() == SelectdbCloud.MetaServiceCode.ROUTINE_LOAD_PROGRESS_NOT_FOUND) {
+                    LOG.warn("not found routine load progress, response: {}", response);
+                    return;
+                } else {
+                    throw new UserException(response.getStatus().getMsg());
+                }
+            }
+        } catch (RpcException e) {
+            LOG.info("failed to get routine load commit attach {}", e);
+            throw new UserException(e.getMessage());
+        }
+
+        RLTaskTxnCommitAttachment commitAttach = new RLTaskTxnCommitAttachment(response.getCommitAttach());
+        updateProgress(commitAttach);
     }
 
     @Override
