@@ -335,7 +335,10 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             internalMsgBuilder.append(transactionId);
             internalMsgBuilder.append(" code:");
             internalMsgBuilder.append(commitTxnResponse.getStatus().getCode());
-            throw new UserException("internal error, try later", internalMsgBuilder.toString());
+            StringBuilder msgBuilder =
+                    new StringBuilder("detail msg: " + commitTxnResponse.getStatus().getMsg());
+            throw new UserException("internal error, try later, " + msgBuilder.toString(),
+                                    internalMsgBuilder.toString());
         }
 
         TransactionState txnState = TxnUtil.transactionStateFromPb(commitTxnResponse.getTxnInfo());
