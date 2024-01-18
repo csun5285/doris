@@ -73,6 +73,8 @@ suite("insert_group_commit_into_max_filter_ratio") {
         def stmt = prepareStatement """ ${sql}  """
         try {
             def result = stmt.executeUpdate()
+            assertTrue(false)
+            /*
             logger.info("insert result: " + result)
             def serverInfo = (((StatementImpl) stmt).results).getServerInfo()
             logger.info("result server info: " + serverInfo)
@@ -82,8 +84,10 @@ suite("insert_group_commit_into_max_filter_ratio") {
             // assertEquals(result, expected_row_count)
             assertTrue(serverInfo.contains("'status':'ABORTED'"))
             // assertFalse(serverInfo.contains("'label':'group_commit_"))
+            */
         } catch (Exception e) {
             logger.info("exception: " + e)
+            assertTrue(e.getMessage().contains("too many filtered rows"))
         }
     }
 
@@ -171,6 +175,7 @@ suite("insert_group_commit_into_max_filter_ratio") {
     for (item in ["legacy", "nereids"]) {
         sql """ truncate table ${tableName} """
         connect(user = context.config.jdbcUser, password = context.config.jdbcPassword, url = context.config.jdbcUrl) {
+            sql """ set enable_insert_strict = true; """
             if (item == "nereids") {
                 sql """ set enable_nereids_dml = true; """
                 sql """ set enable_nereids_planner=true; """
