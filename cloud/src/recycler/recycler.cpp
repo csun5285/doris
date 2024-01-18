@@ -1380,8 +1380,8 @@ int InstanceRecycler::recycle_rowsets() {
                   << rowset_meta->start_version() << '-' << rowset_meta->end_version()
                   << "] txn_id=" << rowset_meta->txn_id()
                   << " type=" << RecycleRowsetPB_Type_Name(rowset.type())
-                  << " rowset_meta_size=" << v.size() << " creation_time"
-                  << rowset_meta->creation_time();
+                  << " rowset_meta_size=" << v.size()
+                  << " creation_time=" << rowset_meta->creation_time();
         if (rowset.type() == RecycleRowsetPB::PREPARE) {
             // unable to calculate file path, can only be deleted by rowset id prefix
             num_prepare += 1;
@@ -1414,7 +1414,7 @@ int InstanceRecycler::recycle_rowsets() {
                 LOG(WARNING) << "failed to delete recycle rowset kv, instance_id=" << instance_id_;
                 return;
             }
-            num_recycled.fetch_add(rowset_keys.size(), std::memory_order_relaxed);
+            num_recycled.fetch_add(rowset_keys_to_delete.size(), std::memory_order_relaxed);
         });
         return 0;
     };

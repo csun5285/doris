@@ -166,11 +166,12 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
         for (; path_iter != relative_paths.end() && (path_iter - path_begin < max_delete_batch);
              ++path_iter) {
             auto key = get_key(*path_iter);
+            objects.emplace_back().SetKey(std::move(key));
             LOG_INFO("delete object")
                     .tag("endpoint", conf_.endpoint)
                     .tag("bucket", conf_.bucket)
-                    .tag("key", key);
-            objects.emplace_back().SetKey(std::move(key));
+                    .tag("key", key)
+                    .tag("size", objects.size());
         }
         if (objects.empty()) {
             return 0;
