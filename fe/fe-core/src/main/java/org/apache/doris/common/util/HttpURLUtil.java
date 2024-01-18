@@ -45,6 +45,8 @@ public class HttpURLUtil {
             return conn;
         } catch (Exception e) {
             throw new IOException(e);
+        } finally {
+            UrlSecurityChecker.stopSSRFChecking();
         }
     }
 

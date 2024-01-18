@@ -374,6 +374,8 @@ public class SmallFileMgr implements Writable {
                 errorMsg = "File not found";
             }
             throw new DdlException("Failed to get file from url: " + downloadUrl + ". Error: " + errorMsg);
+        } finally {
+            UrlSecurityChecker.stopSSRFChecking();
         }
     }
 

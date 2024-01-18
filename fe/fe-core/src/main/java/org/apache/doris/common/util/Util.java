@@ -353,6 +353,7 @@ public class Util {
                     return null;
                 }
             }
+            UrlSecurityChecker.stopSSRFChecking();
         }
         LOG.debug("get result from url {}: {}", urlStr, sb.toString());
         return sb.toString();

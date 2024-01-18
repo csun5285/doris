@@ -419,7 +419,7 @@ public class JdbcExecutor {
             if (isNebula()) {
                 batchSizeNum = batchSize;
                 Class.forName(driverClass);
-                conn = DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword);
+                conn = DriverManager.getConnection(UrlSecurityChecker.getSafeJdbcUrl(jdbcUrl), jdbcUser, jdbcPassword);
                 stmt = conn.prepareStatement(sql);
             } else {
                 ClassLoader parent = getClass().getClassLoader();

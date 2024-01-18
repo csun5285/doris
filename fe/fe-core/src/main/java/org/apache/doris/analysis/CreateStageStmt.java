@@ -151,6 +151,7 @@ public class CreateStageStmt extends DdlStmt {
                     LOG.warn("Failed to disconnect connection, endpoint={}", endpoint, e);
                 }
             }
+            UrlSecurityChecker.stopSSRFChecking();
         }
     }
 
