@@ -63,8 +63,7 @@ public:
                             const int fragment_id, int backend_num,
                             std::shared_ptr<QueryContext> query_ctx, ExecEnv* exec_env,
                             const std::function<void(RuntimeState*, Status*)>& call_back,
-                            const report_status_callback& report_status_cb,
-                            bool group_commit = false);
+                            const report_status_callback& report_status_cb);
 
     ~PipelineFragmentContext();
 
@@ -121,8 +120,6 @@ public:
     taskgroup::TaskGroupPipelineTaskEntity* get_task_group_entity() const {
         return _task_group_entity;
     }
-
-    bool is_group_commit() { return _group_commit; }
 
     void set_query_statistics(std::shared_ptr<QueryStatistics> query_statistics) {
         _query_statistics = query_statistics;
@@ -207,7 +204,6 @@ protected:
     // If this is set to false, and '_is_report_success' is false as well,
     // This executor will not report status to FE on being cancelled.
     bool _is_report_on_cancel;
-    bool _group_commit;
 
     DescriptorTbl* _desc_tbl = nullptr;
     static bool _has_inverted_index_or_partial_update(TOlapTableSink sink);

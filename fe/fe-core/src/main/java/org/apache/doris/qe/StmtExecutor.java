@@ -302,7 +302,7 @@ public class StmtExecutor {
             } else if (expr instanceof ArrayLiteral) {
                 row.addColBuilder().setValue(String.format("\"%s\"", expr.getStringValueInFe()));
             } else {
-                String stringValue = expr.getStringValue();
+                String stringValue = expr.getStringValueInFe();
                 if (stringValue.equals(NULL_VALUE_FOR_LOAD) || stringValue.startsWith("\"") || stringValue.endsWith(
                         "\"")) {
                     row.addColBuilder().setValue(String.format("\"%s\"", stringValue));
@@ -1958,6 +1958,8 @@ public class StmtExecutor {
         } else if (insertStmt instanceof NativeInsertStmt && ((NativeInsertStmt) insertStmt).isGroupCommit()) {
             isGroupCommit = true;
             NativeInsertStmt nativeInsertStmt = (NativeInsertStmt) insertStmt;
+            long dbId = nativeInsertStmt.getTargetTable().getDatabase().getId();
+            long tableId = nativeInsertStmt.getTargetTable().getId();
             int maxRetry = 3;
             for (int i = 0; i < maxRetry; i++) {
                 GroupCommitPlanner groupCommitPlanner = nativeInsertStmt.planForGroupCommit(context.queryId);
@@ -1968,10 +1970,11 @@ public class StmtExecutor {
                 ProtocolStringList errorMsgsList = response.getStatus().getErrorMsgsList();
                 if (code == TStatusCode.DATA_QUALITY_ERROR && !errorMsgsList.isEmpty() && errorMsgsList.get(0)
                         .contains("schema version not match")) {
-                    LOG.info("group commit insert failed. stmt: {}, backend id: {}, status: {}, "
-                                    + "schema version: {}, retry: {}", insertStmt.getOrigStmt().originStmt,
-                            groupCommitPlanner.getBackend().getId(),
-                            response.getStatus(), nativeInsertStmt.getBaseSchemaVersion(), i);
+                    LOG.info("group commit insert failed. stmt: {}, query_id: {}, db_id: {}, table_id: {}"
+                                    + ", schema version: {}, backend_id: {}, status: {}, retry: {}",
+                            insertStmt.getOrigStmt().originStmt, DebugUtil.printId(context.queryId()), dbId, tableId,
+                            nativeInsertStmt.getBaseSchemaVersion(), groupCommitPlanner.getBackend().getId(),
+                            response.getStatus(), i);
                     if (i < maxRetry) {
                         List<TableIf> tables = Lists.newArrayList(insertStmt.getTargetTable());
                         MetaLockUtils.readLockTables(tables);
@@ -1984,12 +1987,14 @@ public class StmtExecutor {
                         }
                         continue;
                     } else {
-                        errMsg = "group commit insert failed. backend id: "
+                        errMsg = "group commit insert failed. db_id: " + dbId + ", table_id: " + tableId
+                                + ", query_id: " + DebugUtil.printId(context.queryId()) + ", backend_id: "
                                 + groupCommitPlanner.getBackend().getId() + ", status: " + response.getStatus();
                     }
                 } else if (code != TStatusCode.OK) {
-                    errMsg = "group commit insert failed. backend id: " + groupCommitPlanner.getBackend().getId()
-                            + ", status: " + response.getStatus();
+                    errMsg = "group commit insert failed. db_id: " + dbId + ", table_id: " + tableId + ", query_id: "
+                            + DebugUtil.printId(context.queryId()) + ", backend_id: " + groupCommitPlanner.getBackend()
+                            .getId() + ", status: " + response.getStatus();
                     ErrorReport.reportDdlException(errMsg, ErrorCode.ERR_FAILED_WHEN_INSERT);
                 }
                 label = response.getLabel();

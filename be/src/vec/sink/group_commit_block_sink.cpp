@@ -101,6 +101,8 @@ Status GroupCommitBlockSink::close(RuntimeState* state, Status close_status) {
                 state->num_rows_load_total() - state->num_rows_load_unselected();
         if (num_selected_rows > 0 &&
             (double)state->num_rows_load_filtered() / num_selected_rows > _max_filter_ratio) {
+            LOG(INFO) << "Group commit load id=" << print_id(_state->query_id())
+                      << ", too many filtered rows, error_url=" << state->get_error_log_file_path();
             return Status::DataQualityError("too many filtered rows");
         }
         RETURN_IF_ERROR(_add_blocks(state, false));
