@@ -166,11 +166,11 @@ cp -r "${ORI_OUTPUT}/audit_loader" "${OUTPUT}/audit_loader"
 
 JDBC_DRIVERS_DIR="${OUTPUT}/jdbc_drivers/"
 mkdir -p "${JDBC_DRIVERS_DIR}"
-wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/clickhouse-jdbc-0.3.2-patch11-all.jar -P "${JDBC_DRIVERS_DIR}/"
-wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/mssql-jdbc-11.2.0.jre8.jar -P "${JDBC_DRIVERS_DIR}/"
+wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/clickhouse-jdbc-0.4.2-all.jar -P "${JDBC_DRIVERS_DIR}/"
+wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/mssql-jdbc-11.2.3.jre8.jar -P "${JDBC_DRIVERS_DIR}/"
 wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/mysql-connector-java-8.0.25.jar -P "${JDBC_DRIVERS_DIR}/"
-wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/ojdbc6.jar -P "${JDBC_DRIVERS_DIR}/"
-wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/postgresql-42.5.0.jar -P "${JDBC_DRIVERS_DIR}/"
+wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/ojdbc8.jar -P "${JDBC_DRIVERS_DIR}/"
+wget https://selectdb-doris-1308700295.cos.ap-beijing.myqcloud.com/release/jdbc_driver/postgresql-42.5.1.jar -P "${JDBC_DRIVERS_DIR}/"
 
 if [[ "${TAR}" -eq 1 ]]; then
     echo "Begin to compress"
