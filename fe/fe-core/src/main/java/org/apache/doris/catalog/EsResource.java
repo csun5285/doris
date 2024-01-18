@@ -68,7 +68,7 @@ public class EsResource extends Resource {
     public static final String DOC_VALUE_SCAN_DEFAULT_VALUE = "true";
     public static final String KEYWORD_SNIFF_DEFAULT_VALUE = "true";
     public static final String HTTP_SSL_ENABLED_DEFAULT_VALUE = "false";
-    public static final String NODES_DISCOVERY_DEFAULT_VALUE = "true";
+    public static final String NODES_DISCOVERY_DEFAULT_VALUE = "false";
     public static final String MAPPING_ES_ID_DEFAULT_VALUE = "false";
 
     public static final String LIKE_PUSH_DOWN_DEFAULT_VALUE = "true";
