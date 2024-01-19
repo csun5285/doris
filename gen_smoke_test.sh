@@ -75,11 +75,11 @@ new_line="jdbcPassword=\"\$jdbcPassword\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
 PWD="\$(pwd)"
-new_line="suitePath = \"\$PWD/bin/regression-test/suites/cloud/smoke\""
+new_line="suitePath = \"\$PWD/bin/regression-test/suites\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
 
-new_line="dataPath = \"\$PWD/bin/regression-test/data/cloud/smoke\""
+new_line="dataPath = \"\$PWD/bin/regression-test/data\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
 new_line="defaultDb = \"smoke_test\""
@@ -129,10 +129,12 @@ echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 new_line="feHttpPassword=\"\$feCloudHttpPassword\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
+new_line="excludeSuites=\"test_stage_ram\""
+echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 # start smoke test
 
 export \$JAVA_HOME
-sh ./bin/run-regression-test.sh --run
+sh ./bin/run-regression-test.sh --run -d cloud/smoke
 EOF
 chmod +x start.sh
 

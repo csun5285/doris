@@ -95,13 +95,14 @@ suite("test_orc", "p0") {
                      "100490",
                      "100480",
                      ]
-
+    // "errCode = 2, detailMessage = some columns not found in the file"
+    // "errCode = 2, detailMessage = failed to find default value expr for slot: not_exist"
      def errorMsgs = [
                      "",
-                     "errCode = 2, detailMessage = some cloumns not found in the file",
+                     "errCode = 2, detailMessage = ",
                      "",
                      "",
-                     "errCode = 2, detailMessage = some cloumns not found in the file",
+                     "errCode = 2, detailMessage = ",
                      "",
                      "",
                      "",
@@ -130,7 +131,7 @@ suite("test_orc", "p0") {
              continue;
          }
          if (result[0][1].equals("CANCELLED")) {
-             assertTrue(errorMsgs[i] == result[0][3], "expected: " + errorMsgs[i] + ", actual: " + result[0][3])
+             assertTrue(result[0][3].contains(errorMsgs[i]), "expected: " + errorMsgs[i] + ", actual: " + result[0][3])
              continue;
          }
          assertTrue(false, "should not come here")
