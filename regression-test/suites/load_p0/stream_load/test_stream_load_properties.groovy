@@ -566,7 +566,7 @@ suite("test_stream_load_properties", "p0") {
             sql "sync"
 
             def tableName1 =  "stream_load_" + tableName
-            if (i <= 3) {
+            if (i <= 2) {
                 qt_sql_2pc "select * from ${tableName1} order by k00,k01"
             } else {
                 qt_sql_2pc "select * from ${tableName1} order by k00"
@@ -575,7 +575,7 @@ suite("test_stream_load_properties", "p0") {
             do_streamload_2pc.call(txnId, "abort", tableName1)
             sql "sync"
 
-            if (i <= 3) {
+            if (i <= 2) {
                 qt_sql_2pc_abort "select * from ${tableName1} order by k00,k01"
             } else {
                 qt_sql_2pc_abort "select * from ${tableName1} order by k00"
@@ -611,7 +611,7 @@ suite("test_stream_load_properties", "p0") {
             def count = 0
             while (true) {
                 def res
-                if (i <= 3) {
+                if (i <= 2) {
                     res = sql "select count(*) from ${tableName1}"
                 } else {
                     res = sql "select count(*) from ${tableName1}"
@@ -628,7 +628,7 @@ suite("test_stream_load_properties", "p0") {
                 count++
             }
             
-            if (i <= 3) {
+            if (i <= 2) {
                 qt_sql_2pc_commit "select * from ${tableName1} order by k00,k01"
             } else {
                 qt_sql_2pc_commit "select * from ${tableName1} order by k00"
