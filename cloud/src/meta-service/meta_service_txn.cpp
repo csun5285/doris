@@ -432,13 +432,12 @@ void MetaServiceImpl::precommit_txn(::google::protobuf::RpcController* controlle
 
 void put_routine_load_progress(MetaServiceCode& code, std::string& msg,
                                const std::string& instance_id,
-                               const ::selectdb::CommitTxnRequest* request,
-                               Transaction* txn, int64_t db_id) {
+                               const ::selectdb::CommitTxnRequest* request, Transaction* txn,
+                               int64_t db_id) {
     std::stringstream ss;
     int64_t txn_id = request->txn_id();
     if (!request->has_commit_attachment()) {
-        ss << "failed to get commit attachment from req, db_id=" << db_id
-           << " txn_id=" << txn_id;
+        ss << "failed to get commit attachment from req, db_id=" << db_id << " txn_id=" << txn_id;
         msg = ss.str();
         return;
     }
@@ -470,8 +469,7 @@ void put_routine_load_progress(MetaServiceCode& code, std::string& msg,
     if (prev_progress_existed) {
         if (!prev_progress_info.ParseFromString(rl_progress_val)) {
             code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            ss << "failed to parse routine load progress, db_id=" << db_id
-               << " txn_id=" << txn_id;
+            ss << "failed to parse routine load progress, db_id=" << db_id << " txn_id=" << txn_id;
             msg = ss.str();
             return;
         }
@@ -492,11 +490,17 @@ void put_routine_load_progress(MetaServiceCode& code, std::string& msg,
     if (prev_progress_info.has_stat()) {
         const RoutineLoadJobStatisticPB& prev_statistic_info = prev_progress_info.stat();
 
-        new_statistic_info->set_filtered_rows(prev_statistic_info.filtered_rows() + commit_attachment.filtered_rows());
-        new_statistic_info->set_loaded_rows(prev_statistic_info.loaded_rows() + commit_attachment.loaded_rows());
-        new_statistic_info->set_unselected_rows(prev_statistic_info.unselected_rows() + commit_attachment.unselected_rows());
-        new_statistic_info->set_received_bytes(prev_statistic_info.received_bytes() + commit_attachment.received_bytes());
-        new_statistic_info->set_task_execution_time_ms(prev_statistic_info.task_execution_time_ms() + commit_attachment.task_execution_time_ms());
+        new_statistic_info->set_filtered_rows(prev_statistic_info.filtered_rows() +
+                                              commit_attachment.filtered_rows());
+        new_statistic_info->set_loaded_rows(prev_statistic_info.loaded_rows() +
+                                            commit_attachment.loaded_rows());
+        new_statistic_info->set_unselected_rows(prev_statistic_info.unselected_rows() +
+                                                commit_attachment.unselected_rows());
+        new_statistic_info->set_received_bytes(prev_statistic_info.received_bytes() +
+                                               commit_attachment.received_bytes());
+        new_statistic_info->set_task_execution_time_ms(
+                prev_statistic_info.task_execution_time_ms() +
+                commit_attachment.task_execution_time_ms());
     } else {
         new_statistic_info->set_filtered_rows(commit_attachment.filtered_rows());
         new_statistic_info->set_loaded_rows(commit_attachment.loaded_rows());
@@ -517,10 +521,10 @@ void put_routine_load_progress(MetaServiceCode& code, std::string& msg,
     txn->put(rl_progress_key, new_progress_val);
 }
 
-void MetaServiceImpl::get_rl_task_commit_attach(::google::protobuf::RpcController* controller,
-                                                const ::selectdb::GetRLTaskCommitAttachRequest* request,
-                                                ::selectdb::GetRLTaskCommitAttachResponse* response,
-                                                ::google::protobuf::Closure* done) {
+void MetaServiceImpl::get_rl_task_commit_attach(
+        ::google::protobuf::RpcController* controller,
+        const ::selectdb::GetRLTaskCommitAttachRequest* request,
+        ::selectdb::GetRLTaskCommitAttachResponse* response, ::google::protobuf::Closure* done) {
     RPC_PREPROCESS(get_rl_task_commit_attach);
     instance_id = get_instance_id(resource_mgr_, request->cloud_unique_id());
     if (instance_id.empty()) {
@@ -556,14 +560,13 @@ void MetaServiceImpl::get_rl_task_commit_attach(::google::protobuf::RpcControlle
     err = txn->get(rl_progress_key, &rl_progress_val);
     if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
         code = MetaServiceCode::ROUTINE_LOAD_PROGRESS_NOT_FOUND;
-        ss << "pregress info not found, db_id=" << db_id
-           << " job_id=" << job_id << " err=" << err;
+        ss << "pregress info not found, db_id=" << db_id << " job_id=" << job_id << " err=" << err;
         msg = ss.str();
         return;
     } else if (err != TxnErrorCode::TXN_OK) {
         code = cast_as<ErrCategory::READ>(err);
-        ss << "failed to get pregress info, db_id=" << db_id
-           << " job_id=" << job_id << " err=" << err;
+        ss << "failed to get pregress info, db_id=" << db_id << " job_id=" << job_id
+           << " err=" << err;
         msg = ss.str();
         return;
     }

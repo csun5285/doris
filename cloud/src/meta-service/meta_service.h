@@ -680,7 +680,8 @@ public:
                                    const ::selectdb::GetRLTaskCommitAttachRequest* request,
                                    ::selectdb::GetRLTaskCommitAttachResponse* response,
                                    ::google::protobuf::Closure* done) override {
-        call_impl(&selectdb::MetaService::get_rl_task_commit_attach, controller, request, response, done);
+        call_impl(&selectdb::MetaService::get_rl_task_commit_attach, controller, request, response,
+                  done);
     }
 
 private:
