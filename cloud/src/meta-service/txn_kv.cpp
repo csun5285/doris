@@ -35,6 +35,12 @@
         if (code != TxnErrorCode::TXN_OK) return code; \
     } while (false)
 
+struct FDBFutureDeleter {
+    void operator()(FDBFuture* fut) const {
+        if (fut != nullptr) fdb_future_destroy(fut);
+    }
+};
+
 namespace selectdb {
 
 int FdbTxnKv::init() {
@@ -299,7 +305,6 @@ TxnErrorCode Transaction::get(std::string_view key, std::string* val, bool snaps
     const uint8_t* ret;
     int len;
     err = fdb_future_get_value(fut, &found, &ret, &len);
-
     if (err) {
         LOG(WARNING) << __PRETTY_FUNCTION__
                      << " failed to fdb_future_get_value err=" << fdb_get_error(err)
@@ -319,22 +324,22 @@ TxnErrorCode Transaction::get(std::string_view begin, std::string_view end,
     std::unique_ptr<int, std::function<void(int*)>> defer(
             (int*)0x01, [&sw](int*) { g_bvar_txn_kv_range_get << sw.elapsed_us(); });
 
-    FDBFuture* fut = fdb_transaction_get_range(
+    std::unique_ptr<FDBFuture, FDBFutureDeleter> fut(fdb_transaction_get_range(
             txn_, FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)begin.data(), begin.size()),
             FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((uint8_t*)end.data(), end.size()), limit,
             0 /*target_bytes, unlimited*/, FDBStreamingMode::FDB_STREAMING_MODE_WANT_ALL,
             //       FDBStreamingMode::FDB_STREAMING_MODE_ITERATOR,
-            0 /*iteration*/, snapshot, false /*reverse*/);
+            0 /*iteration*/, snapshot, false /*reverse*/));
 
-    RETURN_IF_ERROR(await_future(fut));
-    auto err = fdb_future_get_error(fut);
+    RETURN_IF_ERROR(await_future(fut.get()));
+    auto err = fdb_future_get_error(fut.get());
     TEST_SYNC_POINT_CALLBACK("transaction:get_range:get_err", &err);
     if (err) {
-        LOG(WARNING) << fdb_get_error(err);
+        LOG(WARNING) << "transaction get range: " << fdb_get_error(err);
         return cast_as_txn_code(err);
     }
 
-    std::unique_ptr<RangeGetIterator> ret(new RangeGetIterator(fut));
+    std::unique_ptr<RangeGetIterator> ret(new RangeGetIterator(fut.release()));
     RETURN_IF_ERROR(ret->init());
 
     *(iter) = std::move(ret);
