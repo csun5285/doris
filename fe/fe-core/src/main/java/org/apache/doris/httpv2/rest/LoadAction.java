@@ -92,7 +92,7 @@ public class LoadAction extends RestBaseController {
                              @PathVariable(value = DB_KEY) String db, @PathVariable(value = TABLE_KEY) String table) {
         boolean groupCommit = false;
         String groupCommitStr = request.getHeader("group_commit");
-        if (groupCommitStr != null && groupCommitStr.equals("async_mode")) {
+        if (groupCommitStr != null && groupCommitStr.equalsIgnoreCase("async_mode")) {
             groupCommit = true;
             try {
                 if (isGroupCommitBlock(db, table)) {
@@ -221,7 +221,7 @@ public class LoadAction extends RestBaseController {
                     }
                     String reqHostStr = request.getHeader(HttpHeaderNames.HOST.toString());
                     LOG.info("host header {}", reqHostStr);
-                    redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr);
+                    redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr, groupCommit);
                 } else {
                     redirectAddr = selectRedirectBackend(clusterName, groupCommit);
                 }
@@ -268,7 +268,7 @@ public class LoadAction extends RestBaseController {
                 }
                 String reqHostStr = request.getHeader(HttpHeaderNames.HOST.toString());
                 LOG.info("host header {}", reqHostStr);
-                redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr);
+                redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr, false);
             } else {
                 redirectAddr = selectRedirectBackend(clusterName, false);
             }
@@ -359,12 +359,13 @@ public class LoadAction extends RestBaseController {
         return Pair.of(pair[0], port);
     }
 
-    private TNetworkAddress selectCloudRedirectBackend(String clusterName, String reqHostStr) throws LoadException {
+    private TNetworkAddress selectCloudRedirectBackend(String clusterName, String reqHostStr, boolean groupCommit)
+            throws LoadException {
         List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterName(clusterName);
 
         List<Backend> backends = new ArrayList<Backend>();
         for (Backend be : clusterBes) {
-            if (be.isAlive()) {
+            if (be.isAlive() && (!groupCommit || groupCommit && !be.isDecommissioned())) {
                 backends.add(be);
             }
         }

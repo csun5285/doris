@@ -741,16 +741,16 @@ message PGlobResponse {
 }
 
 message PGroupCommitInsertRequest {
-    optional int64 db_id = 1;
-    optional int64 table_id = 2;
+    // optional int64 db_id = 1;
+    // optional int64 table_id = 2;
     //  Descriptors.TDescriptorTable
-    optional bytes desc_tbl = 3; // deprecated
-    optional int64 base_schema_version = 4;
+    // optional bytes desc_tbl = 3; // deprecated
+    // optional int64 base_schema_version = 4;
 
     // TExecPlanFragmentParams -> TPlanFragment -> PlanNodes.TPlan
-    optional bytes plan_node = 5; // deprecated
+    // optional bytes plan_node = 5; // deprecated
     // TScanRangeParams
-    optional bytes scan_range_params = 6; // deprecated
+    // optional bytes scan_range_params = 6; // deprecated
 
     optional PUniqueId load_id = 7;
     repeated PDataRow data = 8;

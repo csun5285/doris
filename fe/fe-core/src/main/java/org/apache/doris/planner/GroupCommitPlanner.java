@@ -135,9 +135,6 @@ public class GroupCommitPlanner {
             throws DdlException, RpcException, ExecutionException, InterruptedException {
         selectBackend(ctx);
         PGroupCommitInsertRequest request = PGroupCommitInsertRequest.newBuilder()
-                .setDbId(db.getId())
-                .setTableId(table.getId())
-                .setBaseSchemaVersion(table.getBaseSchemaVersion())
                 .setExecPlanFragmentRequest(InternalService.PExecPlanFragmentRequest.newBuilder()
                         .setRequest(execPlanFragmentParamsBytes)
                         .setCompact(false).setVersion(InternalService.PFragmentRequestVersion.VERSION_2).build())
@@ -230,9 +227,6 @@ public class GroupCommitPlanner {
                         throw new DdlException(ctx.getState().getErrorMessage());
                     }
                     cluster = ctx.getCloudCluster();
-                }
-                if (backend != null && backend.getCloudClusterName().equals(ctx.getCloudCluster())) {
-                    return;
                 }
                 // select be
                 List<Backend> backends = Env.getCurrentSystemInfo().getCloudIdToBackend(cluster).entrySet().stream()

@@ -70,6 +70,7 @@ private:
     int64_t _db_id;
     int64_t _table_id;
     int64_t _base_schema_version = 0;
+    int32_t _column_num = 0;
     TGroupCommitMode::type _group_commit_mode;
     UniqueId _load_id;
     std::shared_ptr<LoadBlockQueue> _load_block_queue;
