@@ -100,7 +100,13 @@ suite("test_routine_load") {
          AdminClient adminClient = AdminClient.create(props);
          def delResult = adminClient.deleteTopics([topic] as List<String>)
          println("the result is " + delResult);
+         def cnt = 0
          while (!delResult.all().isDone()) {
+             sleep(1000)
+             if (cnt++ > 100) {
+                log.info("failed to wait for delResult")
+                break
+             }
          }
 
          NewTopic newTopic = new NewTopic(topic, 10, (short)1); //new NewTopic(topicName, numPartitions, replicationFactor)
