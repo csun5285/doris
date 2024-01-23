@@ -126,8 +126,8 @@ public:
               _all_block_queues_bytes(all_block_queue_bytes),
               _db_id(db_id),
               _table_id(table_id) {};
-    Status get_first_block_load_queue(int64_t table_id, int64_t base_schema_version, int32_t column_num,
-                                      const UniqueId& load_id,
+    Status get_first_block_load_queue(int64_t table_id, int64_t base_schema_version,
+                                      int32_t column_num, const UniqueId& load_id,
                                       std::shared_ptr<LoadBlockQueue>& load_block_queue,
                                       int be_exe_version);
     Status get_load_block_queue(const TUniqueId& instance_id,
@@ -169,8 +169,8 @@ public:
     // used when init group_commit_scan_node
     Status get_load_block_queue(int64_t table_id, const TUniqueId& instance_id,
                                 std::shared_ptr<LoadBlockQueue>& load_block_queue);
-    Status get_first_block_load_queue(int64_t db_id, int64_t table_id, int64_t base_schema_version, int32_t column_num,
-                                      const UniqueId& load_id,
+    Status get_first_block_load_queue(int64_t db_id, int64_t table_id, int64_t base_schema_version,
+                                      int32_t column_num, const UniqueId& load_id,
                                       std::shared_ptr<LoadBlockQueue>& load_block_queue,
                                       int be_exe_version);
 

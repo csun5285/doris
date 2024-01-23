@@ -219,8 +219,8 @@ Status GroupCommitBlockSink::_add_blocks(RuntimeState* state,
     if (_load_block_queue == nullptr) {
         if (_state->exec_env()->wal_mgr()->is_running()) {
             RETURN_IF_ERROR(_state->exec_env()->group_commit_mgr()->get_first_block_load_queue(
-                    _db_id, _table_id, _base_schema_version, _column_num, load_id, _load_block_queue,
-                    _state->be_exec_version()));
+                    _db_id, _table_id, _base_schema_version, _column_num, load_id,
+                    _load_block_queue, _state->be_exec_version()));
             if (_group_commit_mode == TGroupCommitMode::ASYNC_MODE) {
                 size_t pre_allocated = _pre_allocated(is_blocks_contain_all_load_data);
                 _group_commit_mode = _load_block_queue->has_enough_wal_disk_space(pre_allocated)

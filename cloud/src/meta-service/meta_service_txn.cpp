@@ -18,12 +18,12 @@ struct TableStats {
 
     TableStats() = default;
 
-    TableStats(int64_t num_rows): updated_row_count(num_rows) {}
+    TableStats(int64_t num_rows) : updated_row_count(num_rows) {}
 
     std::string to_string() const {
-            std::stringstream ss;
-            ss << "updated_row_count: " << updated_row_count;
-            return ss.str();
+        std::stringstream ss;
+        ss << "updated_row_count: " << updated_row_count;
+        return ss.str();
     }
 };
 
@@ -1140,7 +1140,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
     }
 
     // calculate table stats from tablets stats
-    std::map<int64_t/*table_id*/, TableStats> table_stats;
+    std::map<int64_t /*table_id*/, TableStats> table_stats;
     calc_table_stats(table_ids, tablet_stats, table_stats);
     for (const auto& pair : table_stats) {
         TableStatsPB* stats_pb = response->add_table_stats();

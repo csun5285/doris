@@ -15,10 +15,10 @@
 #include "common/logging.h"
 #include "common/sync_point.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
+#include "meta-service/meta_service_tablet_stats.h"
 #include "meta-service/txn_kv.h"
 #include "rate-limiter/rate_limiter.h"
 #include "resource-manager/resource_manager.h"
-#include "meta-service/meta_service_tablet_stats.h"
 
 namespace selectdb {
 

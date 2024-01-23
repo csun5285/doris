@@ -287,8 +287,8 @@ Status GroupCommitTable::_create_group_commit_load(
     }
     VLOG_DEBUG << "create plan fragment, db_id=" << _db_id << ", table=" << _table_id
                << ", schema version=" << schema_version << ", column_num=" << column_num
-               << ", label=" << label << ", txn_id=" << txn_id << ", instance_id=" << print_id(instance_id)
-               << ", is_pipeline=" << is_pipeline;
+               << ", label=" << label << ", txn_id=" << txn_id
+               << ", instance_id=" << print_id(instance_id) << ", is_pipeline=" << is_pipeline;
     {
         load_block_queue = std::make_shared<LoadBlockQueue>(
                 instance_id, label, txn_id, schema_version, column_num, _all_block_queues_bytes,
