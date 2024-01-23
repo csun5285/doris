@@ -1164,6 +1164,12 @@ TEST(MetaServiceTest, CommitTxnTest) {
             CommitTxnResponse res;
             meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                      &req, &res, nullptr);
+            for (const auto& tstats : res.table_stats()) {
+                LOG(INFO) << "table_id=" << tstats.table_id()
+                          << " updatedRowCount=" << tstats.updated_row_count();
+                ASSERT_EQ(tstats.table_id(), 1234);
+                ASSERT_EQ(tstats.updated_row_count(), 500);
+            }
             ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
         }
 

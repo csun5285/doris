@@ -137,6 +137,7 @@ public:
     ThreadPool* buffered_reader_prefetch_thread_pool() {
         return _buffered_reader_prefetch_thread_pool.get();
     }
+    ThreadPool* send_table_stats_thread_pool() { return _send_table_stats_thread_pool.get(); }
     ThreadPool* s3_file_writer_upload_thread_pool() {
         return _s3_file_writer_upload_thread_pool.get();
     }
@@ -252,6 +253,8 @@ private:
     std::unique_ptr<ThreadPool> _download_cache_thread_pool;
     // Threadpool used to prefetch remote file for buffered reader
     std::unique_ptr<ThreadPool> _buffered_reader_prefetch_thread_pool;
+    // Threadpool used to send TableStats to FE
+    std::unique_ptr<ThreadPool> _send_table_stats_thread_pool;
     // Threadpool used to do s3 upload operation for s3 file writer
     std::unique_ptr<ThreadPool> _s3_file_writer_upload_thread_pool;
     // Threadpool used to do s3 get operation for s3 downloader

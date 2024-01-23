@@ -10,26 +10,34 @@
 #include <mutex>
 #include <random>
 #include <shared_mutex>
+#include <string>
 #include <vector>
 
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/status.h"
 #include "common/sync_point.h"
+#include "gen_cpp/FrontendService.h"
+#include "gen_cpp/HeartbeatService_types.h"
+#include "gen_cpp/Types_types.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gen_cpp/selectdb_cloud.pb.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset_factory.h"
 #include "olap/tablet.h"
 #include "olap/tablet_meta.h"
+#include "runtime/client_cache.h"
+#include "runtime/exec_env.h"
 #include "runtime/stream_load/stream_load_context.h"
 #include "util/network_util.h"
 #include "util/s3_util.h"
+#include "util/thrift_rpc_helper.h"
 
 namespace doris::cloud {
 using namespace ErrorCode;
 
 bvar::LatencyRecorder g_get_rowset_latency("doris_CloudMetaMgr", "get_rowset");
+bvar::LatencyRecorder g_cloud_commit_txn_resp_redirect_latency("cloud_table_stats_report_latency");
 
 static constexpr int BRPC_RETRY_TIMES = 3;
 
@@ -232,7 +240,7 @@ Status CloudMetaMgr::get_tablet_meta(int64_t tablet_id, TabletMetaSharedPtr* tab
     RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
 
     int tried = 0;
-TRY_AGAIN:
+LABEL_TRY_AGAIN:
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
     selectdb::GetTabletRequest req;
@@ -254,7 +262,7 @@ TRY_AGAIN:
                     .tag("tablet_id", tablet_id)
                     .tag("tried", tried)
                     .tag("sleep", duration_ms);
-            goto TRY_AGAIN;
+            goto LABEL_TRY_AGAIN;
         }
         return Status::RpcError("failed to get tablet meta: {}", cntl.ErrorText());
     }
@@ -277,7 +285,7 @@ Status CloudMetaMgr::sync_tablet_rowsets(Tablet* tablet, bool warmup_delta_data)
     RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
 
     int tried = 0;
-TRY_AGAIN:
+LABEL_TRY_AGAIN:
 
     brpc::Controller cntl;
     cntl.set_timeout_ms(config::meta_service_brpc_timeout_ms);
@@ -323,7 +331,7 @@ TRY_AGAIN:
                     .tag("partition_id", tablet->partition_id())
                     .tag("tried", tried)
                     .tag("sleep", duration_ms);
-            goto TRY_AGAIN;
+            goto LABEL_TRY_AGAIN;
         }
         return Status::RpcError("failed to get rowset meta: {}", cntl.ErrorText());
     }
@@ -355,7 +363,7 @@ TRY_AGAIN:
                     .tag("tablet", tablet->tablet_id())
                     .tag("tried", tried)
                     .error(st);
-            goto TRY_AGAIN;
+            goto LABEL_TRY_AGAIN;
         }
         if (!st.ok()) {
             LOG_WARNING("faild to get delete bimtap").tag("tablet", tablet->tablet_id()).error(st);
@@ -396,7 +404,7 @@ TRY_AGAIN:
                     .tag("resp_cumulative_compaction_cnt", stats.cumulative_compaction_cnt())
                     .tag("cumulative_compaction_cnt", tablet->cumulative_compaction_cnt())
                     .tag("tried", tried);
-            if (tried++ < 10) goto TRY_AGAIN;
+            if (tried++ < 10) goto LABEL_TRY_AGAIN;
             return Status::OK();
         }
         std::vector<RowsetSharedPtr> rowsets;
@@ -691,6 +699,61 @@ Status CloudMetaMgr::update_tmp_rowset(const RowsetMeta& rs_meta) {
     return Status::InternalError("failed to update committed rowset: {}", resp.status().msg());
 }
 
+// async send TableStats(in res) to FE coz we are in streamload ctx, response to the user ASAP
+static void send_stats_to_fe_async(int64_t db_id, int64_t txn_id, std::string& label,
+                                   selectdb::CommitTxnResponse& res) {
+    std::string protobufBytes;
+    res.SerializeToString(&protobufBytes);
+    auto st = ExecEnv::GetInstance()->send_table_stats_thread_pool()->submit_func(
+            [db_id, txn_id, label, protobufBytes]() -> Status {
+                TTableStatsReportRequest request;
+                TStatus result;
+
+                if (protobufBytes.length() <= 0) {
+                    LOG(WARNING) << "protobufBytes: " << protobufBytes.length();
+                    return Status::OK(); // nobody cares the return status
+                }
+
+                request.__set_dbId(db_id);
+                request.__set_txnId(txn_id);
+                request.__set_label(label);
+                request.__set_payload(protobufBytes);
+
+                Status status;
+                int64_t duration_ns = 0;
+                TNetworkAddress master_addr =
+                        ExecEnv::GetInstance()->master_info()->network_address;
+                if (master_addr.hostname.empty() || master_addr.port == 0) {
+                    status = Status::Error<doris::SERVICE_UNAVAILABLE>(
+                            "Have not get FE Master heartbeat yet");
+                } else {
+                    SCOPED_RAW_TIMER(&duration_ns);
+
+                    RETURN_IF_ERROR(ThriftRpcHelper::rpc<FrontendServiceClient>(
+                            master_addr.hostname, master_addr.port,
+                            [&request, &result](FrontendServiceConnection& client) {
+                                client->tableStatsReport(result, request);
+                            }));
+
+                    status = Status::create<false>(result);
+                }
+                g_cloud_commit_txn_resp_redirect_latency << duration_ns / 1000;
+
+                if (!status.ok()) {
+                    LOG(WARNING) << "TableStats report RPC to FE failed, errmsg=" << status
+                                 << " dbId=" << db_id << " txnId=" << txn_id << " label=" << label;
+                    return Status::OK(); // nobody cares the return status
+                } else {
+                    LOG(INFO) << "TableStats report RPC to FE success, msg=" << status
+                              << " dbId=" << db_id << " txnId=" << txn_id << " label=" << label;
+                    return Status::OK();
+                }
+            });
+    if (!st.ok()) {
+        LOG(WARNING) << "TableStats report to FE task submission failed: " << st.to_string();
+    }
+}
+
 Status CloudMetaMgr::commit_txn(StreamLoadContext* ctx, bool is_2pc) {
     VLOG_DEBUG << "commit txn, db_id: " << ctx->db_id << ", txn_id: " << ctx->txn_id
                << ", label: " << ctx->label << ", is_2pc: " << is_2pc;
@@ -700,7 +763,14 @@ Status CloudMetaMgr::commit_txn(StreamLoadContext* ctx, bool is_2pc) {
     req.set_db_id(ctx->db_id);
     req.set_txn_id(ctx->txn_id);
     req.set_is_2pc(is_2pc);
-    return retry_rpc("commit txn", req, res, std::mem_fn(&selectdb::MetaService_Stub::commit_txn));
+    auto st =
+            retry_rpc("commit txn", req, res, std::mem_fn(&selectdb::MetaService_Stub::commit_txn));
+
+    if (st.ok()) {
+        send_stats_to_fe_async(ctx->db_id, ctx->txn_id, ctx->label, res);
+    }
+
+    return st;
 }
 
 Status CloudMetaMgr::abort_txn(StreamLoadContext* ctx) {

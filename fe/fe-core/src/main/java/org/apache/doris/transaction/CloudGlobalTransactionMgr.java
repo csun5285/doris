@@ -82,6 +82,7 @@ import com.selectdb.cloud.proto.SelectdbCloud.GetTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.GetTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.LoadJobSourceTypePB;
 import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
+import com.selectdb.cloud.proto.SelectdbCloud.TableStatsPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.UniqueIdPB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
@@ -352,6 +353,14 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         if (MetricRepo.isInit) {
             MetricRepo.COUNTER_TXN_SUCCESS.increase(1L);
             MetricRepo.HISTO_TXN_EXEC_LATENCY.update(txnState.getCommitTime() - txnState.getPrepareTime());
+        }
+
+        // update rowCountfor AnalysisManager
+        for (TableStatsPB tableStats : commitTxnResponse.getTableStatsList()) {
+            LOG.info("Update RowCount for AnalysisManager. transactionId:{}, table_id:{}, updated_row_count:{}",
+                     txnState.getTransactionId(), tableStats.getTableId(), tableStats.getUpdatedRowCount());
+            Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
+                                                                       tableStats.getUpdatedRowCount());
         }
     }
 

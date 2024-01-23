@@ -140,6 +140,11 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_max_threads(64)
             .build(&_buffered_reader_prefetch_thread_pool);
 
+    ThreadPoolBuilder("SendTableStatsThreadPool")
+            .set_min_threads(8)
+            .set_max_threads(32)
+            .build(&_send_table_stats_thread_pool);
+
     ThreadPoolBuilder("S3FileWriterUploadThreadPool")
             .set_min_threads(16)
             .set_max_threads(64)
@@ -455,6 +460,7 @@ void ExecEnv::_destroy() {
     _send_batch_thread_pool.reset(nullptr);
     _buffered_reader_prefetch_thread_pool.reset(nullptr);
     _send_report_thread_pool.reset(nullptr);
+    _send_table_stats_thread_pool.reset(nullptr);
     _join_node_thread_pool.reset(nullptr);
     _serial_download_cache_thread_token.reset(nullptr);
     _download_cache_thread_pool.reset(nullptr);
