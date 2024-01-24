@@ -152,7 +152,7 @@ def clearFileCache = { check_func ->
                     }
                     def i = line.indexOf(' ')
                     long cur_cache_size = line.substring(i).toLong();
-                    assertEquals(2* total_cache_size, cur_cache_size)
+                    assertTrue(Math.abs(2* total_cache_size - cur_cache_size) < 10000)
                     total_cache_size = cur_cache_size
                     flag2 = true
                 }

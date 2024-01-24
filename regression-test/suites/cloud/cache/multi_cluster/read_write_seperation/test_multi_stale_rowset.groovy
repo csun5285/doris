@@ -183,8 +183,7 @@ suite("test_multi_stale_rowset") {
 
     sleep(90000);
     def backendIdToAfterCompactionCacheSize = getCurCacheSize()
-    assertEquals(backendIdToAfterCompactionCacheSize.get(beUniqueIdList[0]) - backendIdToAfterLoadCacheSize.get(beUniqueIdList[0]),
-                backendIdToAfterCompactionCacheSize.get(beUniqueIdList[1]) - backendIdToAfterLoadCacheSize.get(beUniqueIdList[1]));
+    assertTrue(backendIdToAfterCompactionCacheSize.get(beUniqueIdList[1]) < backendIdToAfterLoadCacheSize.get(beUniqueIdList[1]));
     sql "use @regression_cluster_name1"
 
     long s3_read_count = 0

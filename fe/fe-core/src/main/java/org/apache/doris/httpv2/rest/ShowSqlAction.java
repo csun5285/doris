@@ -31,7 +31,6 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.common.AnalysisException;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.SqlParserUtils;
@@ -194,7 +193,6 @@ public class ShowSqlAction extends RestBaseController {
     }
 
     private class InternalShowQuery {
-        private int timeout = 0;
         private final String sql;
         private final String database;
 
@@ -246,6 +244,7 @@ public class ShowSqlAction extends RestBaseController {
         }
 
         private void buildContext() {
+            context = ConnectContext.get();
             context.setEnv(Env.getCurrentEnv());
             context.setCluster(SystemInfoService.DEFAULT_CLUSTER);
 
@@ -255,9 +254,7 @@ public class ShowSqlAction extends RestBaseController {
             context.setThreadLocalInfo();
             context.setStartTime();
 
-            // If user does not set the timeout, then use max_cbo_statistics_task_timeout_sec
-            timeout = timeout > 0 ? timeout : Config.max_cbo_statistics_task_timeout_sec;
-            context.getSessionVariable().setQueryTimeoutS(timeout);
+
             String sqlHash = DigestUtils.md5Hex(sql);
             context.setSqlHash(sqlHash);
         }
