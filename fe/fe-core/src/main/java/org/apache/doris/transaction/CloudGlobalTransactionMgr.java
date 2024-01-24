@@ -362,6 +362,31 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
                                                                        tableStats.getUpdatedRowCount());
         }
+        // notify partition first load
+        int totalPartitionNum = commitTxnResponse.getPartitionIdsList().size();
+        // a map to record <tableId, [partitionIds]>
+        Map<Long, List<Long>> tablePartitionMap = Maps.newHashMap();
+        for (int idx = 0; idx < totalPartitionNum; ++idx) {
+            long version = commitTxnResponse.getVersions(idx);
+            if (version == 2) {
+                long tableId = commitTxnResponse.getTableIds(idx);
+                tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
+                tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
+                Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
+            }
+        }
+        // tablePartitionMap to string
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Long, List<Long>> entry : tablePartitionMap.entrySet()) {
+            sb.append(entry.getKey()).append(":[");
+            for (Long partitionId : entry.getValue()) {
+                sb.append(partitionId).append(",");
+            }
+            sb.append("];");
+        }
+        if (sb.length() > 0) {
+            LOG.info("notify partition first load. {}", sb);
+        }
     }
 
     private List<OlapTable> getMowTableList(List<Table> tableList) {
