@@ -132,6 +132,7 @@
 #include "util/work_thread_pool.hpp"
 #include "vec/columns/column.h"
 #include "vec/columns/column_string.h"
+#include "vec/common/schema_util.h"
 #include "vec/common/string_ref.h"
 #include "vec/data_types/data_type.h"
 #include "vec/data_types/data_type_factory.hpp"
@@ -3711,9 +3712,16 @@ Status Tablet::read_columns_by_plan(TabletSchemaSPtr tablet_schema,
     auto mutable_columns = block.mutate_columns();
     size_t read_idx = 0;
     for (auto rs_it : read_plan) {
+        auto rowset_iter = rsid_to_rowset.find(rs_it.first);
+        CHECK(rowset_iter != rsid_to_rowset.end());
+#ifdef CLOUD_MODE
+        if (!vectorized::schema_util::is_schema_compatible(*tablet_schema,
+                                                           *rowset_iter->second->tablet_schema())) {
+            return Status::InternalError<false>(
+                    "check schema compatibility failed during partial update alignment.");
+        }
+#endif
         for (auto seg_it : rs_it.second) {
-            auto rowset_iter = rsid_to_rowset.find(rs_it.first);
-            CHECK(rowset_iter != rsid_to_rowset.end());
             std::vector<uint32_t> rids;
             for (auto id_and_pos : seg_it.second) {
                 rids.emplace_back(id_and_pos.rid);

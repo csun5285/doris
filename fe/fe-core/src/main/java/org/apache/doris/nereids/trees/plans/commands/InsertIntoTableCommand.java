@@ -20,6 +20,7 @@ package org.apache.doris.nereids.trees.plans.commands;
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.util.ProfileManager.ProfileType;
 import org.apache.doris.nereids.NereidsPlanner;
@@ -146,10 +147,9 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
             throw new DdlException("txn does not exist: " + txn.getTxnId());
         }
         state.addTableIndexes(physicalOlapTableSink.getTargetTable());
-        if (physicalOlapTableSink.isPartialUpdate()) {
+        if (!Config.isCloudMode() && physicalOlapTableSink.isPartialUpdate()) {
             state.setSchemaForPartialUpdate(physicalOlapTableSink.getTargetTable());
         }
-
         executor.setProfileType(ProfileType.LOAD);
 
         LOG.info("Nereids start to execute the insert command, query id: {}, txn id: {}",

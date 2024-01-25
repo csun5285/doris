@@ -36,6 +36,7 @@ import org.apache.doris.catalog.TableIf;
 import org.apache.doris.catalog.external.JdbcExternalDatabase;
 import org.apache.doris.catalog.external.JdbcExternalTable;
 import org.apache.doris.common.AnalysisException;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
@@ -977,7 +978,7 @@ public class NativeInsertStmt extends InsertStmt {
                 throw new DdlException("txn does not exist: " + transactionId);
             }
             txnState.addTableIndexes((OlapTable) targetTable);
-            if (isPartialUpdate) {
+            if (!Config.isCloudMode() && isPartialUpdate) {
                 txnState.setSchemaForPartialUpdate((OlapTable) targetTable);
             }
         }

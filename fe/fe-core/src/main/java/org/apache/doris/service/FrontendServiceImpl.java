@@ -2223,7 +2223,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 if (txnState == null) {
                     throw new UserException("txn does not exist: " + request.getTxnId());
                 }
-                if (request.isPartialUpdate()) {
+                if (!Config.isCloudMode() && request.isPartialUpdate()) {
                     txnState.setSchemaForPartialUpdate(table);
                 }
                 txnState.addTableIndexes(table);
@@ -2289,7 +2289,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 if (txnState == null) {
                     throw new UserException("txn does not exist: " + request.getTxnId());
                 }
-                if (request.isPartialUpdate()) {
+                if (!Config.isCloudMode() && request.isPartialUpdate()) {
                     txnState.setSchemaForPartialUpdate(table);
                 }
                 txnState.addTableIndexes(table);

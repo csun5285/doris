@@ -675,7 +675,7 @@ public class DatabaseTransactionMgr {
                     + "] is prepare, not pre-committed.");
         }
 
-        if (transactionState.isPartialUpdate()) {
+        if (!Config.isCloudMode() && transactionState.isPartialUpdate()) {
             if (is2PC) {
                 Iterator<TableCommitInfo> tableCommitInfoIterator
                         = transactionState.getIdToTableCommitInfos().values().iterator();

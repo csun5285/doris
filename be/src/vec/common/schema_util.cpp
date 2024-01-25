@@ -130,6 +130,36 @@ bool is_conversion_required_between_integers(FieldType lhs, FieldType rhs) {
     return true;
 }
 
+bool is_schema_compatible(const TabletSchema& current_schema, const TabletSchema& prev_schema) {
+    if (current_schema.schema_version() >= prev_schema.schema_version()) {
+        return true;
+    }
+
+    const auto& prev_columns = prev_schema.columns();
+    for (const auto& column : current_schema.columns()) {
+        if (!column.visible() || !field_is_slice_type(column.type())) {
+            continue;
+        }
+        if (auto it = std::find_if(
+                    prev_columns.cbegin(), prev_columns.cend(),
+                    [&](const auto& col) { return col.unique_id() == column.unique_id(); });
+            it != prev_columns.cend()) {
+            if (column.length() != it->length()) {
+                LOG(WARNING) << fmt::format(
+                        "[partial update] check schema compatibility failed during partial update "
+                        "alignment. column[unique_id={}], table[table_id={}], "
+                        "current_schema[schema_version={}, column_name={}, length={}], "
+                        "previous_schema[schema_version={}, column_name={}, length={}].",
+                        column.unique_id(), current_schema.table_id(),
+                        current_schema.schema_version(), column.name(), column.length(),
+                        prev_schema.schema_version(), it->name(), it->length());
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 Status cast_column(const ColumnWithTypeAndName& arg, const DataTypePtr& type, ColumnPtr* result,
                    RuntimeState* state) {
     ColumnsWithTypeAndName arguments;
