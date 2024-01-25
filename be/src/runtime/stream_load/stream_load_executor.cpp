@@ -296,6 +296,9 @@ void StreamLoadExecutor::get_commit_request(StreamLoadContext* ctx,
         request.db_id = ctx->db_id;
         request.__isset.db_id = true;
     }
+    if (ctx->table_id) {
+        request.__set_table_id(ctx->table_id);
+    }
     request.tbl = ctx->table;
     request.txnId = ctx->txn_id;
     request.sync = true;

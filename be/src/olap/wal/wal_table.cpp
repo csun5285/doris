@@ -220,8 +220,7 @@ Status WalTable::_handle_stream_load(int64_t wal_id, const std::string& wal,
     ctx->wal_id = wal_id;
     ctx->label = label;
     ctx->table_id = _table_id;
-    ctx->auth.token = "relay_wal"; // this is a fake, fe not check it now
-    ctx->auth.user = "admin";
+    ctx->auth.auth_code = wal_id;
     ctx->group_commit = false;
     ctx->format = TFileFormatType::FORMAT_WAL;
     RETURN_IF_ERROR(_exec_env->stream_load_executor()->begin_txn(ctx.get()));

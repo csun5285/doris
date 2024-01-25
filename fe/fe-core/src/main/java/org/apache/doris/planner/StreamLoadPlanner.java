@@ -54,6 +54,7 @@ import org.apache.doris.task.StreamLoadTask;
 import org.apache.doris.thrift.PaloInternalServiceVersion;
 import org.apache.doris.thrift.TBrokerFileStatus;
 import org.apache.doris.thrift.TExecPlanFragmentParams;
+import org.apache.doris.thrift.TFileFormatType;
 import org.apache.doris.thrift.TFileType;
 import org.apache.doris.thrift.TNetworkAddress;
 import org.apache.doris.thrift.TPipelineFragmentParams;
@@ -503,7 +504,9 @@ public class StreamLoadPlanner {
 
     protected ScanNode createScanNode(TUniqueId loadId, TupleDescriptor scanTupleDesc)
             throws AnalysisException, DdlException {
-        FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc);
+        boolean replayWal = taskInfo.getFormatType() == TFileFormatType.FORMAT_WAL;
+        FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc,
+                replayWal);
         // 1. create file group
         DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
         dataDescription.analyzeWithoutCheckPriv(db.getFullName());

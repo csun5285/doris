@@ -87,12 +87,15 @@ public class FileLoadScanNode extends FileScanNode {
     // For load, the num of ParamCreateContext equals to the num of file group infos.
     private final List<ParamCreateContext> contexts = Lists.newArrayList();
 
+    private boolean replayWal;
+
     /**
      * External file scan node for load from file
      * These scan nodes do not have corresponding catalog/database/table info, so no need to do priv check
      */
-    public FileLoadScanNode(PlanNodeId id, TupleDescriptor desc) {
+    public FileLoadScanNode(PlanNodeId id, TupleDescriptor desc, boolean replayWal) {
         super(id, desc, "FILE_LOAD_SCAN_NODE", StatisticalType.FILE_SCAN_NODE, false);
+        this.replayWal = replayWal;
     }
 
     // Only for broker load job.
@@ -250,6 +253,9 @@ public class FileLoadScanNode extends FileScanNode {
                         srcSlotDesc.setIsNullable(true);
                     }
                     expr = new SlotRef(srcSlotDesc);
+                    if (replayWal) {
+                        expr.setType(destSlotDesc.getType());
+                    }
                 } else {
                     Column column = destSlotDesc.getColumn();
                     if (column.getDefaultValue() != null) {
@@ -270,7 +276,7 @@ public class FileLoadScanNode extends FileScanNode {
             }
 
             // check hll_hash
-            if (destSlotDesc.getType().getPrimitiveType() == PrimitiveType.HLL) {
+            if (destSlotDesc.getType().getPrimitiveType() == PrimitiveType.HLL && !replayWal) {
                 if (!(expr instanceof FunctionCallExpr)) {
                     throw new AnalysisException("HLL column must use " + FunctionSet.HLL_HASH + " function, like "
                         + destSlotDesc.getColumn().getName() + "=" + FunctionSet.HLL_HASH + "(xxx)");

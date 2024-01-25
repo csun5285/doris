@@ -956,7 +956,7 @@ public class DataDescription implements InsertStmt.DataDesc {
                 }
             }
         } else {
-            List<Column> columns = olapTable.getBaseSchema();
+            List<Column> columns = olapTable.getBaseSchema(true);
             for (Column column : columns) {
                 if (column.getName().equalsIgnoreCase(sequenceCol)) {
                     hasSourceSequenceCol = true;

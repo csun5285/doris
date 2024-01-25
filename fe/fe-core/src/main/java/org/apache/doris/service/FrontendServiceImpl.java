@@ -2186,6 +2186,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             }
             table = db.getTableOrMetaException(request.getTbl(), TableType.OLAP);
         }
+        if (((OlapTable) table).hasSequenceCol() && request.getFormatType() == TFileFormatType.FORMAT_WAL) {
+            request.setSequenceCol("__DORIS_SEQUENCE_COL__");
+        }
         long timeoutMs = request.isSetThriftRpcTimeoutMs() ? request.getThriftRpcTimeoutMs() : 5000;
         return generatePlanFragmentParams(request, db, db.getFullName(), (OlapTable) table, timeoutMs);
     }

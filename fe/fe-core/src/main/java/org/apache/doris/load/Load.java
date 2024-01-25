@@ -772,7 +772,9 @@ public class Load {
 
         // in vectorized load, reanalyze exprs with castExpr type
         // otherwise analyze exprs with varchar type
-        analyzeAllExprs(tbl, analyzer, exprsByName, mvDefineExpr, slotDescByName);
+        boolean replayWal = formatType == TFileFormatType.FORMAT_WAL;
+        analyzeAllExprs(tbl, analyzer, exprsByName, mvDefineExpr, slotDescByName,
+                replayWal);
         LOG.debug("after init column, exprMap: {}", exprsByName);
     }
 
@@ -801,7 +803,8 @@ public class Load {
     }
 
     private static void analyzeAllExprs(Table tbl, Analyzer analyzer, Map<String, Expr> exprsByName,
-            Map<String, Expr> mvDefineExpr, Map<String, SlotDescriptor> slotDescByName) throws UserException {
+            Map<String, Expr> mvDefineExpr, Map<String, SlotDescriptor> slotDescByName, boolean replayWal)
+            throws UserException {
         // analyze all exprs
         for (Map.Entry<String, Expr> entry : exprsByName.entrySet()) {
             ExprSubstitutionMap smap = new ExprSubstitutionMap();
@@ -810,6 +813,9 @@ public class Load {
             for (SlotRef slot : slots) {
                 SlotDescriptor slotDesc = slotDescByName.get(slot.getColumnName());
                 if (slotDesc == null) {
+                    if (replayWal) {
+                        continue;
+                    }
                     if (entry.getKey() != null) {
                         if (entry.getKey().equalsIgnoreCase(Column.DELETE_SIGN)) {
                             throw new UserException("unknown reference column in DELETE ON clause:"

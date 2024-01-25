@@ -66,7 +66,7 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
     //convert to dst block
     vectorized::Block dst_block;
     int index = 0;
-    auto columns = block->get_columns_with_type_and_name();
+    auto columns = src_block.get_columns_with_type_and_name();
     if (columns.size() != _tuple_descriptor->slots().size()) {
         return Status::InternalError(
                 "not equal columns size=" + std::to_string(columns.size()) + " vs " +
@@ -76,8 +76,13 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
     for (auto slot_desc : _tuple_descriptor->slots()) {
         auto it = _column_pos_map.find(slot_desc->col_unique_id());
         if (it != _column_pos_map.end()) {
-            auto pos = it->second;
+            if (it->second.empty()) {
+                return Status::InternalError("pos list is empty");
+            }
+            auto pos = it->second.front();
+            it->second.pop_front();
             column_ptr = src_block.get_by_position(pos).column;
+            it->second.emplace_back(pos);
         } else {
             auto default_it = _col_default_value_ctx.find(slot_desc->col_name());
             if (default_it != _col_default_value_ctx.end()) {
@@ -85,13 +90,13 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
                 st = default_it->second->execute(&src_block, &result_column_id);
                 column_ptr = src_block.get_by_position(result_column_id).column;
                 column_ptr = column_ptr->convert_to_full_column_if_const();
-                if (column_ptr != nullptr && slot_desc->is_nullable()) {
-                    column_ptr = make_nullable(column_ptr);
-                }
             } else {
                 return Status::InternalError("can't find default_value for column " +
                                              slot_desc->col_name());
             }
+        }
+        if (column_ptr != nullptr && slot_desc->is_nullable()) {
+            column_ptr = make_nullable(column_ptr);
         }
         DataTypePtr data_type;
         RETURN_IF_CATCH_EXCEPTION(data_type = DataTypeFactory::instance().create_data_type(
@@ -116,7 +121,14 @@ Status WalReader::get_columns(std::unordered_map<std::string, TypeDescriptor>* n
         int64_t pos = 0;
         for (auto col_id_str : column_id_vector) {
             auto col_id = std::strtoll(col_id_str.c_str(), NULL, 10);
-            _column_pos_map.emplace(col_id, pos);
+            auto it = _column_pos_map.find(col_id);
+            if (it == _column_pos_map.end()) {
+                std::list<int64_t> list;
+                list.emplace_back(pos);
+                _column_pos_map.emplace(col_id, list);
+            } else {
+                it->second.emplace_back(pos);
+            }
             pos++;
         }
     } catch (const std::invalid_argument& e) {

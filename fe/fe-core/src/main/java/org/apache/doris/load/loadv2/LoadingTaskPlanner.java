@@ -203,7 +203,7 @@ public class LoadingTaskPlanner {
         // Generate plan trees
         // 1. Broker scan node
         ScanNode scanNode;
-        scanNode = new FileLoadScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc);
+        scanNode = new FileLoadScanNode(new PlanNodeId(nextNodeId++), scanTupleDesc, false);
         ((FileLoadScanNode) scanNode).setLoadInfo(loadJobId, txnId, table, brokerDesc, fileGroups,
                 fileStatusesList, filesAdded, strictMode, loadParallelism, userInfo);
         scanNode.init(analyzer);
