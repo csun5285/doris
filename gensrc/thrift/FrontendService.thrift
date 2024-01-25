@@ -1275,7 +1275,7 @@ struct TGetBackendMetaResult {
     3: optional Types.TNetworkAddress master_address
 }
 
-struct TTableStatsReportRequest {
+struct TReportCommitTxnResultRequest {
     1: optional i64 dbId
     2: optional i64 txnId
     3: optional string label
@@ -1358,5 +1358,5 @@ service FrontendService {
 
     Status.TStatus invalidateStatsCache(1: TInvalidateFollowerStatsCacheRequest request)
 
-    Status.TStatus tableStatsReport(1: TTableStatsReportRequest request)
+    Status.TStatus reportCommitTxnResult(1: TReportCommitTxnResultRequest request)
 }

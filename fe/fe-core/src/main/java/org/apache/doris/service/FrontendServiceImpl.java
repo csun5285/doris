@@ -166,6 +166,7 @@ import org.apache.doris.thrift.TPrivilegeStatus;
 import org.apache.doris.thrift.TPrivilegeType;
 import org.apache.doris.thrift.TQueryStatsResult;
 import org.apache.doris.thrift.TReplicaInfo;
+import org.apache.doris.thrift.TReportCommitTxnResultRequest;
 import org.apache.doris.thrift.TReportExecStatusParams;
 import org.apache.doris.thrift.TReportExecStatusResult;
 import org.apache.doris.thrift.TReportRequest;
@@ -188,7 +189,6 @@ import org.apache.doris.thrift.TTableIndexQueryStats;
 import org.apache.doris.thrift.TTableMetadataNameIds;
 import org.apache.doris.thrift.TTableQueryStats;
 import org.apache.doris.thrift.TTableRef;
-import org.apache.doris.thrift.TTableStatsReportRequest;
 import org.apache.doris.thrift.TTableStatus;
 import org.apache.doris.thrift.TTxnParams;
 import org.apache.doris.thrift.TUniqueId;
@@ -3379,7 +3379,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         public long updatedRowCount;
     }
 
-    public TStatus tableStatsReport(TTableStatsReportRequest request) throws TException {
+    public TStatus reportCommitTxnResult(TReportCommitTxnResultRequest request) throws TException {
         String clientAddr = getClientAddrAsString();
         // FE only has one master, this should not be a problem
         if (!Env.getCurrentEnv().isMaster()) {

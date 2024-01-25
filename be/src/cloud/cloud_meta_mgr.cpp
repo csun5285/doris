@@ -706,7 +706,7 @@ static void send_stats_to_fe_async(int64_t db_id, int64_t txn_id, std::string& l
     res.SerializeToString(&protobufBytes);
     auto st = ExecEnv::GetInstance()->send_table_stats_thread_pool()->submit_func(
             [db_id, txn_id, label, protobufBytes]() -> Status {
-                TTableStatsReportRequest request;
+                TReportCommitTxnResultRequest request;
                 TStatus result;
 
                 if (protobufBytes.length() <= 0) {
@@ -732,7 +732,7 @@ static void send_stats_to_fe_async(int64_t db_id, int64_t txn_id, std::string& l
                     RETURN_IF_ERROR(ThriftRpcHelper::rpc<FrontendServiceClient>(
                             master_addr.hostname, master_addr.port,
                             [&request, &result](FrontendServiceConnection& client) {
-                                client->tableStatsReport(result, request);
+                                client->reportCommitTxnResult(result, request);
                             }));
 
                     status = Status::create<false>(result);
