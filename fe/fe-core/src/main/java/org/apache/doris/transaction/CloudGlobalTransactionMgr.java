@@ -23,6 +23,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.Table;
+import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.catalog.TabletMeta;
 import org.apache.doris.common.AnalysisException;
@@ -64,6 +65,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.selectdb.cloud.catalog.CloudPartition;
 import com.selectdb.cloud.proto.SelectdbCloud.AbortTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.AbortTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.BeginTxnRequest;
@@ -372,7 +374,22 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                 long tableId = commitTxnResponse.getTableIds(idx);
                 tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
                 tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
+                // 1. inform AnalysisManager
                 Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
+                // 2. update CloudPartition
+                Env env = Env.getCurrentEnv();
+                OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(dbId)
+                        .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
+                        .orElse(null);
+                if (olapTable == null) {
+                    continue;
+                }
+                CloudPartition partition = (CloudPartition) olapTable.getPartition(
+                        commitTxnResponse.getPartitionIds(idx));
+                if (partition == null) {
+                    continue;
+                }
+                partition.setCachedVisibleVersion(2);
             }
         }
         // tablePartitionMap to string

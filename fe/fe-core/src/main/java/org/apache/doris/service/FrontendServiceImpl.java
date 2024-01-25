@@ -209,6 +209,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.selectdb.cloud.catalog.CloudPartition;
 import com.selectdb.cloud.proto.SelectdbCloud.CommitTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.TableStatsPB;
 import org.apache.commons.collections.CollectionUtils;
@@ -3415,7 +3416,22 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                     long tableId = commitTxnResponse.getTableIds(idx);
                     tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
                     tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
+                    // 1. inform AnalysisManager
                     Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
+                    // 2. update CloudPartition
+                    Env env = Env.getCurrentEnv();
+                    OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(request.getDbId())
+                            .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
+                            .orElse(null);
+                    if (olapTable == null) {
+                        continue;
+                    }
+                    CloudPartition partition = (CloudPartition) olapTable.getPartition(
+                            commitTxnResponse.getPartitionIds(idx));
+                    if (partition == null) {
+                        continue;
+                    }
+                    partition.setCachedVisibleVersion(2);
                 }
             }
             // tablePartitionMap to string
