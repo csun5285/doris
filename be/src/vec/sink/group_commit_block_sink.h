@@ -79,6 +79,9 @@ private:
     bool _is_block_appended = false;
     double _max_filter_ratio = 0.0;
     std::vector<char> _filter_bitmap;
+
+    // used for find_partition
+    VOlapTablePartitionParam* _vpartition = nullptr;
 };
 
 } // namespace vectorized

@@ -56,6 +56,8 @@ Status GroupCommitBlockSink::init(const TDataSink& t_sink) {
     _group_commit_mode = table_sink.group_commit_mode;
     _load_id = table_sink.load_id;
     _max_filter_ratio = table_sink.max_filter_ratio;
+    _vpartition = new doris::VOlapTablePartitionParam(_schema, table_sink.partition);
+    RETURN_IF_ERROR(_vpartition->init());
     return Status::OK();
 }
 
@@ -163,6 +165,30 @@ Status GroupCommitBlockSink::send(RuntimeState* state, vectorized::Block* input_
             return Status::EndOfFile("Encountered unqualified data, stop processing");
         }
         _validator->convert_to_dest_desc_block(&block);
+    }
+
+    //reuse vars for find_partition
+    bool has_filtered_rows = false;
+    for (int row_index = 0; row_index < rows; row_index++) {
+        BlockRow block_row;
+        block_row = {&block, row_index};
+        const VOlapTablePartition* partition = nullptr;
+        if (!_vpartition->find_partition(&block_row, &partition)) {
+            LOG(WARNING) << "no partition for this tuple. tuple=" << block.dump_data(row_index, 1);
+            _filter_bitmap[row_index] = true;
+            has_filtered_rows = true;
+        }
+    }
+    if (filtered_rows > 0 || has_filtered_rows) {
+        auto cloneBlock = block.clone_without_columns();
+        auto res_block = vectorized::MutableBlock::build_mutable_block(&cloneBlock);
+        for (int i = 0; i < rows; ++i) {
+            if (_filter_bitmap[i]) {
+                continue;
+            }
+            res_block.add_row(&block, i);
+        }
+        block.swap(res_block.to_block());
     }
 
     // add block into block queue
