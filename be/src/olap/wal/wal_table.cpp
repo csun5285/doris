@@ -179,7 +179,7 @@ Status WalTable::_try_abort_txn(int64_t db_id, std::string& label) {
                 client->loadTxnRollback(result, request);
             },
             10000L);
-    auto result_status = Status::create(result.status);
+    auto result_status = Status::create<false>(result.status);
     LOG(INFO) << "abort label " << label << ", st:" << st << ", result_status:" << result_status;
     return result_status;
 }
