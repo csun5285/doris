@@ -78,8 +78,7 @@ bool is_conversion_required_between_integers(FieldType lhs, FieldType rhs);
 
 // for partial update only, check if we can read data from old rowsets with different schema safely
 // during alignment.
-bool is_schema_compatible(const TabletSchema& current_schema,
-                                 const TabletSchema& prev_schema);
+bool is_schema_compatible(const TabletSchema& current_schema, const TabletSchema& prev_schema);
 
 // Align block schema with tablet schema
 // eg.
