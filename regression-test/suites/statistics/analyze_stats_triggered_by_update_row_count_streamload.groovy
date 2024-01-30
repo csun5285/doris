@@ -20,10 +20,6 @@ import java.text.SimpleDateFormat
 // under the License.
 
 suite("test_analyze_triggered_by_update_row_count_streamload") {
-
-
-    String db = "test_analyze_triggered_by_update_row_count"
-
     String tbl = "analyzetestlimited_agg_streamload"
 
     sql "show tables"
