@@ -177,6 +177,8 @@ public:
 
     bool get_lazy_open_success() { return _lazy_open_done; }
 
+    void update_ttl_atime(const Key& file_key);
+
     BlockFileCache& operator=(const BlockFileCache&) = delete;
     BlockFileCache(const BlockFileCache&) = delete;
 

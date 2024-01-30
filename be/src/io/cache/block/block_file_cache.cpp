@@ -27,12 +27,14 @@
 #include <chrono> // IWYU pragma: keep
 #include <filesystem>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <system_error>
 #include <utility>
 
 #include "common/logging.h"
 #include "common/status.h"
+#include "common/config.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
@@ -42,7 +44,7 @@
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
 
-namespace fs = std::filesystem;
+        namespace fs = std::filesystem;
 
 namespace doris {
 namespace io {
@@ -311,14 +313,22 @@ void BlockFileCache::clear_file_cache_async() {
             _async_clear_file_cache = true;
         }
     }
-    TEST_SYNC_POINT_CALLBACK("BlockFileCache::recycle_deleted_blocks");
 }
 
 void BlockFileCache::recycle_deleted_blocks() {
+    using namespace std::chrono;
+    static int remove_batch = 100;
+    TEST_SYNC_POINT_CALLBACK("BlockFileCache::set_remove_batch", &remove_batch);
+    TEST_SYNC_POINT_CALLBACK("BlockFileCache::recycle_deleted_blocks");
     std::unique_lock cache_lock(_mutex);
+    auto remove_file_block = [&cache_lock, this](FileBlockCell* cell) {
+        std::lock_guard segment_lock(cell->file_block->_mutex);
+        remove(cell->file_block, cache_lock, segment_lock);
+    };
+    int i = 0;
+    std::condition_variable cond;
+    auto start_time = steady_clock::time_point();
     if (_async_clear_file_cache) {
-        using namespace std::chrono;
-        auto start_time = steady_clock::time_point();
         LOG_INFO("Start clear file cache async").tag("path", _cache_base_path);
         auto remove_file_block = [&cache_lock, this](FileBlockCell* cell) {
             std::lock_guard segment_lock(cell->file_block->_mutex);
@@ -346,7 +356,7 @@ void BlockFileCache::recycle_deleted_blocks() {
                         cells.push_back(cell);
                     }
                 }
-                std::for_each(cells.begin(), cells.end(), remove_file_block);
+                std::ranges::for_each(cells, remove_file_block);
                 // just for sleep
                 cond.wait_for(cache_lock, std::chrono::microseconds(100));
             }
@@ -354,6 +364,8 @@ void BlockFileCache::recycle_deleted_blocks() {
         iter_queue(get_queue(FileCacheType::DISPOSABLE));
         iter_queue(get_queue(FileCacheType::NORMAL));
         iter_queue(get_queue(FileCacheType::INDEX));
+    }
+    if (_async_clear_file_cache || config::file_cache_ttl_valid_check_interval_second != 0) {
         std::vector<Key> ttl_keys;
         ttl_keys.reserve(_key_to_time.size());
         for (auto& [key, _] : _key_to_time) {
@@ -369,6 +381,17 @@ void BlockFileCache::recycle_deleted_blocks() {
                 std::vector<FileBlockCell*> cells;
                 cells.reserve(iter->second.size());
                 for (auto& [_, cell] : iter->second) {
+                    cell.is_deleted =
+                            cell.is_deleted
+                                    ? true
+                                    : (config::file_cache_ttl_valid_check_interval_second == 0
+                                               ? false
+                                               : std::chrono::duration_cast<std::chrono::seconds>(
+                                                         std::chrono::steady_clock::now()
+                                                                 .time_since_epoch())
+                                                                         .count() -
+                                                                 cell.atime >
+                                                         config::file_cache_ttl_valid_check_interval_second);
                     if (!cell.is_deleted) {
                         continue;
                     } else if (cell.releasable()) {
@@ -376,14 +399,16 @@ void BlockFileCache::recycle_deleted_blocks() {
                         i++;
                     }
                 }
-                std::for_each(cells.begin(), cells.end(), remove_file_block);
+                std::ranges::for_each(cells, remove_file_block);
             }
         }
-        _async_clear_file_cache = false;
-        auto use_time = duration_cast<milliseconds>(steady_clock::time_point() - start_time);
-        LOG_INFO("End clear file cache async")
-                .tag("path", _async_clear_file_cache)
-                .tag("use_time", static_cast<int64_t>(use_time.count()));
+        if (_async_clear_file_cache) {
+            _async_clear_file_cache = false;
+            auto use_time = duration_cast<milliseconds>(steady_clock::time_point() - start_time);
+            LOG_INFO("End clear file cache async")
+                    .tag("path", _async_clear_file_cache)
+                    .tag("use_time", static_cast<int64_t>(use_time.count()));
+        }
     }
 }
 
@@ -1488,6 +1513,9 @@ BlockFileCache::FileBlockCell::FileBlockCell(FileBlockSPtr file_block, FileCache
         DCHECK(false) << "Can create cell with either EMPTY, DOWNLOADED, SKIP_CACHE state, got: "
                       << FileBlock::state_to_string(file_block->_download_state);
     }
+    if (cache_type == FileCacheType::TTL) {
+        update_atime();
+    }
 }
 
 BlockFileCache::LRUQueue::Iterator BlockFileCache::LRUQueue::add(
@@ -1845,6 +1873,15 @@ bool BlockFileCache::try_reserve_for_lazy_load(size_t size,
     std::for_each(to_evict.begin(), to_evict.end(), remove_file_block_if);
 
     return !_disk_resource_limit_mode || removed_size >= size;
+}
+
+void BlockFileCache::update_ttl_atime(const Key& file_key) {
+    std::lock_guard lock(_mutex);
+    if (auto iter = _files.find(file_key); iter != _files.end()) {
+        for (auto& [_, cell] : iter->second) {
+            cell.update_atime();
+        }
+    };
 }
 
 } // namespace io

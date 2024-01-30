@@ -268,6 +268,9 @@ private:
     void _vacuum_stale_rowsets_thread_callback();
 
     // CLOUD_MODE
+    void _check_file_cache_ttl_block_valid();
+
+    // CLOUD_MODE
     void _sync_tablets_thread_callback();
 
     // CLOUD_MODE

@@ -25,6 +25,7 @@
 #include <ctime>
 #include <random>
 #include <string>
+#include <ranges>
 
 #include "cloud/cloud_base_compaction.h"
 #include "cloud/cloud_cumulative_compaction.h"
@@ -35,6 +36,7 @@
 #include "common/logging.h"
 #include "common/status.h"
 #include "gutil/strings/substitute.h"
+#include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/s3_file_system.h"
 #include "olap/cumulative_compaction.h"
 #include "olap/cumulative_compaction_policy.h"
@@ -138,6 +140,14 @@ Status StorageEngine::cloud_start_bg_threads() {
             [this]() { this->_vacuum_stale_rowsets_thread_callback(); },
             &_bg_threads.emplace_back()));
     LOG(INFO) << "vacuum stale rowsets thread started";
+
+    if (config::file_cache_ttl_valid_check_interval_second != 0) {
+        RETURN_IF_ERROR(Thread::create(
+                "StorageEngine", "check_file_cache_ttl_block_valid_thread",
+                [this]() { this->_check_file_cache_ttl_block_valid(); },
+                &_bg_threads.emplace_back()));
+        LOG(INFO) << "check file cache ttl block valid thread started";
+    }
 
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "sync_tablets_thread",
@@ -244,6 +254,34 @@ void StorageEngine::_vacuum_stale_rowsets_thread_callback() {
     while (!_stop_background_threads_latch.wait_for(
             std::chrono::seconds(config::vacuum_stale_rowsets_interval_seconds))) {
         cloud::tablet_mgr()->vacuum_stale_rowsets();
+    }
+}
+
+void StorageEngine::_check_file_cache_ttl_block_valid() {
+    int64_t interval_seconds = config::file_cache_ttl_valid_check_interval_second / 2;
+    auto check_ttl = [](std::weak_ptr<Tablet>& tablet_wk) {
+        auto tablet = tablet_wk.lock();
+        if (!tablet) return;
+        if (tablet->tablet_meta()->ttl_seconds() == 0) return;
+        auto rowsets = tablet->get_snapshot_rowset();
+        std::ranges::for_each(rowsets, [ttl_seconds = tablet->tablet_meta()->ttl_seconds()](RowsetSharedPtr& rowset){
+            if (rowset->newest_write_timestamp() + ttl_seconds > UnixSeconds()) { // still valid
+                std::ranges::for_each(
+                    std::ranges::iota_view{0, rowset->num_segments()} |
+                    std::views::transform([&](int32_t seg_id) {
+                        auto seg_path = rowset->segment_file_path(seg_id);
+                        return io::BlockFileCache::hash(io::Path(seg_path).filename().native());
+                    }), [](const io::Key& key) {
+                        auto file_cache = io::FileCacheFactory::instance().get_by_path(key);
+                        file_cache->update_ttl_atime(key);
+                    });
+            }
+        });
+    };
+    while (!_stop_background_threads_latch.wait_for(
+            std::chrono::seconds(interval_seconds))) {
+        auto weak_tablets = cloud::tablet_mgr()->get_weak_tablets();
+        std::ranges::for_each(weak_tablets, check_ttl);
     }
 }
 
