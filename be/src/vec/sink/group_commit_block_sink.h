@@ -81,7 +81,7 @@ private:
     std::vector<char> _filter_bitmap;
 
     // used for find_partition
-    VOlapTablePartitionParam* _vpartition = nullptr;
+    std::unique_ptr<VOlapTablePartitionParam> _vpartition = nullptr;
 };
 
 } // namespace vectorized
