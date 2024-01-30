@@ -223,6 +223,8 @@ Status WalTable::_handle_stream_load(int64_t wal_id, const std::string& wal,
     ctx->auth.auth_code = wal_id;
     ctx->group_commit = false;
     ctx->format = TFileFormatType::FORMAT_WAL;
+    ctx->load_type = TLoadType::MANUL_LOAD;
+    ctx->load_src_type = TLoadSourceType::RAW;
     RETURN_IF_ERROR(_exec_env->stream_load_executor()->begin_txn(ctx.get()));
     auto st = _stream_load_action->process_put(nullptr, ctx);
     if (st.ok()) {
