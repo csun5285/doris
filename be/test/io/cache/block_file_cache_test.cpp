@@ -3770,7 +3770,7 @@ TEST_F(BlockFileCacheTest, recyle_unvalid_ttl_async) {
     context.cache_type = io::FileCacheType::TTL;
     context.expiration_time = UnixSeconds() + 3600;
     auto sp = SyncPoint::get_instance();
-    Defer defer {[sp] { 
+    Defer defer {[sp] {
         sp->clear_call_back("BlockFileCache::set_remove_batch");
         sp->clear_call_back("BlockFileCache::recycle_deleted_blocks");
         sp->clear_call_back("BlockFileCache::set_sleep_time");
@@ -3779,9 +3779,8 @@ TEST_F(BlockFileCacheTest, recyle_unvalid_ttl_async) {
                       [](auto&& args) { *try_any_cast<int64_t*>(args[0]) = 1; });
     sp->set_call_back("BlockFileCache::set_remove_batch",
                       [](auto&& args) { *try_any_cast<int*>(args[0]) = 2; });
-    sp->set_call_back("BlockFileCache::recycle_deleted_blocks", [&](auto&&) {
-        cache.get_or_set(key, 0, 5, context);
-    });
+    sp->set_call_back("BlockFileCache::recycle_deleted_blocks",
+                      [&](auto&&) { cache.get_or_set(key, 0, 5, context); });
     sp->enable_processing();
     ASSERT_TRUE(cache.initialize());
     for (int i = 0; i < 100; i++) {
@@ -3794,13 +3793,15 @@ TEST_F(BlockFileCacheTest, recyle_unvalid_ttl_async) {
         auto holder = cache.get_or_set(key, offset, 5, context);
         auto segments = fromHolder(holder);
         ASSERT_EQ(segments.size(), 1);
-        assert_range(1, segments[0], io::FileBlock::Range(offset, offset + 4), io::FileBlock::State::EMPTY);
+        assert_range(1, segments[0], io::FileBlock::Range(offset, offset + 4),
+                     io::FileBlock::State::EMPTY);
         ASSERT_TRUE(segments[0]->get_or_set_downloader() == io::FileBlock::get_caller_id());
         download(segments[0]);
         assert_range(1, segments[0], io::FileBlock::Range(offset, offset + 4),
                      io::FileBlock::State::DOWNLOADED);
     }
-    std::this_thread::sleep_for(std::chrono::seconds(config::file_cache_ttl_valid_check_interval_second + 2));
+    std::this_thread::sleep_for(
+            std::chrono::seconds(config::file_cache_ttl_valid_check_interval_second + 2));
     config::file_cache_ttl_valid_check_interval_second = 0;
     EXPECT_EQ(cache._cur_cache_size, 5);
     if (fs::exists(cache_base_path)) {

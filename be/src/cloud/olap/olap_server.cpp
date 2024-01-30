@@ -24,8 +24,8 @@
 #include <cmath>
 #include <ctime>
 #include <random>
-#include <string>
 #include <ranges>
+#include <string>
 
 #include "cloud/cloud_base_compaction.h"
 #include "cloud/cloud_cumulative_compaction.h"
@@ -264,22 +264,24 @@ void StorageEngine::_check_file_cache_ttl_block_valid() {
         if (!tablet) return;
         if (tablet->tablet_meta()->ttl_seconds() == 0) return;
         auto rowsets = tablet->get_snapshot_rowset();
-        std::ranges::for_each(rowsets, [ttl_seconds = tablet->tablet_meta()->ttl_seconds()](RowsetSharedPtr& rowset){
+        std::ranges::for_each(rowsets, [ttl_seconds = tablet->tablet_meta()->ttl_seconds()](
+                                               RowsetSharedPtr& rowset) {
             if (rowset->newest_write_timestamp() + ttl_seconds > UnixSeconds()) { // still valid
-                std::ranges::for_each(
-                    std::ranges::iota_view{0, rowset->num_segments()} |
-                    std::views::transform([&](int32_t seg_id) {
-                        auto seg_path = rowset->segment_file_path(seg_id);
-                        return io::BlockFileCache::hash(io::Path(seg_path).filename().native());
-                    }), [](const io::Key& key) {
-                        auto file_cache = io::FileCacheFactory::instance().get_by_path(key);
-                        file_cache->update_ttl_atime(key);
-                    });
+                std::ranges::for_each(std::ranges::iota_view {0, rowset->num_segments()} |
+                                              std::views::transform([&](int32_t seg_id) {
+                                                  auto seg_path = rowset->segment_file_path(seg_id);
+                                                  return io::BlockFileCache::hash(
+                                                          io::Path(seg_path).filename().native());
+                                              }),
+                                      [](const io::Key& key) {
+                                          auto file_cache =
+                                                  io::FileCacheFactory::instance().get_by_path(key);
+                                          file_cache->update_ttl_atime(key);
+                                      });
             }
         });
     };
-    while (!_stop_background_threads_latch.wait_for(
-            std::chrono::seconds(interval_seconds))) {
+    while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(interval_seconds))) {
         auto weak_tablets = cloud::tablet_mgr()->get_weak_tablets();
         std::ranges::for_each(weak_tablets, check_ttl);
     }

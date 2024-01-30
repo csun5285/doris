@@ -32,9 +32,9 @@
 #include <system_error>
 #include <utility>
 
+#include "common/config.h"
 #include "common/logging.h"
 #include "common/status.h"
-#include "common/config.h"
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_fwd.h"
 #include "io/cache/block/block_file_cache_settings.h"
@@ -44,7 +44,7 @@
 #include "vec/common/hex.h"
 #include "vec/common/sip_hash.h"
 
-        namespace fs = std::filesystem;
+namespace fs = std::filesystem;
 
 namespace doris {
 namespace io {
