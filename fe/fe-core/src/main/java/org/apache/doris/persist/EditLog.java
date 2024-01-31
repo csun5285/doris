@@ -773,7 +773,7 @@ public class EditLog {
                     break;
                 }
                 case OperationType.OP_DYNAMIC_PARTITION:
-                case OperationType.OP_MODIFY_IN_MEMORY:
+                case OperationType.OP_MODIFY_TABLE_PROPERTIES:
                 case OperationType.OP_MODIFY_PERSISTENT:
                 case OperationType.OP_MODIFY_TTL_SECONDS:
                 case OperationType.OP_UPDATE_BINLOG_CONFIG:
@@ -1712,19 +1712,9 @@ public class EditLog {
         logEdit(OperationType.OP_MODIFY_DISTRIBUTION_BUCKET_NUM, info);
     }
 
-    public long logModifyInMemory(ModifyTablePropertyOperationLog info) {
-        return logModifyTableProperty(OperationType.OP_MODIFY_IN_MEMORY, info);
+    public long logModifyTableProperties(ModifyTablePropertyOperationLog info) {
+        return logModifyTableProperty(OperationType.OP_MODIFY_TABLE_PROPERTIES, info);
     }
-
-    // SELECTDB_CODE_BEGIN
-    public void logModifyPersistent(ModifyTablePropertyOperationLog info) {
-        logEdit(OperationType.OP_MODIFY_PERSISTENT, info);
-    }
-
-    public void logModifyTTLSeconds(ModifyTablePropertyOperationLog info) {
-        logEdit(OperationType.OP_MODIFY_TTL_SECONDS, info);
-    }
-    // SELECTDB_CODE_END
 
     public long logUpdateBinlogConfig(ModifyTablePropertyOperationLog info) {
         return logModifyTableProperty(OperationType.OP_UPDATE_BINLOG_CONFIG, info);

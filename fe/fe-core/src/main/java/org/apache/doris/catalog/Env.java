@@ -5334,43 +5334,7 @@ public class Env {
         ModifyTablePropertyOperationLog info =
                 new ModifyTablePropertyOperationLog(db.getId(), table.getId(), table.getName(),
                         properties);
-        editLog.logModifyInMemory(info);
-    }
-
-    // The caller need to hold the table write lock
-    public void modifyTablePersistentMeta(Database db, OlapTable table, Map<String, String> properties) {
-        Preconditions.checkArgument(table.isWriteLockHeldByCurrentThread());
-        TableProperty tableProperty = table.getTableProperty();
-        if (tableProperty == null) {
-            tableProperty = new TableProperty(properties);
-        } else {
-            tableProperty.modifyTableProperties(properties);
-        }
-        tableProperty.buildPersistent();
-
-        // need to update partition info meta
-        for (Partition partition : table.getPartitions()) {
-            table.getPartitionInfo().setIsPersistent(partition.getId(), tableProperty.isPersistent());
-        }
-
-        ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
-                table.getName(), properties);
-        editLog.logModifyPersistent(info);
-    }
-
-    public void modifyTableTtlSecondsMeta(Database db, OlapTable table, Map<String, String> properties) {
-        Preconditions.checkArgument(table.isWriteLockHeldByCurrentThread());
-        TableProperty tableProperty = table.getTableProperty();
-        if (tableProperty == null) {
-            tableProperty = new TableProperty(properties);
-        } else {
-            tableProperty.modifyTableProperties(properties);
-        }
-        tableProperty.buildTTLSeconds();
-        table.setTTLSeconds(tableProperty.getTTLSeconds());
-        ModifyTablePropertyOperationLog info = new ModifyTablePropertyOperationLog(db.getId(), table.getId(),
-                table.getName(), properties);
-        editLog.logModifyTTLSeconds(info);
+        editLog.logModifyTableProperties(info);
     }
 
     public void updateBinlogConfig(Database db, OlapTable table, BinlogConfig newBinlogConfig) {
@@ -5405,14 +5369,6 @@ public class Env {
 
             // need to replay partition info meta
             switch (opCode) {
-                case OperationType.OP_MODIFY_IN_MEMORY:
-                    for (Partition partition : olapTable.getPartitions()) {
-                        olapTable.getPartitionInfo().setIsInMemory(partition.getId(), tableProperty.isInMemory());
-                        // storage policy re-use modify in memory
-                        Optional.ofNullable(tableProperty.getStoragePolicy()).filter(p -> !p.isEmpty())
-                                .ifPresent(p -> olapTable.getPartitionInfo().setStoragePolicy(partition.getId(), p));
-                    }
-                    break;
                 case OperationType.OP_UPDATE_BINLOG_CONFIG:
                     BinlogConfig newBinlogConfig = new BinlogConfig();
                     newBinlogConfig.mergeFromProperties(properties);

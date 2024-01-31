@@ -125,7 +125,7 @@ public class TableProperty implements Writable {
             case OperationType.OP_MODIFY_REPLICATION_NUM:
                 buildReplicaAllocation();
                 break;
-            case OperationType.OP_MODIFY_IN_MEMORY:
+            case OperationType.OP_MODIFY_TABLE_PROPERTIES:
                 buildInMemory();
                 buildStoragePolicy();
                 buildIsBeingSynced();
@@ -136,14 +136,8 @@ public class TableProperty implements Writable {
                 buildSkipWriteIndexOnLoad();
                 buildEnableSingleReplicaCompaction();
                 buildTimeSeriesCompactionEmptyRowsetsThreshold();
-                break;
-            case OperationType.OP_MODIFY_PERSISTENT:
-                buildPersistent();
-                break;
-            case OperationType.OP_MODIFY_TTL_SECONDS:
                 buildTTLSeconds();
                 break;
-            // TODO buildDynamicSchema();
             default:
                 break;
         }
