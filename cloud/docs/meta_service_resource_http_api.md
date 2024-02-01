@@ -1897,11 +1897,6 @@ curl '127.0.0.1:5008/MetaService/http/set_cluster_status?token=greedisgood9999' 
 }
 ```
 
-
-```
-
-
-
 ## 设置instance状态
 
 ### 接口描述
@@ -1953,6 +1948,4 @@ curl '127.0.0.1:5000/MetaService/http/set_instance_status?token=greedisgood9999'
     "msg": ""
 }
 ```
-
-
 
