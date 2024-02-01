@@ -205,16 +205,7 @@ public abstract class BaseAnalysisTask {
 
     public abstract void doExecute() throws Exception;
 
-    protected void afterExecution() {
-        if (killed) {
-            return;
-        }
-        long tblId = tbl.getId();
-        String colName = col.getName();
-        if (!Env.getCurrentEnv().getStatisticsCache().syncLoadColStats(tblId, -1, colName)) {
-            Env.getCurrentEnv().getAnalysisManager().removeColStatsStatus(tblId, colName);
-        }
-    }
+    protected void afterExecution() {}
 
     protected void setTaskStateToRunning() {
         Env.getCurrentEnv().getAnalysisManager()
@@ -319,6 +310,7 @@ public abstract class BaseAnalysisTask {
             stmtExecutor = new StmtExecutor(a.connectContext, sql);
             ColStatsData colStatsData = new ColStatsData(stmtExecutor.executeInternalQuery().get(0));
             queryId = DebugUtil.printId(stmtExecutor.getContext().queryId());
+            Env.getCurrentEnv().getStatisticsCache().syncColStats(colStatsData);
             job.appendBuf(this, Collections.singletonList(colStatsData));
         } finally {
             LOG.debug("End cost time in millisec: " + (System.currentTimeMillis() - startTime)
