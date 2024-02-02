@@ -100,19 +100,6 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
                                                 const IOContext* io_ctx) {
     size_t bytes_req = result.size;
     ReadStatistics stats;
-    // session variable chooses to close file cache for this query
-    if (io_ctx != nullptr && io_ctx->disable_file_cache) {
-        SCOPED_RAW_TIMER(&stats.remote_read_timer);
-        RETURN_IF_ERROR(_remote_file_reader->read_at(offset, result, bytes_read, io_ctx));
-        DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
-        cache_skipped_bytes_read << *bytes_read;
-        if (io_ctx->file_cache_stats && _metrics_hook) {
-            stats.bytes_read += bytes_req;
-            _update_state(stats, io_ctx->file_cache_stats);
-            _metrics_hook(stats);
-        }
-        return Status::OK();
-    }
     auto [align_left, align_size] = s_align_size(offset, bytes_req, size());
     CacheContext cache_context(io_ctx);
     FileBlocksHolder holder = _cache->get_or_set(_cache_key, align_left, align_size, cache_context);

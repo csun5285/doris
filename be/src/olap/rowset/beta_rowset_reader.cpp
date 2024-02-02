@@ -95,7 +95,10 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     // convert RowsetReaderContext to StorageReadOptions
     if (read_context->runtime_state != nullptr) {
         _read_options.io_ctx.query_id = &read_context->runtime_state->query_id();
+        // TODO(AlexYue): Later we'd better improve the semantic of disable_file_cache
         _read_options.io_ctx.disable_file_cache =
+                read_context->runtime_state->query_options().disable_file_cache;
+        _read_options.io_ctx.is_disposable =
                 read_context->runtime_state->query_options().disable_file_cache;
     }
     if (read_context->reader_type != ReaderType::READER_QUERY) {
