@@ -2015,8 +2015,7 @@ public class Auth implements Writable {
             if (globalPrivEntry.privSet.containsResourcePriv()) {
                 roleManager.addOrMergeRole(new Role(roleManager.getUserDefaultRoleName(user.getUserIdentity()),
                         Arrays.asList(ResourcePattern.ALL_GENERAL,
-                        ResourcePattern.ALL_CLUSTER, ResourcePattern.ALL_STAGE),
-                        PrivBitSet.of(Privilege.USAGE_PRIV)), false);
+                        ResourcePattern.ALL_CLUSTER, ResourcePattern.ALL_STAGE)), false);
             }
             PrivBitSet copy = globalPrivEntry.privSet.copy();
             copy.unset(Privilege.USAGE_PRIV.getIdx());
@@ -2082,8 +2081,7 @@ public class Auth implements Writable {
             if (globalPrivEntry.privSet.containsResourcePriv()) {
                 roleManager.addOrMergeRole(new Role(roleManager.getUserDefaultRoleName(user.getUserIdentity()),
                         Arrays.asList(ResourcePattern.ALL_GENERAL,
-                        ResourcePattern.ALL_CLUSTER, ResourcePattern.ALL_STAGE),
-                        PrivBitSet.of(Privilege.USAGE_PRIV)), false);
+                        ResourcePattern.ALL_CLUSTER, ResourcePattern.ALL_STAGE)), false);
             }
             PrivBitSet copy = globalPrivEntry.privSet.copy();
             copy.unset(Privilege.USAGE_PRIV.getIdx());

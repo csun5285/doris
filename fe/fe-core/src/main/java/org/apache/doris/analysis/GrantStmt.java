@@ -298,7 +298,12 @@ public class GrantStmt extends DdlStmt {
                     ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT/ROVOKE");
                 }
             } else {
-                if (resourcePattern.isClusterResource()) {
+                if (resourcePattern.isGeneralResource()) {
+                    if (!Env.getCurrentEnv().getAccessManager().checkResourcePriv(ConnectContext.get(),
+                            resourcePattern.getResourceName(), PrivPredicate.GRANT)) {
+                        ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "GRANT/ROVOKE");
+                    }
+                } else if (resourcePattern.isClusterResource()) {
                     if (!Env.getCurrentEnv().getAccessManager()
                             .checkCloudPriv(ConnectContext.get(),
                                 resourcePattern.getResourceName(), PrivPredicate.GRANT, ResourceTypeEnum.CLUSTER)) {

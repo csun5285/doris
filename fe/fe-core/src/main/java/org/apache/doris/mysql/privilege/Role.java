@@ -143,41 +143,36 @@ public class Role implements Writable, GsonPostProcessable {
 
     public Role(String roleName, ResourcePattern resourcePattern, PrivBitSet privs) throws DdlException {
         this.roleName = roleName;
-        this.resourcePatternToPrivs.put(resourcePattern, privs);
+        if (resourcePattern.isGeneralResource()) {
+            this.resourcePatternToPrivs.put(resourcePattern, privs);
+        } else if (resourcePattern.isClusterResource()) {
+            this.clusterPatternToPrivs.put(resourcePattern, privs);
+        } else {
+            this.stagePatternToPrivs.put(resourcePattern, privs);
+        }
         grantPrivs(resourcePattern, privs.copy());
     }
 
-    public Role(String roleName, List<ResourcePattern> resourcePatterns, PrivBitSet privs) throws DdlException {
+    public Role(String roleName, List<ResourcePattern> resourcePatterns) throws DdlException {
         this.roleName = roleName;
-        resourcePatterns.forEach(r -> {
-            if (r.isGeneralResource()) {
-                this.resourcePatternToPrivs.put(r, privs);
-            } else if (r.isClusterResource()) {
-                this.clusterPatternToPrivs.put(r, privs);
-            } else if (r.isStageResource()) {
-                this.stagePatternToPrivs.put(r, privs);
+        for (ResourcePattern resourcePattern : resourcePatterns) {
+            PrivBitSet privs = null;
+            if (resourcePattern.isGeneralResource()) {
+                privs  = PrivBitSet.of(Privilege.USAGE_PRIV);
+                this.resourcePatternToPrivs.put(resourcePattern, privs);
+            } else if (resourcePattern.isClusterResource()) {
+                privs  = PrivBitSet.of(Privilege.CLUSTER_USAGE_PRIV);
+                this.clusterPatternToPrivs.put(resourcePattern, privs);
+            } else if (resourcePattern.isStageResource()) {
+                privs = PrivBitSet.of(Privilege.STAGE_USAGE_PRIV);
+                this.stagePatternToPrivs.put(resourcePattern, privs);
             }
             try {
-                grantPrivs(r, privs.copy());
+                grantPrivs(resourcePattern, privs.copy());
             } catch (DdlException e) {
                 LOG.warn("role grant resource failed", e);
             }
-        });
-    }
-
-    public Role(String roleName, TablePattern tablePattern, PrivBitSet tablePrivs,
-            ResourcePattern resourcePattern, PrivBitSet resourcePrivs) {
-        this.roleName = roleName;
-        this.tblPatternToPrivs.put(tablePattern, tablePrivs);
-        this.resourcePatternToPrivs.put(resourcePattern, resourcePrivs);
-        //for init admin role,will not generate exception
-        try {
-            grantPrivs(tablePattern, tablePrivs.copy());
-            grantPrivs(resourcePattern, resourcePrivs.copy());
-        } catch (DdlException e) {
-            LOG.warn("grant failed,", e);
         }
-
     }
 
     public Role(String roleName, TablePattern tablePattern, PrivBitSet tablePrivs,
@@ -271,6 +266,24 @@ public class Role implements Writable, GsonPostProcessable {
                 existPrivs.or(entry.getValue());
             } else {
                 resourcePatternToPrivs.put(entry.getKey(), entry.getValue());
+            }
+            grantPrivs(entry.getKey(), entry.getValue().copy());
+        }
+        for (Map.Entry<ResourcePattern, PrivBitSet> entry : other.clusterPatternToPrivs.entrySet()) {
+            if (clusterPatternToPrivs.containsKey(entry.getKey())) {
+                PrivBitSet existPrivs = clusterPatternToPrivs.get(entry.getKey());
+                existPrivs.or(entry.getValue());
+            } else {
+                clusterPatternToPrivs.put(entry.getKey(), entry.getValue());
+            }
+            grantPrivs(entry.getKey(), entry.getValue().copy());
+        }
+        for (Map.Entry<ResourcePattern, PrivBitSet> entry : other.stagePatternToPrivs.entrySet()) {
+            if (stagePatternToPrivs.containsKey(entry.getKey())) {
+                PrivBitSet existPrivs = stagePatternToPrivs.get(entry.getKey());
+                existPrivs.or(entry.getValue());
+            } else {
+                stagePatternToPrivs.put(entry.getKey(), entry.getValue());
             }
             grantPrivs(entry.getKey(), entry.getValue().copy());
         }
@@ -822,7 +835,14 @@ public class Role implements Writable, GsonPostProcessable {
 
     public void revokePrivs(ResourcePattern resourcePattern, PrivBitSet privs, boolean errOnNonExist)
             throws DdlException {
-        PrivBitSet existingPriv = resourcePatternToPrivs.get(resourcePattern);
+        PrivBitSet existingPriv = null;
+        if (resourcePattern.isGeneralResource()) {
+            existingPriv = resourcePatternToPrivs.get(resourcePattern);
+        } else if (resourcePattern.isClusterResource()) {
+            existingPriv = clusterPatternToPrivs.get(resourcePattern);
+        } else if (resourcePattern.isStageResource()) {
+            existingPriv = stagePatternToPrivs.get(resourcePattern);
+        }
         if (existingPriv == null) {
             if (errOnNonExist) {
                 throw new DdlException(resourcePattern + " does not exist in role " + roleName);
