@@ -96,7 +96,7 @@ public class DateFunctionRewrite extends AbstractExpressionRewriteRule {
             if (greaterThanEqual.left().child(0).getDataType() instanceof DateTimeType
                     && greaterThanEqual.right() instanceof DateLiteral) {
                 DateTimeLiteral newLiteral = ((DateLiteral) greaterThanEqual.right()).toBeginOfTheDay();
-                return new GreaterThan(greaterThanEqual.left().child(0), newLiteral);
+                return new GreaterThanEqual(greaterThanEqual.left().child(0), newLiteral);
             }
 
             // V2
