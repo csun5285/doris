@@ -26,13 +26,15 @@ public:
     virtual int init() = 0;
 
     // returns 0 for success otherwise error
-    virtual int delete_objects_by_prefix(const std::string& relative_path) = 0;
+    virtual int delete_objects_by_prefix(const std::string& relative_path,
+                                         const std::string& instance_id) = 0;
 
     // returns 0 for success otherwise error
-    virtual int delete_objects(const std::vector<std::string>& relative_paths) = 0;
+    virtual int delete_objects(const std::vector<std::string>& relative_paths,
+                               const std::string& instance_id) = 0;
 
     // returns 0 for success otherwise error
-    virtual int delete_object(const std::string& relative_path) = 0;
+    virtual int delete_object(const std::string& relative_path, const std::string& instance_id) = 0;
 
     // for test
     // returns 0 for success otherwise error
@@ -46,7 +48,8 @@ public:
 
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
-    virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time) = 0;
+    virtual int delete_expired_objects(const std::string& relative_path, int64_t expired_time,
+                                       const std::string& instance_id) = 0;
 
     // return 0 for success otherwise error
     virtual int get_bucket_lifecycle(int64_t* expiration_days) = 0;
@@ -79,13 +82,15 @@ public:
     int init() override;
 
     // returns 0 for success, returns 1 for http FORBIDDEN error, negative for other errors
-    int delete_objects_by_prefix(const std::string& relative_path) override;
+    int delete_objects_by_prefix(const std::string& relative_path,
+                                 const std::string& instance_id) override;
 
     // returns 0 for success otherwise error
-    int delete_objects(const std::vector<std::string>& relative_paths) override;
+    int delete_objects(const std::vector<std::string>& relative_paths,
+                       const std::string& instance_id) override;
 
     // returns 0 for success otherwise error
-    int delete_object(const std::string& relative_path) override;
+    int delete_object(const std::string& relative_path, const std::string& instance_id) override;
 
     // for test
     // returns 0 for success otherwise error
@@ -99,7 +104,8 @@ public:
 
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
-    int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override;
+    int delete_expired_objects(const std::string& relative_path, int64_t expired_time,
+                               const std::string& instance_id) override;
 
     // returns 0 for success otherwise error
     int get_bucket_lifecycle(int64_t* expiration_days) override;
@@ -124,7 +130,8 @@ public:
     ~GcsAccessor() override = default;
 
     // returns 0 for success otherwise error
-    int delete_objects(const std::vector<std::string>& relative_paths) override;
+    int delete_objects(const std::vector<std::string>& relative_paths,
+                       const std::string& instance_id) override;
 };
 
 } // namespace selectdb

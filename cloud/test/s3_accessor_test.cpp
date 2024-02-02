@@ -100,7 +100,7 @@ public:
         Aws::S3::Model::DeleteObjectsResult result;
         const auto& deletes = req.GetDelete();
         for (const auto& obj : deletes.GetObjects()) {
-            _mock_fs->delete_object(obj.GetKey());
+            _mock_fs->delete_object(obj.GetKey(), "instance_id");
         }
         return Aws::S3::Model::DeleteObjectsOutcome(std::move(result));
     }
@@ -108,7 +108,7 @@ public:
     Aws::S3::Model::DeleteObjectOutcome DeleteObject(
             const Aws::S3::Model::DeleteObjectRequest& req) override {
         Aws::S3::Model::DeleteObjectResult result;
-        _mock_fs->delete_object(req.GetKey());
+        _mock_fs->delete_object(req.GetKey(), "instance_id");
         return Aws::S3::Model::DeleteObjectOutcome(std::move(result));
     }
 
@@ -647,7 +647,7 @@ TEST(S3AccessorTest, delete_object) {
     create_file_under_prefix(prefix, 200);
     for (size_t i = 0; i < 200; i++) {
         auto path = fmt::format("{}{}", prefix, i);
-        ASSERT_EQ(0, accessor->delete_object(path));
+        ASSERT_EQ(0, accessor->delete_object(path, "instance_id"));
         ASSERT_EQ(1, accessor->exist(path));
     }
 }
@@ -677,7 +677,7 @@ TEST(S3AccessorTest, gcs_delete_objects) {
         _mock_fs->put_object(path, "");
         paths.emplace_back(std::move(path));
     }
-    ASSERT_EQ(0, accessor->delete_objects(paths));
+    ASSERT_EQ(0, accessor->delete_objects(paths, "instance"));
     for (size_t i = 0; i < num; i++) {
         auto path = fmt::format("{}{}", prefix, i);
         ASSERT_EQ(1, accessor->exist(path));
@@ -716,9 +716,9 @@ TEST(S3AccessorTest, gcs_delete_objects_error) {
         }
     }
     std::vector<std::string> empty;
-    ASSERT_EQ(0, accessor->delete_objects(empty));
+    ASSERT_EQ(0, accessor->delete_objects(empty, "instance"));
     return_error_for_error_s3_client = true;
-    ASSERT_EQ(-1, accessor->delete_objects(paths_first_half));
+    ASSERT_EQ(-1, accessor->delete_objects(paths_first_half, "instance"));
 }
 
 TEST(S3AccessorTest, delete_objects) {
@@ -746,7 +746,7 @@ TEST(S3AccessorTest, delete_objects) {
         _mock_fs->put_object(path, "");
         paths.emplace_back(std::move(path));
     }
-    ASSERT_EQ(0, accessor->delete_objects(paths));
+    ASSERT_EQ(0, accessor->delete_objects(paths, "instance"));
     for (size_t i = 0; i < num; i++) {
         auto path = fmt::format("{}{}", prefix, i);
         ASSERT_EQ(1, accessor->exist(path));
@@ -786,12 +786,12 @@ TEST(S3AccessorTest, delete_objects_error) {
         }
     }
     std::vector<std::string> empty;
-    ASSERT_EQ(0, accessor->delete_objects(empty));
+    ASSERT_EQ(0, accessor->delete_objects(empty, "instance"));
     return_error_for_error_s3_client = true;
     delete_objects_return_part_error = true;
-    ASSERT_EQ(-1, accessor->delete_objects(paths_first_half));
+    ASSERT_EQ(-1, accessor->delete_objects(paths_first_half, "instance"));
     delete_objects_return_part_error = false;
-    ASSERT_EQ(-2, accessor->delete_objects(paths_second_half));
+    ASSERT_EQ(-2, accessor->delete_objects(paths_second_half, "instance"));
 }
 
 TEST(S3AccessorTest, delete_expired_objects) {
@@ -817,7 +817,7 @@ TEST(S3AccessorTest, delete_expired_objects) {
         create_file_under_prefix(prefix, num);
         list_object_v2_with_expire_time = true;
         expire_time = 50;
-        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100));
+        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100, "instance"));
         for (size_t i = 0; i < num; i++) {
             auto path = fmt::format("{}{}", prefix, i);
             ASSERT_EQ(1, accessor->exist(path));
@@ -829,7 +829,7 @@ TEST(S3AccessorTest, delete_expired_objects) {
         create_file_under_prefix(prefix, num);
         list_object_v2_with_expire_time = true;
         expire_time = 150;
-        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100));
+        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100, "instance"));
         for (size_t i = 0; i < num; i++) {
             auto path = fmt::format("{}{}", prefix, i);
             ASSERT_EQ(1, accessor->exist(path));
@@ -844,7 +844,7 @@ TEST(S3AccessorTest, delete_expired_objects) {
         return_error_for_error_s3_client = true;
         std::unique_ptr<int, std::function<void(int*)>> defer(
                 (int*)0x01, [&](int*) { return_error_for_error_s3_client = false; });
-        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100));
+        ASSERT_EQ(0, accessor->delete_expired_objects(prefix, 100, "instance"));
     }
 }
 
@@ -868,7 +868,7 @@ TEST(S3AccessorTest, delete_object_by_prefix) {
     std::string prefix = "test_delete_objects_by_prefix";
     size_t num = 2000;
     create_file_under_prefix(prefix, num);
-    ASSERT_EQ(0, accessor->delete_objects_by_prefix(prefix));
+    ASSERT_EQ(0, accessor->delete_objects_by_prefix(prefix, "instance"));
     for (size_t i = 0; i < num; i++) {
         auto path = fmt::format("{}{}", prefix, i);
         ASSERT_EQ(1, accessor->exist(path));
@@ -899,11 +899,11 @@ TEST(S3AccessorTest, delete_object_by_prefix_error) {
     create_file_under_prefix(prefix, num);
     delete_objects_return_part_error = true;
     return_error_for_error_s3_client = true;
-    ASSERT_EQ(-1, accessor->delete_objects_by_prefix(prefix));
+    ASSERT_EQ(-1, accessor->delete_objects_by_prefix(prefix, "instance"));
     return_error_for_error_s3_client = false;
-    ASSERT_EQ(-2, accessor->delete_objects_by_prefix(prefix));
+    ASSERT_EQ(-2, accessor->delete_objects_by_prefix(prefix, "instance"));
     delete_objects_return_part_error = false;
-    ASSERT_EQ(-3, accessor->delete_objects_by_prefix(prefix));
+    ASSERT_EQ(-3, accessor->delete_objects_by_prefix(prefix, "instance"));
 }
 
 } // namespace selectdb

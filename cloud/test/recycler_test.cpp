@@ -2117,11 +2117,11 @@ TEST(CheckerTest, abnormal) {
     std::vector<std::string> deleted_paths;
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(10001 + gen() % 100), &files));
     deleted_paths.push_back(files[gen() % files.size()].path);
-    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back()));
+    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back(), "instance_id"));
     files.clear();
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(10101 + gen() % 100), &files));
     deleted_paths.push_back(files[gen() % files.size()].path);
-    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back()));
+    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back(), "instance_id"));
 
     std::vector<std::string> lost_paths;
     auto sp = SyncPoint::get_instance();

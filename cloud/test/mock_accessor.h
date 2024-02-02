@@ -23,7 +23,8 @@ public:
     int init() override { return 0; }
 
     // returns 0 for success otherwise error
-    int delete_objects_by_prefix(const std::string& relative_path) override {
+    int delete_objects_by_prefix(const std::string& relative_path,
+                                 const std::string& instance_id) override {
         TEST_SYNC_POINT_CALLBACK("MockAccessor::delete_objects_by_prefix", nullptr);
         LOG(INFO) << "delete object of prefix=" << relative_path;
         std::lock_guard lock(mtx_);
@@ -43,7 +44,8 @@ public:
     }
 
     // returns 0 for success otherwise error
-    int delete_objects(const std::vector<std::string>& relative_paths) override {
+    int delete_objects(const std::vector<std::string>& relative_paths,
+                       const std::string& instance_id) override {
         TEST_SYNC_POINT_CALLBACK("MockAccessor::delete_objects", nullptr);
         {
             [[maybe_unused]] int ret = -1;
@@ -60,7 +62,7 @@ public:
     }
 
     // returns 0 for success otherwise error
-    int delete_object(const std::string& relative_path) override {
+    int delete_object(const std::string& relative_path, const std::string& instance_id) override {
         LOG(INFO) << "delete object path=" << relative_path;
         std::lock_guard lock(mtx_);
         objects_.erase(relative_path);
@@ -104,7 +106,7 @@ public:
 
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
-    int delete_expired_objects(const std::string& relative_path, int64_t expired_time) override {
+    int delete_expired_objects(const std::string& relative_path, int64_t expired_time, const std::string& instance_id) override {
         return 0;
     }
 

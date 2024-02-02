@@ -17,7 +17,9 @@
 #include <execution>
 #include <utility>
 
+#include "common/bvars.h"
 #include "common/logging.h"
+#include "common/stopwatch.h"
 #include "common/sync_point.h"
 
 namespace selectdb {
@@ -80,7 +82,9 @@ int S3Accessor::init() {
     return 0;
 }
 
-int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
+int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
+                                         const std::string& instance_id) {
+    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     Aws::S3::Model::ListObjectsV2Request request;
     auto prefix = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithPrefix(prefix);
@@ -89,6 +93,8 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
     delete_request.SetBucket(conf_.bucket);
     bool is_trucated = false;
     do {
+        StopWatch sw;
+        sw.start();
         auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->ListObjectsV2(request),
                                                     "s3_client::list_objects_v2", request);
         if (!outcome.IsSuccess()) {
@@ -103,6 +109,9 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
             }
             return -1;
         }
+
+        g_bvar_recycler_list_objects.put(bvar_tag, sw.elapsed_us() / 1000);
+
         const auto& result = outcome.GetResult();
         VLOG_DEBUG << "get " << result.GetContents().size() << " objects";
         Aws::Vector<Aws::S3::Model::ObjectIdentifier> objects;
@@ -118,6 +127,7 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
             Aws::S3::Model::Delete del;
             del.WithObjects(std::move(objects)).SetQuiet(true);
             delete_request.SetDelete(std::move(del));
+            sw.reset();
             auto delete_outcome =
                     SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
                                                  "s3_client::delete_objects", delete_request);
@@ -134,6 +144,9 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
                 }
                 return -2;
             }
+
+            g_bvar_recycler_delete_objects.put(bvar_tag, sw.elapsed_us() / 1000);
+
             if (!delete_outcome.GetResult().GetErrors().empty()) {
                 const auto& e = delete_outcome.GetResult().GetErrors().front();
                 LOG_WARNING("failed to delete object")
@@ -151,7 +164,9 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path) {
     return 0;
 }
 
-int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
+int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths,
+                               const std::string& instance_id) {
+    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     if (relative_paths.empty()) {
         return 0;
     }
@@ -180,6 +195,9 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
         }
         del.WithObjects(std::move(objects)).SetQuiet(true);
         delete_request.SetDelete(std::move(del));
+
+        StopWatch sw;
+        sw.start();
         auto delete_outcome =
                 SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
                                              "s3_client::delete_objects", delete_request);
@@ -204,15 +222,19 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths) {
                     .tag("error", e.GetMessage());
             return -2;
         }
+        g_bvar_recycler_delete_objects.put(bvar_tag, sw.elapsed_us() / 1000);
     } while (path_iter != relative_paths.end());
 
     return 0;
 }
 
-int S3Accessor::delete_object(const std::string& relative_path) {
+int S3Accessor::delete_object(const std::string& relative_path, const std::string& instance_id) {
+    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     Aws::S3::Model::DeleteObjectRequest request;
     auto key = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithKey(key);
+    StopWatch sw;
+    sw.start();
     auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObject(request),
                                                 "s3_client::delete_object", request);
     if (!outcome.IsSuccess()) {
@@ -225,6 +247,7 @@ int S3Accessor::delete_object(const std::string& relative_path) {
                 .tag("exception", outcome.GetError().GetExceptionName());
         return -1;
     }
+    g_bvar_recycler_delete_object.put(bvar_tag, sw.elapsed_us() / 1000);
     return 0;
 }
 
@@ -301,13 +324,17 @@ int S3Accessor::exist(const std::string& relative_path) {
     }
 }
 
-int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t expired_time) {
+int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t expired_time,
+                                       const std::string& instance_id) {
+    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     Aws::S3::Model::ListObjectsV2Request request;
     auto prefix = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithPrefix(prefix);
 
     bool is_truncated = false;
     do {
+        StopWatch sw;
+        sw.start();
         auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->ListObjectsV2(request),
                                                     "s3_client::list_objects_v2", request);
         ;
@@ -320,6 +347,7 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
                     .tag("error", outcome.GetError().GetMessage());
             return -1;
         }
+        g_bvar_recycler_list_objects.put(bvar_tag, sw.elapsed_us() / 1000);
         const auto& result = outcome.GetResult();
         std::vector<std::string> expired_keys;
         for (const auto& obj : result.GetContents()) {
@@ -341,7 +369,7 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
             }
         }
 
-        auto ret = delete_objects(expired_keys);
+        auto ret = delete_objects(expired_keys, instance_id);
         if (ret != 0) {
             return ret;
         }
@@ -420,11 +448,13 @@ int S3Accessor::check_bucket_versioning() {
     return 0;
 }
 
-int GcsAccessor::delete_objects(const std::vector<std::string>& relative_paths) {
+int GcsAccessor::delete_objects(const std::vector<std::string>& relative_paths,
+                                const std::string& instance_id) {
     std::vector<int> delete_rets(relative_paths.size());
     std::transform(std::execution::par, relative_paths.begin(), relative_paths.end(),
-                   delete_rets.begin(),
-                   [this](const std::string& path) { return delete_object(path); });
+                   delete_rets.begin(), [this, &instance_id](const std::string& path) {
+                       return delete_object(path, instance_id);
+                   });
     int ret = 0;
     for (int delete_ret : delete_rets) {
         if (delete_ret != 0) {

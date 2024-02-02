@@ -540,7 +540,7 @@ int InstanceRecycler::recycle_deleted_instance() {
     for (auto& [_, accessor] : accessor_map_) {
         if (stopped()) return ret;
         LOG(INFO) << "begin to delete all objects in " << accessor->path();
-        int del_ret = accessor->delete_objects_by_prefix("");
+        int del_ret = accessor->delete_objects_by_prefix("", instance_id_);
         if (del_ret == 0) {
             LOG(INFO) << "successfully delete all objects in " << accessor->path();
         } else if (del_ret != 1) { // no need to log, because S3Accessor has logged this error
@@ -1117,7 +1117,7 @@ int InstanceRecycler::delete_rowset_data(const doris::RowsetMetaPB& rs_meta_pb) 
         }
     }
     // TODO(AlexYue): seems could do do batch
-    return accessor->delete_objects(file_paths);
+    return accessor->delete_objects(file_paths, instance_id_);
 }
 
 int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>& rowsets) {
@@ -1193,7 +1193,7 @@ int InstanceRecycler::delete_rowset_data(const std::vector<doris::RowsetMetaPB>&
     for (auto& [resource_id, file_paths] : resource_file_paths) {
         auto& accessor = accessor_map_[resource_id];
         DCHECK(accessor);
-        if (accessor->delete_objects(file_paths) != 0) {
+        if (accessor->delete_objects(file_paths, instance_id_) != 0) {
             ret = -1;
         }
     }
@@ -1210,7 +1210,8 @@ int InstanceRecycler::delete_rowset_data(const std::string& resource_id, int64_t
         return -1;
     }
     auto& accessor = it->second;
-    return accessor->delete_objects_by_prefix(rowset_path_prefix(tablet_id, rowset_id));
+    return accessor->delete_objects_by_prefix(rowset_path_prefix(tablet_id, rowset_id),
+                                              instance_id_);
 }
 
 int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
@@ -1257,7 +1258,7 @@ int InstanceRecycler::recycle_tablet(int64_t tablet_id) {
 
     // delete all rowset data in this tablet
     for (auto& [_, accessor] : accessor_map_) {
-        if (accessor->delete_objects_by_prefix(tablet_path_prefix(tablet_id)) != 0) {
+        if (accessor->delete_objects_by_prefix(tablet_path_prefix(tablet_id), instance_id_) != 0) {
             LOG(WARNING) << "failed to delete rowset data of tablet " << tablet_id
                          << " s3_path=" << accessor->path();
             ret = -1;
@@ -1866,8 +1867,11 @@ struct CopyJobIdTuple {
 };
 struct BatchObjStoreAccessor {
     BatchObjStoreAccessor(std::shared_ptr<ObjStoreAccessor> accessor, uint64_t& batch_count,
-                          TxnKv* txn_kv)
-            : accessor_(std::move(accessor)), batch_count_(batch_count), txn_kv_(txn_kv) {};
+                          TxnKv* txn_kv, const std::string& instance_id)
+            : accessor_(std::move(accessor)),
+              batch_count_(batch_count),
+              txn_kv_(txn_kv),
+              instance_id_(instance_id) {};
     ~BatchObjStoreAccessor() {
         if (!paths_.empty()) {
             consume();
@@ -1921,7 +1925,7 @@ private:
                  batch_count_);
         StopWatch sw;
         // TODO(yuejing): 在accessor的delete_objets的实现里可以考虑如果_paths数量不超过10个的话，就直接发10个delete objection operation而不是发post
-        if (0 != accessor_->delete_objects(paths_)) {
+        if (0 != accessor_->delete_objects(paths_, instance_id_)) {
             LOG_WARNING("failed to delete {} internal stage objects in batch {} and it takes {} us",
                         paths_.size(), batch_count_, sw.elapsed_us());
             return;
@@ -1966,6 +1970,7 @@ private:
     // which can together uniquely identifies different tasks for tracing log
     uint64_t& batch_count_;
     TxnKv* txn_kv_;
+    std::string instance_id_;
 };
 
 int InstanceRecycler::recycle_copy_jobs() {
@@ -2042,7 +2047,7 @@ int InstanceRecycler::recycle_copy_jobs() {
                     } else if (ret == 0) {
                         path = inner_accessor->path();
                         accessor = std::make_shared<BatchObjStoreAccessor>(
-                                inner_accessor, batch_count, txn_kv_.get());
+                                inner_accessor, batch_count, txn_kv_.get(), instance_id_);
                         stage_accessor_map.emplace(stage_id, accessor);
                     } else { // stage not found, skip check storage
                         check_storage = false;
@@ -2308,7 +2313,7 @@ int InstanceRecycler::recycle_stage() {
                 .tag("user_id", recycle_stage.stage().mysql_user_id()[0])
                 .tag("obj_info_id", idx)
                 .tag("prefix", recycle_stage.stage().obj_info().prefix());
-        ret = accessor->delete_objects_by_prefix("");
+        ret = accessor->delete_objects_by_prefix("", instance_id_);
         if (ret != 0) {
             LOG(WARNING) << "failed to delete objects of dropped internal stage. instance_id="
                          << instance_id_ << ", stage_id=" << recycle_stage.stage().stage_id()
@@ -2394,7 +2399,7 @@ int InstanceRecycler::recycle_expired_stage_objects() {
         int64_t expired_time =
                 duration_cast<seconds>(system_clock::now().time_since_epoch()).count() -
                 config::internal_stage_objects_expire_time_second;
-        ret1 = accessor->delete_expired_objects("", expired_time);
+        ret1 = accessor->delete_expired_objects("", expired_time, instance_id_);
         if (ret1 != 0) {
             LOG(WARNING) << "failed to recycle expired stage objects, instance_id=" << instance_id_
                          << ", stage_id=" << stage.stage_id() << ", ret=" << ret1;
