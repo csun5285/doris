@@ -1250,6 +1250,8 @@ DECLARE_mInt32(group_commit_queue_mem_limit);
 // group_commit_wal_max_disk_limit=1024 or group_commit_wal_max_disk_limit=10% can be automatically identified.
 DECLARE_mString(group_commit_wal_max_disk_limit);
 DECLARE_Bool(group_commit_wait_replay_wal_finish);
+DECLARE_mInt32(group_commit_replay_other_be_wal_time_diff_seconds);
+DECLARE_mInt32(group_commit_scan_other_be_wal_interval_seconds);
 
 // The configuration item is used to lower the priority of the scanner thread,
 // typically employed to ensure CPU scheduling for write operations.

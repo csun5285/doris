@@ -91,13 +91,7 @@ void WalTable::_pick_relay_wals() {
 Status WalTable::_relay_wal_one_by_one() {
     std::vector<std::shared_ptr<WalInfo>> need_retry_wals;
     std::vector<std::shared_ptr<WalInfo>> need_delete_wals;
-    while (!_replaying_queue.empty()) {
-        std::shared_ptr<WalInfo> wal_info = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(_replay_wal_lock);
-            wal_info = _replaying_queue.front();
-            _replaying_queue.pop_front();
-        }
+    for (auto wal_info : _replaying_queue) {
         wal_info->add_retry_num();
         auto st = _replay_wal_internal(wal_info->get_wal_path());
         if (!st.ok()) {
@@ -116,6 +110,7 @@ Status WalTable::_relay_wal_one_by_one() {
     }
     {
         std::lock_guard<std::mutex> lock(_replay_wal_lock);
+        _replaying_queue.clear();
         for (auto retry_wal_info : need_retry_wals) {
             _replay_wal_map.emplace(retry_wal_info->get_wal_path(), retry_wal_info);
         }
@@ -186,9 +181,13 @@ Status WalTable::_try_abort_txn(int64_t db_id, std::string& label) {
 
 Status WalTable::_replay_wal_internal(const std::string& wal) {
     LOG(INFO) << "Start replay wal for db=" << _db_id << ", table=" << _table_id << ", wal=" << wal;
-    int64_t wal_id = 0;
+    int64_t version = -1;
+    int64_t backend_id = -1;
+    int64_t wal_id = -1;
     std::string label = "";
-    RETURN_IF_ERROR(_parse_wal_path(wal, wal_id, label));
+    io::Path wal_path = wal;
+    auto file_name = wal_path.filename().string();
+    RETURN_IF_ERROR(WalManager::parse_wal_path(file_name, version, backend_id, wal_id, label));
 #ifndef BE_TEST
     if (!config::group_commit_wait_replay_wal_finish) {
         auto st = _try_abort_txn(_db_id, label);
@@ -198,19 +197,6 @@ Status WalTable::_replay_wal_internal(const std::string& wal) {
     }
 #endif
     RETURN_IF_ERROR(_replay_one_txn_with_stremaload(wal_id, wal, label));
-    return Status::OK();
-}
-
-Status WalTable::_parse_wal_path(const std::string& wal, int64_t& wal_id, std::string& label) {
-    io::Path wal_path = wal;
-    auto file_name = wal_path.filename().string();
-    auto pos = file_name.find("_");
-    try {
-        wal_id = std::strtoll(file_name.substr(0, pos).c_str(), NULL, 10);
-        label = file_name.substr(pos + 1);
-    } catch (const std::invalid_argument& e) {
-        return Status::InvalidArgument("Invalid format, {}", e.what());
-    }
     return Status::OK();
 }
 
@@ -252,7 +238,7 @@ Status WalTable::_replay_one_txn_with_stremaload(int64_t wal_id, const std::stri
     auto st = _handle_stream_load(wal_id, wal, label);
     auto msg = st.msg();
     success = st.ok() || st.is<ErrorCode::PUBLISH_TIMEOUT>() ||
-              msg.find("has already been used") != msg.npos;
+              st.is<ErrorCode::LABEL_ALREADY_EXISTS>();
     LOG(INFO) << "handle_stream_load:" << st.to_string();
 #else
     success = k_stream_load_exec_status.ok();
