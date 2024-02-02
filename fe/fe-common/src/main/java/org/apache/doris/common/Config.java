@@ -2427,6 +2427,10 @@ public class Config extends ConfigBase {
     @ConfField(mutable = false)
     public static boolean forbid_analyze_polluting_file_cache = true;
 
+    // forbid the analyze task triggering flushing BE's cache with internal statistics info table
+    @ConfField(mutable = false)
+    public static boolean forbid_analyze_statistics_info_polluting_file_cache = false;
+
     //==========================================================================
     //                    end of cloud config
     //==========================================================================

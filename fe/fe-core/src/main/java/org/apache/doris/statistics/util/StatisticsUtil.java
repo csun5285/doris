@@ -123,7 +123,7 @@ public class StatisticsUtil {
     public static List<ResultRow> executeQuery(String template, Map<String, String> params) {
         StringSubstitutor stringSubstitutor = new StringSubstitutor(params);
         String sql = stringSubstitutor.replace(template);
-        return execStatisticQuery(sql);
+        return execStatisticQuery(sql, true);
     }
 
     public static void execUpdate(String template, Map<String, String> params) throws Exception {
@@ -133,10 +133,16 @@ public class StatisticsUtil {
     }
 
     public static List<ResultRow> execStatisticQuery(String sql) {
+        return execStatisticQuery(sql, false);
+    }
+
+    public static List<ResultRow> execStatisticQuery(String sql, boolean enableFileCache) {
         if (!FeConstants.enableInternalSchemaDb) {
             return Collections.emptyList();
         }
-        try (AutoCloseConnectContext r = StatisticsUtil.buildConnectContext()) {
+        boolean useFileCacheForStat = (enableFileCache && !Config.forbid_analyze_statistics_info_polluting_file_cache)
+                ? true : false;
+        try (AutoCloseConnectContext r = StatisticsUtil.buildConnectContext(false, useFileCacheForStat)) {
             if (Config.isCloudMode()) {
                 r.connectContext.setCloudCluster();
             }
@@ -175,10 +181,10 @@ public class StatisticsUtil {
     }
 
     public static AutoCloseConnectContext buildConnectContext() {
-        return buildConnectContext(false);
+        return buildConnectContext(false, false);
     }
 
-    public static AutoCloseConnectContext buildConnectContext(boolean limitScan) {
+    public static AutoCloseConnectContext buildConnectContext(boolean limitScan, boolean useFileCacheForStat) {
         ConnectContext connectContext = new ConnectContext();
         SessionVariable sessionVariable = connectContext.getSessionVariable();
         sessionVariable.internalSession = true;
@@ -207,7 +213,8 @@ public class StatisticsUtil {
         if (Config.isCloudMode()) {
             AutoCloseConnectContext ctx = new AutoCloseConnectContext(connectContext);
             ctx.connectContext.setCloudCluster();
-            sessionVariable.disableFileCache = Config.forbid_analyze_polluting_file_cache;
+            sessionVariable.disableFileCache = useFileCacheForStat
+                    ? false : Config.forbid_analyze_statistics_info_polluting_file_cache;
             return ctx;
         } else {
             return new AutoCloseConnectContext(connectContext);
