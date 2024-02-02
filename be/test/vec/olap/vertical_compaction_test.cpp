@@ -39,6 +39,7 @@
 #include "common/status.h"
 #include "gtest/gtest_pred_impl.h"
 #include "gutil/stringprintf.h"
+#include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/local_file_system.h"
 #include "io/io_common.h"
 #include "json2pb/json_to_pb.h"
@@ -99,6 +100,8 @@ protected:
         doris::EngineOptions options;
         k_engine = new StorageEngine(options);
         ExecEnv::GetInstance()->set_storage_engine(k_engine);
+        io::FileCacheSettings cache_setting;
+        io::FileCacheFactory::instance().create_file_cache(absolute_dir + "/tablet_path", cache_setting);
     }
     void TearDown() override {
         SAFE_DELETE(_data_dir);

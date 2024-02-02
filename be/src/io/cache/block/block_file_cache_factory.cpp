@@ -95,6 +95,14 @@ BlockFileCachePtr FileCacheFactory::get_by_path(const std::string& cache_base_pa
     }
 }
 
+std::vector<std::string> FileCacheFactory::get_base_paths() {
+    std::vector<std::string> paths;
+    for (const auto& pair : _path_to_cache) {
+        paths.push_back(pair.first);
+    }
+    return paths;
+}
+
 std::vector<BlockFileCache::QueryFileCacheContextHolderPtr>
 FileCacheFactory::get_query_context_holders(const TUniqueId& query_id) {
     std::vector<BlockFileCache::QueryFileCacheContextHolderPtr> holders;
