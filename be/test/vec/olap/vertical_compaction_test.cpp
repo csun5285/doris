@@ -101,7 +101,8 @@ protected:
         k_engine = new StorageEngine(options);
         ExecEnv::GetInstance()->set_storage_engine(k_engine);
         io::FileCacheSettings cache_setting;
-        io::FileCacheFactory::instance().create_file_cache(absolute_dir + "/tablet_path", cache_setting);
+        io::FileCacheFactory::instance().create_file_cache(absolute_dir + "/tablet_path",
+                                                           cache_setting);
     }
     void TearDown() override {
         SAFE_DELETE(_data_dir);

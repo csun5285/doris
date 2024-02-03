@@ -106,7 +106,8 @@ public:
 
     // delete objects which last modified time is less than the input expired time and under the input relative path
     // returns 0 for success otherwise error
-    int delete_expired_objects(const std::string& relative_path, int64_t expired_time, const std::string& instance_id) override {
+    int delete_expired_objects(const std::string& relative_path, int64_t expired_time,
+                               const std::string& instance_id) override {
         return 0;
     }
 
