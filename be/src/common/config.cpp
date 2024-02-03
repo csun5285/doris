@@ -359,8 +359,8 @@ DEFINE_mInt32(ordered_data_compaction_min_segment_size, "10485760");
 DEFINE_mInt32(min_compaction_failure_interval_ms, "5000");
 
 // This config can be set to limit thread number in compaction thread pool.
-DEFINE_mInt32(max_base_compaction_threads, "4");
-DEFINE_mInt32(max_cumu_compaction_threads, "10");
+DEFINE_mInt32(max_base_compaction_threads, "-1");
+DEFINE_mInt32(max_cumu_compaction_threads, "-1");
 DEFINE_mInt32(max_single_replica_compaction_threads, "10");
 
 DEFINE_Bool(enable_base_compaction_idle_sched, "true");
@@ -1273,6 +1273,10 @@ DEFINE_mBool(enable_column_type_check, "true");
 
 // Tolerance for the number of partition id 0 in rowset, default 0
 DEFINE_Int32(ignore_invalid_partition_id_rowset_num, "0");
+
+DEFINE_mDouble(base_compaction_thread_num_factor, "0.25");
+
+DEFINE_mDouble(cumu_compaction_thread_num_factor, "0.5");
 
 // clang-format off
 #ifdef BE_TEST

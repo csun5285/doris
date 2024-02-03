@@ -53,6 +53,24 @@ using namespace ErrorCode;
 // number of running SCHEMA-CHANGE threads
 volatile uint32_t g_schema_change_active_threads = 0;
 
+int get_cumu_thread_num() {
+    if (config::max_cumu_compaction_threads > 0) {
+        return config::max_cumu_compaction_threads;
+    }
+
+    int num_cores = doris::CpuInfo::num_cores();
+    return std::min(std::max(int(num_cores * config::cumu_compaction_thread_num_factor), 2), 20);
+}
+
+int get_base_thread_num() {
+    if (config::max_base_compaction_threads > 0) {
+        return config::max_base_compaction_threads;
+    }
+
+    int num_cores = doris::CpuInfo::num_cores();
+    return std::min(std::max(int(num_cores * config::base_compaction_thread_num_factor), 1), 10);
+}
+
 Status StorageEngine::start_bg_threads() {
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "unused_rowset_monitor_thread",
@@ -172,19 +190,23 @@ Status StorageEngine::cloud_start_bg_threads() {
     LOG(INFO) << "check bucket enable versioning thread started";
 
     // compaction tasks producer thread
+    int base_thread_num = get_base_thread_num();
+    int cumu_thread_num = get_cumu_thread_num();
     ThreadPoolBuilder("BaseCompactionTaskThreadPool")
-            .set_min_threads(config::max_base_compaction_threads)
-            .set_max_threads(config::max_base_compaction_threads)
+            .set_min_threads(base_thread_num)
+            .set_max_threads(base_thread_num)
             .build(&_base_compaction_thread_pool);
     ThreadPoolBuilder("CumuCompactionTaskThreadPool")
-            .set_min_threads(config::max_cumu_compaction_threads)
-            .set_max_threads(config::max_cumu_compaction_threads)
+            .set_min_threads(cumu_thread_num)
+            .set_max_threads(cumu_thread_num)
             .build(&_cumu_compaction_thread_pool);
     RETURN_IF_ERROR(Thread::create(
             "StorageEngine", "compaction_tasks_producer_thread",
             [this]() { this->_compaction_tasks_producer_callback(); },
             &_bg_threads.emplace_back()));
-    LOG(INFO) << "compaction tasks producer thread started";
+    LOG(INFO) << "compaction tasks producer thread started,"
+              << " base thread num " << base_thread_num
+              << " cumu thread num " << cumu_thread_num;
 
     // add calculate tablet delete bitmap task thread pool
     ThreadPoolBuilder("TabletCalDeleteBitmapThreadPool")
@@ -452,41 +474,43 @@ void StorageEngine::_tablet_checkpoint_callback(const std::vector<DataDir*>& dat
 }
 
 void StorageEngine::_adjust_compaction_thread_num() {
-    if (_base_compaction_thread_pool->max_threads() != config::max_base_compaction_threads) {
+    int base_thread_num = get_base_thread_num();
+    if (_base_compaction_thread_pool->max_threads() != base_thread_num) {
         int old_max_threads = _base_compaction_thread_pool->max_threads();
         Status status =
-                _base_compaction_thread_pool->set_max_threads(config::max_base_compaction_threads);
+                _base_compaction_thread_pool->set_max_threads(base_thread_num);
         if (status.ok()) {
             VLOG_NOTICE << "update base compaction thread pool max_threads from " << old_max_threads
-                        << " to " << config::max_base_compaction_threads;
+                        << " to " << base_thread_num;
         }
     }
-    if (_base_compaction_thread_pool->min_threads() != config::max_base_compaction_threads) {
+    if (_base_compaction_thread_pool->min_threads() != base_thread_num) {
         int old_min_threads = _base_compaction_thread_pool->min_threads();
         Status status =
-                _base_compaction_thread_pool->set_min_threads(config::max_base_compaction_threads);
+                _base_compaction_thread_pool->set_min_threads(base_thread_num);
         if (status.ok()) {
             VLOG_NOTICE << "update base compaction thread pool min_threads from " << old_min_threads
-                        << " to " << config::max_base_compaction_threads;
+                        << " to " << base_thread_num;
         }
     }
 
-    if (_cumu_compaction_thread_pool->max_threads() != config::max_cumu_compaction_threads) {
+    int cumu_thread_num = get_cumu_thread_num();
+    if (_cumu_compaction_thread_pool->max_threads() != cumu_thread_num) {
         int old_max_threads = _cumu_compaction_thread_pool->max_threads();
         Status status =
-                _cumu_compaction_thread_pool->set_max_threads(config::max_cumu_compaction_threads);
+                _cumu_compaction_thread_pool->set_max_threads(cumu_thread_num);
         if (status.ok()) {
             VLOG_NOTICE << "update cumu compaction thread pool max_threads from " << old_max_threads
-                        << " to " << config::max_cumu_compaction_threads;
+                        << " to " << cumu_thread_num;
         }
     }
-    if (_cumu_compaction_thread_pool->min_threads() != config::max_cumu_compaction_threads) {
+    if (_cumu_compaction_thread_pool->min_threads() != cumu_thread_num) {
         int old_min_threads = _cumu_compaction_thread_pool->min_threads();
         Status status =
-                _cumu_compaction_thread_pool->set_min_threads(config::max_cumu_compaction_threads);
+                _cumu_compaction_thread_pool->set_min_threads(cumu_thread_num);
         if (status.ok()) {
             VLOG_NOTICE << "update cumu compaction thread pool min_threads from " << old_min_threads
-                        << " to " << config::max_cumu_compaction_threads;
+                        << " to " << cumu_thread_num;
         }
     }
 }
