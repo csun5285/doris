@@ -67,10 +67,11 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
     vectorized::Block dst_block;
     int index = 0;
     auto columns = src_block.get_columns_with_type_and_name();
-    if (columns.size() != _tuple_descriptor->slots().size()) {
+    if (_column_id_count != columns.size() || columns.size() != _tuple_descriptor->slots().size()) {
         return Status::InternalError(
-                "not equal columns size=" + std::to_string(columns.size()) + " vs " +
-                "tuple_descriptor size=" + std::to_string(_tuple_descriptor->slots().size()));
+                "not equal _column_id_count={} vs columns size={} vs tuple_descriptor size={}",
+                std::to_string(_column_id_count), std::to_string(columns.size()),
+                std::to_string(_tuple_descriptor->slots().size()));
     }
     vectorized::ColumnPtr column_ptr = nullptr;
     for (auto slot_desc : _tuple_descriptor->slots()) {
@@ -81,6 +82,10 @@ Status WalReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
             }
             auto pos = it->second.front();
             it->second.pop_front();
+            if (pos >= src_block.columns()) {
+                return Status::InternalError("read wal {} fail, pos {}, columns size {}", _wal_path,
+                                             pos, src_block.columns());
+            }
             column_ptr = src_block.get_by_position(pos).column;
             it->second.emplace_back(pos);
         } else {
@@ -117,6 +122,7 @@ Status WalReader::get_columns(std::unordered_map<std::string, TypeDescriptor>* n
     RETURN_IF_ERROR(_wal_reader->read_header(col_ids));
     std::vector<std::string> column_id_vector =
             strings::Split(col_ids, ",", strings::SkipWhitespace());
+    _column_id_count = column_id_vector.size();
     try {
         int64_t pos = 0;
         for (auto col_id_str : column_id_vector) {

@@ -43,6 +43,7 @@ private:
     std::unordered_map<std::string, vectorized::VExprContextSPtr> _col_default_value_ctx;
     // column_id, column_pos
     std::map<int64_t, std::list<int64_t>> _column_pos_map;
+    int64_t _column_id_count;
 };
 } // namespace vectorized
 } // namespace doris
