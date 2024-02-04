@@ -36,6 +36,13 @@ jobs:
           persist-credentials: true
           submodules: recursive
 
+      - name: Checkout ${{ github.ref }} ( ${{ github.event.pull_request.head.sha }} )
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          submodules: recursive
+
       - name: Paths filter
         uses: ./.github/actions/paths-filter
         id: filter
