@@ -109,6 +109,9 @@ uint64_t get_fragment_last_active_time() {
 }
 
 std::string to_load_error_http_path(const std::string& file_name) {
+#ifdef CLOUD_MODE
+    return file_name;
+#endif
     if (file_name.empty()) {
         return "";
     }
@@ -470,7 +473,8 @@ void FragmentMgr::coordinator_callback(const ReportStatusRequest& req) {
                     std::to_string(req.runtime_state->num_rows_load_unselected()));
         }
         if (!req.runtime_state->get_error_log_file_path().empty()) {
-            params.__set_tracking_url(req.runtime_state->get_error_log_file_path());
+            params.__set_tracking_url(
+                    to_load_error_http_path(req.runtime_state->get_error_log_file_path()));
         }
         if (!req.runtime_state->export_output_files().empty()) {
             params.__isset.export_files = true;

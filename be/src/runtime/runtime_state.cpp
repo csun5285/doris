@@ -417,7 +417,7 @@ const std::string RuntimeState::get_error_log_file_path() const {
     return std::dynamic_pointer_cast<io::S3FileSystem>(_error_fs)->generate_presigned_url(
             _s3_error_log_file_path, EXPIRATION_SECONDS, true);
 #else
-    return to_load_error_http_path(_error_log_file_path);
+    return _error_log_file_path;
 #endif
 }
 

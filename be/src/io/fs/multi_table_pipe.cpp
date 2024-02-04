@@ -249,7 +249,7 @@ Status MultiTablePipe::exec_plans(ExecEnv* exec_env, std::vector<ExecParam> para
                 *status = Status::InternalError("too many filtered rows");
             }
             if (_number_filtered_rows > 0 && !state->get_error_log_file_path().empty()) {
-                _ctx->error_url = state->get_error_log_file_path();
+                _ctx->error_url = to_load_error_http_path(state->get_error_log_file_path());
             }
 
             // if any of the plan fragment exec failed, set the status to the first failed plan
