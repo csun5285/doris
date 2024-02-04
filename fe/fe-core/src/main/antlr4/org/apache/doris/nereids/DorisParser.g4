@@ -560,6 +560,7 @@ nonReserved
     | ARRAY
     | AT
     | AUTHORS
+    | AUTO_INCREMENT
     | BACKENDS
     | BACKUP
     | BEGIN
