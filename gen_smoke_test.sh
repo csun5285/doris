@@ -131,6 +131,10 @@ echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
 
 new_line="excludeSuites=\"test_stage_ram\""
 echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
+
+new_line="pluginPath=\"bin/regression-test/plugins\""
+echo \$new_line >> ./bin/regression-test/conf/regression-conf-custom.groovy
+
 # start smoke test
 
 export \$JAVA_HOME

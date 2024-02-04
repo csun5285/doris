@@ -36,6 +36,14 @@ suite("test_grant_revoke_cluster_stage_to_role", "cloud_auth") {
         assertEquals(GlobalPrivs as String, result.GlobalPrivs[0] as String)
     }
 
+    def fieldDisorder = { result, expected1, expected2 ->
+        boolean ret = false
+        if ((result as String) == (expected1 as String) || (result as String) == (expected2 as String)) {
+            ret = true
+        }
+        return ret
+    }
+
     def clusters = sql " SHOW CLUSTERS; "
     assertTrue(!clusters.isEmpty())
     def validCluster = clusters[0][0]
@@ -114,7 +122,9 @@ suite("test_grant_revoke_cluster_stage_to_role", "cloud_auth") {
         """
 
     result = showRoles.call(roleName)
-    assertEquals(result.CloudClusterPrivs as String, "$testClusterA: Cluster_Usage_priv ; $validCluster: Cluster_Usage_priv " as String)
+    assertTrue(fieldDisorder.call(result.CloudClusterPrivs as String,
+        "$testClusterA: Cluster_Usage_priv ; $validCluster: Cluster_Usage_priv " as String, 
+        "$validCluster: Cluster_Usage_priv ; $testClusterA: Cluster_Usage_priv " as String) as boolean)
     assertEquals(result.CloudStagePrivs as String, "$testStageA: Stage_Usage_priv " as String)
     assertEquals(result.GlobalPrivs as String, "Select_priv  Cluster_Usage_priv  Stage_Usage_priv " as String)
     def matcher = result.Users =~ /.*${user1}.*/
@@ -167,7 +177,9 @@ suite("test_grant_revoke_cluster_stage_to_role", "cloud_auth") {
         """
     
     result = showRoles.call(roleName)
-    assertEquals(result.CloudClusterPrivs as String, "$testClusterA: ; $validCluster: Cluster_Usage_priv " as String)
+    assertTrue(fieldDisorder.call(result.CloudClusterPrivs as String,
+        "$testClusterA: ; $validCluster: Cluster_Usage_priv " as String, 
+        "$validCluster: Cluster_Usage_priv ; $testClusterA: " as String) as boolean)
     assertEquals(result.CloudStagePrivs as String, "$testStageA: " as String)
     matcher = result.Users =~ /.*${user1}.*/
     assertTrue(matcher.matches())
@@ -196,7 +208,9 @@ suite("test_grant_revoke_cluster_stage_to_role", "cloud_auth") {
         """
 
     result = showRoles.call(roleName)
-    assertEquals(result.CloudClusterPrivs as String, "$testClusterA: ; $validCluster: " as String)
+    assertTrue(fieldDisorder.call(result.CloudClusterPrivs as String,
+        "$testClusterA: ; $validCluster: " as String, 
+        "$validCluster: ; $testClusterA: " as String) as boolean)
 
     // still can select, because have global * cluster
     connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
@@ -220,7 +234,9 @@ suite("test_grant_revoke_cluster_stage_to_role", "cloud_auth") {
         """
 
     result = showRoles.call(roleName)
-    assertEquals(result.CloudClusterPrivs as String, "$testClusterA: ; $validCluster: " as String)
+    assertTrue(fieldDisorder.call(result.CloudClusterPrivs as String,
+        "$testClusterA: ; $validCluster: " as String, 
+        "$validCluster: ; $testClusterA: " as String) as boolean)
     assertEquals(result.CloudStagePrivs as String, "$testStageA: " as String)
     assertEquals(result.GlobalPrivs as String, "Select_priv   " as String)
 
