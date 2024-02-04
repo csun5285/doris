@@ -1160,8 +1160,6 @@ PARTITION `p599` VALUES IN (599)
         );
     """
 
-    // Comment update rows case not fit for cloud version.
-    /*
     sql """ANALYZE TABLE test_updated_rows WITH SYNC"""
     sql """ INSERT INTO test_updated_rows VALUES('1',1,1); """
     def cnt1 = sql """ SHOW TABLE STATS test_updated_rows """
@@ -1169,13 +1167,10 @@ PARTITION `p599` VALUES IN (599)
     sql """ INSERT INTO test_updated_rows SELECT * FROM test_updated_rows """
     sql """ INSERT INTO test_updated_rows SELECT * FROM test_updated_rows """
     sql """ INSERT INTO test_updated_rows SELECT * FROM test_updated_rows """
-    sql """ANALYZE TABLE test_updated_rows WITH SYNC"""
     def cnt2 = sql """ SHOW TABLE STATS test_updated_rows """
-    assertEquals(Integer.valueOf(cnt2[0][0]), 7)
+    assertEquals(Integer.valueOf(cnt2[0][0]), 8)
     sql """ANALYZE TABLE test_updated_rows WITH SYNC"""
     cnt2 = sql """ SHOW TABLE STATS test_updated_rows """
-    assertEquals(Integer.valueOf(cnt2[0][0]), 0)
-    */
     assertTrue(Integer.valueOf(cnt2[0][0]) == 0 || Integer.valueOf(cnt2[0][0]) == 8)
 
     // test analyze specific column
