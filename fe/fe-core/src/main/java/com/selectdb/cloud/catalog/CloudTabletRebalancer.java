@@ -314,6 +314,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             }
 
             Map<Long, Boolean> taskDone = sendCheckPreCacheRpc(entry.getValue(), entry.getKey());
+            if (taskDone == null) {
+                LOG.warn("sendCheckPreCacheRpc return null be {}, inFight tasks {}", entry.getKey(), entry.getValue());
+                continue;
+            }
 
             for (Map.Entry<Long, Boolean> result : taskDone.entrySet()) {
                 InfightTask task = tabletToInfightTask.get(result.getKey());
