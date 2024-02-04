@@ -1,3 +1,4 @@
+import java.util.Date
 import java.util.stream.Collectors
 
 // Licensed to the Apache Software Foundation (ASF) under one
@@ -44,21 +45,21 @@ suite("test_analyze_partition_first_load") {
 
     sql """analyze table `$tbl` with sync"""
     sql """insert into `$tbl` values (1, '1', '1')"""
-    def partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "true")
-    assertEquals(partition_result[0][0], "1")
+    def partition_result = sql_return_maparray """show table stats `$tbl`"""
+    assertEquals(partition_result.new_partition[0], "true")
+    assertEquals(partition_result.updated_rows[0], "1")
     sql """analyze table `$tbl` with sync"""
-    partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "false")
+    partition_result = sql_return_maparray """show table stats `$tbl`"""
+    assertEquals(partition_result.new_partition[0], "false")
     sql """insert into `$tbl` values (101, '1', '1')"""
-    partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "true")
+    partition_result = sql_return_maparray """show table stats `$tbl`"""
+    assertEquals(partition_result.new_partition[0], "true")
     sql """analyze table `$tbl`(id) with sync"""
-    partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "false")
+    partition_result = sql_return_maparray """show table stats `$tbl`"""
+    assertEquals(partition_result.new_partition[0], "false")
     sql """insert into `$tbl` values (102, '1', '1')"""
-    partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "false")
+    partition_result = sql_return_maparray """show table stats `$tbl`"""
+    assertEquals(partition_result.new_partition[0], "false")
 
     streamLoad {
         table "$tbl"
@@ -68,9 +69,21 @@ suite("test_analyze_partition_first_load") {
         time 10000 // limit inflight 10s
     }
 
-    partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "true")
+    def retry = 0
+    while (retry < 10) {
+        sleep(1000)
+        partition_result = sql_return_maparray """show table stats `$tbl`"""
+        if (partition_result.new_partition[0] == "true") {
+            break
+        }
+        retry++
+    }
+    if (retry >= 10) {
+        partition_result = sql_return_maparray """show table stats `$tbl`"""
+        assertEquals(partition_result.new_partition[0], "true") // last chance, still failure?
+    }
+
     sql """analyze table `$tbl`(id) with sync"""
-    partition_result = sql """show table stats `$tbl`"""
-    assertEquals(partition_result[0][6], "false")
+    partition_result = sql_return_maparray """show table stats `$tbl`"""
+    assertEquals(partition_result.new_partition[0], "false")
 }
