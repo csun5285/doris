@@ -349,7 +349,7 @@ DEFINE_mBool(enable_ordered_data_compaction, "true");
 // In vertical compaction, column number for every group
 DEFINE_mInt32(vertical_compaction_num_columns_per_group, "5");
 // In vertical compaction, max memory usage for row_source_buffer
-DEFINE_Int32(vertical_compaction_max_row_source_memory_mb, "2048");
+DEFINE_Int32(vertical_compaction_max_row_source_memory_mb, "1024");
 // In vertical compaction, max dest segment file size
 DEFINE_mInt64(vertical_compaction_max_segment_size, "268435456");
 
@@ -675,9 +675,9 @@ DEFINE_mInt32(storage_flood_stage_usage_percent, "90"); // 90%
 // The min bytes that should be left of a data dir
 DEFINE_mInt64(storage_flood_stage_left_capacity_bytes, "1073741824"); // 1GB
 // number of thread for flushing memtable per store
-DEFINE_Int32(flush_thread_num_per_store, "6");
+DEFINE_Int32(flush_thread_num_per_store, "24");
 // number of thread for flushing memtable per store, for high priority load task
-DEFINE_Int32(high_priority_flush_thread_num_per_store, "6");
+DEFINE_Int32(high_priority_flush_thread_num_per_store, "24");
 
 // config for tablet meta checkpoint
 DEFINE_mInt32(tablet_meta_checkpoint_min_new_rowsets_num, "10");
