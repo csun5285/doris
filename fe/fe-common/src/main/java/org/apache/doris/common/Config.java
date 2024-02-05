@@ -2418,6 +2418,10 @@ public class Config extends ConfigBase {
     // To control the default value of the session variable `enable_auto_analyze`
     @ConfField(mutable = true)
     public static boolean enable_auto_analyze = false;
+
+    @ConfField(mutable = true)
+    public static boolean force_sample_analyze = true; // avoid full analyze for performance reason
+
     @ConfField(mutable = true)
     public static boolean enable_collect_internal_query_profile = false;
 
