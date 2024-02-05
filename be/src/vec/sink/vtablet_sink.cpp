@@ -950,6 +950,10 @@ Status VNodeChannel::close_wait(RuntimeState* state) {
     }
     _close_time_ms = UnixMillis() - _close_time_ms;
 
+    if (_cancelled || state->is_cancelled()) {
+        _cancel_with_msg(state->cancel_reason());
+    }
+
     if (_add_batches_finished) {
         _close_check();
         state->tablet_commit_infos().insert(state->tablet_commit_infos().end(),
