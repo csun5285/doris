@@ -65,8 +65,6 @@ Status LoadBlockQueue::add_block(RuntimeState* runtime_state,
             _block_queue.push_back(block);
             _data_bytes += block->bytes();
             _all_block_queues_bytes->fetch_add(block->bytes(), std::memory_order_relaxed);
-        } else {
-            LOG(INFO) << "skip adding block to queue on txn " << txn_id;
         }
         if (write_wal || config::group_commit_wait_replay_wal_finish) {
             auto st = _v_wal_writer->write_wal(block.get());
@@ -394,7 +392,7 @@ Status GroupCommitTable::_finish_group_commit_load(int64_t db_id, int64_t table_
             auto delete_st = _exec_env->wal_mgr()->delete_wal(
                     table_id, txn_id, load_block_queue->block_queue_pre_allocated());
             if (!delete_st.ok()) {
-                LOG(WARNING) << "fail to delete wal " << txn_id;
+                LOG(WARNING) << "fail to delete wal " << txn_id << ", st=" << delete_st.to_string();
             }
         }
     } else {
