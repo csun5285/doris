@@ -156,6 +156,9 @@ Status WalManager::_init_wal_dirs_info() {
         wal_limit_test_bytes = wal_disk_limit;
 #endif
     }
+#ifdef BE_TEST
+    return Status::OK();
+#endif
     return Thread::create(
             "WalMgr", "update_wal_dir_info",
             [this]() { static_cast<void>(this->_update_wal_dir_info_thread()); },
