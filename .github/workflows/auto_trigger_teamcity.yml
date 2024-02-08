@@ -22,6 +22,8 @@ on:
     types: [created, edited]
   pull_request_review_comment:
     types: [created, edited]
+  pull_request_target:
+    types: [opened, synchronize]
 
 env:
   COMMENT: "${{ github.event.comment.body }}"
@@ -31,7 +33,7 @@ env:
 
 jobs:
   run_teamcity_pipeline:
-    if: (contains(github.event.comment.body, 'buildall') || contains(github.event.comment.body, 'ms_ut') || contains(github.event.comment.body, 'cloud_be_ut') || contains(github.event.comment.body, 'fe_ut') || contains(github.event.comment.body, 'compile') || contains(github.event.comment.body, 'p0') && contains(github.event.comment.body, 'run')) && !contains(github.event.comment.body, 'Thanks for your contribution')
+    if: github.event_name == "pull_request_target" || (contains(github.event.comment.body, 'buildall') || contains(github.event.comment.body, 'ms_ut') || contains(github.event.comment.body, 'cloud_be_ut') || contains(github.event.comment.body, 'fe_ut') || contains(github.event.comment.body, 'compile') || contains(github.event.comment.body, 'p0') && contains(github.event.comment.body, 'run')) && !contains(github.event.comment.body, 'Thanks for your contribution')
 
     runs-on: ubuntu-latest
 
@@ -47,8 +49,12 @@ jobs:
             echo "Comment was made on an issue, not a pull request."
           fi
           pull_request_num=${{ env.PULL_REQUEST_NUM }}
-          encoded_string=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "${{ env.COMMENT }}")          
+          encoded_string=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "${{ env.COMMENT }}")
           comment_message="${{ env.COMMENT }}"
+          # if is triggered by pull_request_target event, run all CIs
+          if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+            comment_message="run buildall"
+          fi
           latest_commit_id="${{ env.LATEST_COMMIT }}"
           teamcity_url="${{ env.TEAMCITY_URL }}"
           trigger_pipelines=""
@@ -56,7 +62,7 @@ jobs:
           echo "pull_request_num : ${pull_request_num}"
           echo "encoded_string : ${encoded_string}"
           echo "latest_commit_id : ${{ env.LATEST_COMMIT }}"
-          
+
           if [[ "${comment_message}" =~ "run" && "${comment_message}" =~ "buildall" && ! "${comment_message}" =~ "Thanks for your contribution" ]]; then
             trigger_pipelines="SelectdbCore_Ut_MsUt SelectdbCore_Ut_FeUt SelectdbCore_BeUt_CloutBeUt SelectdbCore_Regression_Compile_2 ${trigger_pipelines}"
           fi
@@ -79,26 +85,26 @@ jobs:
           if [ -z "${trigger_pipelines}" ];then
             echo "Just a general comment that doesn't match any pipeline rules"
           fi
-          
+
           echo "need run pipelines: ${trigger_pipelines}"
-          
+
           for pipeline in ${trigger_pipelines}
           do
             echo "-----------------------------------------------------------------"
             running_builds_command="curl -s -X GET ${teamcity_url}/app/rest/builds\?locator\=buildType\:${pipeline}\,branch:pull/${pull_request_num}\,running:true"
-            echo "${running_builds_command}" 
+            echo "${running_builds_command}"
             running_builds_list=$(eval "${running_builds_command}" > running_builds.json && jq -r '.build[].id' running_builds.json)
             echo "running_builds_list : ${running_builds_list}"
-          
+
             queue_builds_command="curl -s -X GET ${teamcity_url}/app/rest/buildQueue\?locator\=buildType\:${pipeline}"
             echo "${queue_builds_command}"
             eval "${queue_builds_command}" > queue_builds.json
             queue_builds_list=$(cat queue_builds.json | jq ".build[] | select(.branchName == \"pull/${pull_request_num}\") | .id" )
             echo "queue builds list: ${queue_builds_list}"
-          
+
             merged_list=("${running_builds_list[@]} ${queue_builds_list[@]}")
             echo "merged_list :  ${merged_list}"
-          
+
             for build in ${merged_list}; do
               running_commit_command="curl -s -X GET ${teamcity_url}/app/rest/builds/${build}"
               echo "${running_commit_command}"
@@ -108,11 +114,11 @@ jobs:
 
               if [[ "_"${latest_commit_id} == "_"${running_commit_id} || _"\"${latest_commit_id}\"" == "_"${running_env_commit_id} ]];then
                 echo "the same pr_commit build already exist, this build ${build} is running or in queue!"
-                same_build_sign="true" 
+                same_build_sign="true"
                 break
               fi
             done
-          
+
             if [ "_""${same_build_sign}" == "_false" ];then
               sleep 10s
               echo "there is no running build or queue build, so trigger a new !"
@@ -120,9 +126,8 @@ jobs:
               echo "${execute_command}"
               eval "${execute_command}"
               echo "-----------------------------------------------------------------"
-            else 
+            else
               echo "there is same pr commit task in queue,so skip trigger !"
               echo "-----------------------------------------------------------------"
             fi
           done
-          
