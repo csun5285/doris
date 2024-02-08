@@ -207,7 +207,9 @@ Status GroupCommitTable::get_first_block_load_queue(
                 }
             }
             if (!is_schema_version_match) {
-                return Status::DataQualityError<false>("schema version not match");
+                return Status::DataQualityError<false>(
+                        "schema version not match, maybe a schema change is in process. Please "
+                        "retry this load manually.");
             }
             if (!_need_plan_fragment) {
                 _need_plan_fragment = true;
@@ -226,7 +228,9 @@ Status GroupCommitTable::get_first_block_load_queue(
                 } else if (base_schema_version < load_block_queue->schema_version ||
                            (base_schema_version == load_block_queue->schema_version &&
                             column_num != load_block_queue->column_num)) {
-                    return Status::DataQualityError<false>("schema version not match");
+                    return Status::DataQualityError<false>(
+                            "schema version not match, maybe a schema change is in process. Please "
+                            "retry this load manually.");
                 }
                 load_block_queue.reset();
             }
@@ -534,7 +538,7 @@ bool LoadBlockQueue::has_enough_wal_disk_space(size_t pre_allocated) {
     {
         Status st = wal_mgr->get_wal_dir_available_size(_wal_base_path, &available_bytes);
         if (!st.ok()) {
-            LOG(WARNING) << "get wal disk available size filed, reson: " << st.to_string();
+            LOG(WARNING) << "get wal disk available size failed, reason: " << st.to_string();
         }
     }
     if (pre_allocated < available_bytes) {
