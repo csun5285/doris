@@ -33,7 +33,7 @@ env:
 
 jobs:
   run_teamcity_pipeline:
-    if: (github.event_name == "pull_request_target" || contains(github.event.comment.body, 'buildall') || contains(github.event.comment.body, 'ms_ut') || contains(github.event.comment.body, 'cloud_be_ut') || contains(github.event.comment.body, 'fe_ut') || contains(github.event.comment.body, 'compile') || contains(github.event.comment.body, 'p0') && contains(github.event.comment.body, 'run')) && !contains(github.event.comment.body, 'Thanks for your contribution')
+    if: (github.event_name == 'pull_request_target' || contains(github.event.comment.body, 'buildall') || contains(github.event.comment.body, 'ms_ut') || contains(github.event.comment.body, 'cloud_be_ut') || contains(github.event.comment.body, 'fe_ut') || contains(github.event.comment.body, 'compile') || contains(github.event.comment.body, 'p0') && contains(github.event.comment.body, 'run')) && !contains(github.event.comment.body, 'Thanks for your contribution')
 
     runs-on: ubuntu-latest
 
