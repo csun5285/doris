@@ -223,6 +223,10 @@ public:
     // for single-stream-multi-table, we have table list
     std::vector<std::string> table_list;
 
+    // use for cloud cluster mode
+    std::string qualified_user;
+    std::string cloud_cluster;
+
 public:
     ExecEnv* exec_env() { return _exec_env; }
 

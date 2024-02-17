@@ -162,6 +162,8 @@ Status MultiTablePipe::request_and_exec_plans() {
     request.__set_loadId(_ctx->id.to_thrift());
     request.fileType = TFileType::FILE_STREAM;
     request.__set_thrift_rpc_timeout_ms(config::thrift_rpc_timeout_ms);
+    request.__set_user(_ctx->qualified_user);
+    request.__set_cloud_cluster(_ctx->cloud_cluster);
     // no need to register new_load_stream_mgr coz it is already done in routineload submit task
 
     // plan this load

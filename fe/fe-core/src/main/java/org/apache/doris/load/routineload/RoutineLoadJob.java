@@ -262,6 +262,10 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
 
     protected byte escape = 0;
 
+    // use for cloud cluster mode
+    protected String qualifiedUser;
+    protected String cloudCluster;
+
     public void setTypeRead(boolean isTypeRead) {
         this.isTypeRead = isTypeRead;
     }
@@ -307,6 +311,8 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
         if (ConnectContext.get() != null) {
             SessionVariable var = ConnectContext.get().getSessionVariable();
             sessionVariables.put(SessionVariable.SQL_MODE, Long.toString(var.getSqlMode()));
+            this.qualifiedUser = ConnectContext.get().getQualifiedUser();
+            this.cloudCluster = ConnectContext.get().getCloudCluster();
         } else {
             sessionVariables.put(SessionVariable.SQL_MODE, String.valueOf(SqlModeHelper.MODE_DEFAULT));
         }
@@ -686,6 +692,14 @@ public abstract class RoutineLoadJob extends AbstractTxnStateChangeCallback impl
 
     public void setComment(String comment) {
         this.comment = comment;
+    }
+
+    public String getQualifiedUser() {
+        return qualifiedUser;
+    }
+
+    public String getCloudCluster() {
+        return cloudCluster;
     }
 
     public int getSizeOfRoutineLoadTaskInfoList() {

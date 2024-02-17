@@ -1453,8 +1453,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         // if it has multi table, use multi table and update multi table running transaction table ids
         if (CollectionUtils.isNotEmpty(request.getTbls())) {
             List<Long> multiTableIds = tables.stream().map(Table::getId).collect(Collectors.toList());
-            ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr()).getDatabaseTransactionMgr(db.getId())
-                    .updateMultiTableRunningTransactionTableIds(request.getTxnId(), multiTableIds);
+            if (!Config.isCloudMode()) {
+                ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr())
+                    .getDatabaseTransactionMgr(db.getId())
+                        .updateMultiTableRunningTransactionTableIds(request.getTxnId(), multiTableIds);
+            }
             LOG.debug("txn {} has multi table {}", request.getTxnId(), request.getTbls());
         }
         return tables;
@@ -2039,6 +2042,43 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         TStatus status = new TStatus(TStatusCode.OK);
         result.setStatus(status);
         List<String> tableNames = request.getTableNames();
+
+        if (Config.isCloudMode()) {
+            try {
+                ConnectContext ctx = new ConnectContext();
+                ctx.setThreadLocalInfo();
+                ctx.setQualifiedUser(request.getUser());
+                ctx.setRemoteIP(request.getUserIp());
+                String fullUserName = ClusterNamespace
+                                        .getFullName(SystemInfoService.DEFAULT_CLUSTER, request.getUser());
+                if (fullUserName != null) {
+                    List<UserIdentity> currentUser = Lists.newArrayList();
+                    try {
+                        Env.getCurrentEnv().getAuth().checkPlainPassword(fullUserName,
+                                request.getUserIp(), request.getPasswd(), currentUser);
+                    } catch (AuthenticationException e) {
+                        throw new UserException(e.formatErrMsg());
+                    }
+                    Preconditions.checkState(currentUser.size() == 1);
+                    ctx.setCurrentUserIdentity(currentUser.get(0));
+                }
+                LOG.info("one stream multi table load use cloud cluster {}", request.getCloudCluster());
+                if (Strings.isNullOrEmpty(request.getCloudCluster())) {
+                    ctx.setCloudCluster();
+                } else {
+                    if (Strings.isNullOrEmpty(request.getUser())) {
+                        ctx.setCloudCluster(request.getCloudCluster());
+                    } else {
+                        Env.getCurrentEnv().changeCloudCluster(request.getCloudCluster(), ctx);
+                    }
+                }
+            } catch (UserException e) {
+                LOG.warn("failed to set ConnectContext info: {}", e.getMessage());
+                status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
+                status.addToErrorMsgs(e.getMessage());
+            }
+        }
+
         try {
             if (CollectionUtils.isEmpty(tableNames)) {
                 throw new MetaNotFoundException("table not found");
@@ -2082,7 +2122,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
         long timeoutMs = request.isSetThriftRpcTimeoutMs() ? request.getThriftRpcTimeoutMs() : 5000;
         List planFragmentParamsList = new ArrayList<>(tableNames.size());
-        List<Long> tableIds = olapTables.stream().map(OlapTable::getId).collect(Collectors.toList());
         // todo: if is multi table, we need consider the lock time and the timeout
         boolean enablePipelineLoad = Config.enable_pipeline_load;
         try {
@@ -2100,9 +2139,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 }
                 multiTableFragmentInstanceIdIndexMap.put(request.getTxnId(), ++index);
             }
-            ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr()).getDatabaseTransactionMgr(db.getId())
-                    .putTransactionTableNames(request.getTxnId(),
-                            tableIds);
             LOG.debug("receive stream load multi table put request result: {}", result);
         } catch (Throwable e) {
             LOG.warn("catch unknown result.", e);
