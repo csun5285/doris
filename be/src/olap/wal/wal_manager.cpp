@@ -289,7 +289,7 @@ Status WalManager::_replay_wal() {
         if (!exists) {
             continue;
         }
-        LOG(INFO) << "replay wal: " << wal.wal_path << " replay_own:" << replay_own
+        LOG(INFO) << "find wal: " << wal.wal_path << " replay_own:" << replay_own
                   << " _start_time_ms:" << _start_time_ms;
         if (replay_own) {
             if (_exec_env->master_info()->backend_id != wal.be_id) {
