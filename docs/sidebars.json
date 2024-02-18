@@ -26,7 +26,9 @@
                     "label": "Deploy Doris on Kubernetes",
                     "items": [
                         "install/k8s-deploy/operator-deploy",
-                        "install/k8s-deploy/helm-chart-deploy"
+                        "install/k8s-deploy/helm-chart-deploy",
+                        "install/k8s-deploy/network",
+                        "install/k8s-deploy/persistent-volume"
                     ]
                 },
                 {
@@ -239,6 +241,7 @@
             "items": [
                 "ecosystem/spark-doris-connector",
                 "ecosystem/flink-doris-connector",
+                "ecosystem/doris-streamloader",
                 "ecosystem/datax",
                 "ecosystem/seatunnel",
                 "ecosystem/kyuubi",
@@ -1330,6 +1333,7 @@
             "type": "category",
             "label": "Release notes",
             "items": [
+                "releasenotes/release-2.0.4",
                 "releasenotes/release-2.0.3",
                 "releasenotes/release-2.0.2",
                 "releasenotes/release-2.0.1",

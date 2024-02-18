@@ -182,12 +182,8 @@ Status InvertedIndexReader::get_index_search(OlapReaderStatistics* stats,
                                              const std::string& index_dir,
                                              const std::string& index_file_name) {
     InvertedIndexCacheHandle inverted_index_cache_handle;
-    auto st = InvertedIndexSearcherCache::instance()->get_index_searcher(
-            _fs, index_dir, index_file_name, &inverted_index_cache_handle, stats);
-    if (!st.ok()) {
-        LOG(WARNING) << "get index search failed, status=" << st;
-        return st;
-    }
+    RETURN_IF_ERROR(InvertedIndexSearcherCache::instance()->get_index_searcher(
+            _fs, index_dir, index_file_name, &inverted_index_cache_handle, stats));
     index_searcher = inverted_index_cache_handle.get_index_searcher();
     return Status::OK();
 }
@@ -342,8 +338,9 @@ Status FullTextIndexReader::query(OlapReaderStatistics* stats, RuntimeState* run
                 RETURN_IF_ERROR(get_index_search(stats, index_searcher, index_dir.c_str(),
                                                  index_file_name));
 
-                Status res = Status::OK();
                 term_match_bitmap = std::make_shared<roaring::Roaring>();
+
+                Status res = Status::OK();
                 if (query_type == InvertedIndexQueryType::MATCH_PHRASE_QUERY) {
                     auto* phrase_query = new lucene::search::PhraseQuery();
                     for (auto& token : analyse_result) {
@@ -629,9 +626,6 @@ Status StringTypeInvertedIndexReader::query(OlapReaderStatistics* stats,
         stats->inverted_index_query_cache_miss++;
     }
 
-    IndexSearcherPtr index_searcher = nullptr;
-    RETURN_IF_ERROR(get_index_search(stats, index_searcher, index_dir.c_str(), index_file_name));
-
     switch (query_type) {
     case InvertedIndexQueryType::MATCH_ANY_QUERY:
     case InvertedIndexQueryType::MATCH_ALL_QUERY:
@@ -662,6 +656,9 @@ Status StringTypeInvertedIndexReader::query(OlapReaderStatistics* stats,
     }
 
     roaring::Roaring result;
+    IndexSearcherPtr index_searcher = nullptr;
+    RETURN_IF_ERROR(get_index_search(stats, index_searcher, index_dir.c_str(), index_file_name));
+
     // try to reuse index_searcher's directory to read null_bitmap to cache
     // to avoid open directory additionally for null_bitmap
     InvertedIndexQueryCacheHandle null_bitmap_cache_handle;
