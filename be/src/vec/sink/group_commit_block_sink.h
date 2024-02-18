@@ -51,7 +51,8 @@ public:
 private:
     Status _add_block(RuntimeState* state, vectorized::Block* block);
     Status _add_blocks(RuntimeState* state, bool is_blocks_contain_all_load_data);
-    size_t _pre_allocated(bool is_blocks_contain_all_load_data);
+    size_t _calculate_estimated_wal_bytes(bool is_blocks_contain_all_load_data);
+    void _remove_estimated_wal_bytes();
 
     // ObjectPool* _pool;
     const RowDescriptor& _input_row_desc;
@@ -82,6 +83,7 @@ private:
 
     // used for find_partition
     std::unique_ptr<VOlapTablePartitionParam> _vpartition = nullptr;
+    size_t _estimated_wal_bytes = 0;
 };
 
 } // namespace vectorized
