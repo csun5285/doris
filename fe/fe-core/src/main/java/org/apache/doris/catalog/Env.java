@@ -1053,7 +1053,7 @@ public class Env {
     private void getClusterIdAndRole() throws IOException, InterruptedException {
         NodeInfoPB.NodeType type = NodeInfoPB.NodeType.UNKNOWN;
         String feNodeNameFromMeta = "";
-        if (Config.isCloudMode()) {
+        if (Config.isCloudMode() && !Config.enable_check_compatibility_mode) {
             // cloud mode
             while (true) {
                 SelectdbCloud.NodeInfoPB nodeInfoPB = null;
@@ -1489,6 +1489,13 @@ public class Env {
         replayJournal(-1);
         long replayEndTime = System.currentTimeMillis();
         LOG.info("finish replay in " + (replayEndTime - replayStartTime) + " msec");
+
+        if (Config.isCloudMode() && Config.enable_check_compatibility_mode) {
+            String msg = "check metadata compatibility successfully";
+            LOG.info(msg);
+            System.out.println(msg);
+            System.exit(0);
+        }
 
         checkCurrentNodeExist();
 

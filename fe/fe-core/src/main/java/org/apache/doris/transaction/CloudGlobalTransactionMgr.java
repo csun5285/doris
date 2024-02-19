@@ -192,7 +192,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
                     .setCloudUniqueId(Config.cloud_unique_id)
                     .build();
 
-            while (retryTime < Config.meta_service_rpc_retry_times) {
+            while (retryTime < Config.metaServiceRpcRetryTimes()) {
                 LOG.debug("retryTime:{}, beginTxnRequest:{}", retryTime, beginTxnRequest);
                 beginTxnResponse = MetaServiceProxy.getInstance().beginTxn(beginTxnRequest);
                 LOG.debug("retryTime:{}, beginTxnResponse:{}", retryTime, beginTxnResponse);
@@ -303,7 +303,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         int retryTime = 0;
 
         try {
-            while (retryTime < Config.meta_service_rpc_retry_times) {
+            while (retryTime < Config.metaServiceRpcRetryTimes()) {
                 LOG.debug("retryTime:{}, commitTxnRequest:{}", retryTime, commitTxnRequest);
                 commitTxnResponse = MetaServiceProxy.getInstance().commitTxn(commitTxnRequest);
                 LOG.debug("retryTime:{}, commitTxnResponse:{}", retryTime, commitTxnResponse);
@@ -520,7 +520,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             GetDeleteBitmapUpdateLockResponse response = null;
 
             int retryTime = 0;
-            while (retryTime++ < Config.meta_service_rpc_retry_times) {
+            while (retryTime++ < Config.metaServiceRpcRetryTimes()) {
                 try {
                     response = MetaServiceProxy.getInstance().getDeleteBitmapUpdateLock(request);
                     if (LOG.isDebugEnabled()) {
@@ -685,7 +685,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         AbortTxnResponse abortTxnResponse = null;
         int retryTime = 0;
         try {
-            while (retryTime < Config.meta_service_rpc_retry_times) {
+            while (retryTime < Config.metaServiceRpcRetryTimes()) {
                 LOG.debug("retryTime:{}, abortTxnRequest:{}", retryTime, abortTxnRequest);
                 abortTxnResponse = MetaServiceProxy
                         .getInstance().abortTxn(abortTxnRequest);
@@ -733,7 +733,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         int retryTime = 0;
 
         try {
-            while (retryTime < Config.meta_service_rpc_retry_times) {
+            while (retryTime < Config.metaServiceRpcRetryTimes()) {
                 LOG.debug("retyTime:{}, abortTxnRequest:{}", retryTime, abortTxnRequest);
                 abortTxnResponse = MetaServiceProxy
                         .getInstance().abortTxn(abortTxnRequest);

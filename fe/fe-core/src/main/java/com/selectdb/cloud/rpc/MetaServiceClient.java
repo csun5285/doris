@@ -30,12 +30,14 @@ public class MetaServiceClient {
 
     public MetaServiceClient(TNetworkAddress address) {
         this.address = address;
-        channel = NettyChannelBuilder.forAddress(address.getHostname(), address.getPort())
-            .flowControlWindow(Config.grpc_max_message_size_bytes)
-            .maxInboundMessageSize(Config.grpc_max_message_size_bytes)
-            .defaultServiceConfig(getRetryingServiceConfig())
-            .enableRetry()
-            .usePlaintext().build();
+        NettyChannelBuilder channelBuilder = NettyChannelBuilder.forAddress(address.getHostname(), address.getPort())
+                .flowControlWindow(Config.grpc_max_message_size_bytes)
+                .maxInboundMessageSize(Config.grpc_max_message_size_bytes)
+                .usePlaintext();
+        if (Config.isCloudMode() && !Config.enable_check_compatibility_mode) {
+            channelBuilder.defaultServiceConfig(getRetryingServiceConfig()).enableRetry();
+        }
+        channel = channelBuilder.build();
         stub = MetaServiceGrpc.newFutureStub(channel);
         blockingStub = MetaServiceGrpc.newBlockingStub(channel);
         expiredAt = connectionAgeExpiredAt();
@@ -55,7 +57,7 @@ public class MetaServiceClient {
         Map<String, ?> serviceConfig = new Gson().fromJson(new JsonReader(new InputStreamReader(
                 MetaServiceClient.class.getResourceAsStream("/retrying_service_config.json"),
                         StandardCharsets.UTF_8)), Map.class);
-        LOG.info("serviceConfig:{}", serviceConfig);
+        LOG.debug("serviceConfig:{}", serviceConfig);
         return serviceConfig;
     }
 
