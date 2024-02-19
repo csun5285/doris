@@ -228,6 +228,15 @@ Status CompactionAction::_handle_run_status_compaction(HttpRequest* req, std::st
                     strings::Substitute(json_template, run_status, msg, tablet_id, compaction_type);
             return Status::OK();
         }
+
+        if (StorageEngine::instance()->has_full_compaction(tablet_id)) {
+            msg = "compaction task for this tablet is running";
+            compaction_type = "full";
+            run_status = true;
+            *json_result =
+                    strings::Substitute(json_template, run_status, msg, tablet_id, compaction_type);
+            return Status::OK();
+        }
         // not running any compaction
         *json_result =
                 strings::Substitute(json_template, run_status, msg, tablet_id, compaction_type);

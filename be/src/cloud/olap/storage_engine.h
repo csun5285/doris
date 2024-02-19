@@ -175,6 +175,7 @@ public:
 
     bool has_base_compaction(int64_t tablet_id) const;
     bool has_cumu_compaction(int64_t tablet_id) const;
+    bool has_full_compaction(int64_t tablet_id) const;
     void get_cumu_compaction(int64_t tablet_id,
                              std::vector<std::shared_ptr<CloudCumulativeCompaction>>& res);
 
