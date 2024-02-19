@@ -2169,6 +2169,13 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static boolean cloud_delete_loaded_internal_stage_files = false;
 
+    public static int metaServiceRpcRetryTimes() {
+        if (isCloudMode() && enable_check_compatibility_mode) {
+            return 1;
+        }
+        return meta_service_rpc_retry_times;
+    }
+
     @ConfField(mutable = true)
     public static int meta_service_rpc_retry_times = 200;
 
@@ -2439,6 +2446,9 @@ public class Config extends ConfigBase {
     // forbid the analyze task triggering flushing BE's cache with internal statistics info table
     @ConfField(mutable = false)
     public static boolean forbid_analyze_statistics_info_polluting_file_cache = false;
+
+    @ConfField(mutable = false)
+    public static boolean enable_check_compatibility_mode = false;
 
     //==========================================================================
     //                    end of cloud config

@@ -1137,6 +1137,15 @@ public class EditLog {
              * like DB.
              */
             LOG.warn("[INCONSISTENT META] replay failed {}: {}", journal, e.getMessage(), e);
+        } catch (RuntimeException e) {
+            if (Config.isCloudMode() && Config.enable_check_compatibility_mode) {
+                // just for cloud mode check fe meta compatibility
+                LOG.warn("enable_check_compatibility_mode:{}, ignore RuntimeException:",
+                        Config.enable_check_compatibility_mode, e);
+                return;
+            }
+            LOG.error("Operation Type {}", opCode, e);
+            System.exit(-1);
         } catch (Exception e) {
             LOG.error("Operation Type {}", opCode, e);
             System.exit(-1);
