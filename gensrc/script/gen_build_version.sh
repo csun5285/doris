@@ -37,7 +37,7 @@ build_version_rc_version=""
 build_version="${build_version_major}.${build_version_minor}.${build_version_patch}"
 
 #doris version
-build_base_version="2.0.3"
+build_base_version="2.0.4"
 
 unset LANG
 unset LC_CTYPE
