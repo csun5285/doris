@@ -62,7 +62,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class CloudTabletRebalancer extends MasterDaemon {
     private static final Logger LOG = LogManager.getLogger(CloudTabletRebalancer.class);
 
-    private volatile ConcurrentHashMap<Long, List<Tablet>> beToTabletsGlobal;
+    private volatile ConcurrentHashMap<Long, List<Tablet>> beToTabletsGlobal =
+            new ConcurrentHashMap<Long, List<Tablet>>();
 
     private Map<Long, List<Tablet>> futureBeToTabletsGlobal;
 
