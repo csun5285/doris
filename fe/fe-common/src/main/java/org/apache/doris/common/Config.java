@@ -2649,4 +2649,9 @@ public class Config extends ConfigBase {
                     + "and the deleted labels can be reused."
     })
     public static int label_num_threshold = 2000;
+
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "控制是否允许创建resource"
+    })
+    public static boolean enable_create_resource = false;
 }
