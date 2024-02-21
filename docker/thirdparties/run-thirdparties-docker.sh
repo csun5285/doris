@@ -236,6 +236,7 @@ if [[ "${RUN_SQLSERVER}" -eq 1 ]]; then
     if [[ "${STOP}" -ne 1 ]]; then
         sudo rm "${ROOT}"/docker-compose/sqlserver/data/* -rf
         sudo mkdir -p "${ROOT}"/docker-compose/sqlserver/data/
+        sudo chown 10001:10001 "${ROOT}"/docker-compose/sqlserver/data/
         sudo docker compose -f "${ROOT}"/docker-compose/sqlserver/sqlserver.yaml --env-file "${ROOT}"/docker-compose/sqlserver/sqlserver.env up -d
     fi
 fi

@@ -28,6 +28,7 @@ services:
       timeout: 30s
       retries: 120
     volumes:
+        - ./data:/var/opt/mssql
         - ./init:/docker-entrypoint-initdb.d
     command:
       - /bin/bash
