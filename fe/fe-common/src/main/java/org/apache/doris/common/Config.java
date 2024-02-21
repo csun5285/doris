@@ -2651,7 +2651,8 @@ public class Config extends ConfigBase {
     public static int label_num_threshold = 2000;
 
     @ConfField(mutable = true, masterOnly = false, description = {
-            "控制是否允许创建resource"
+            "控制是否允许创建resource",
+            "Control whether to allow the creation of resource."
     })
     public static boolean enable_create_resource = false;
 }
