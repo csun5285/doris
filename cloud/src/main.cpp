@@ -132,6 +132,7 @@ static std::string build_info() {
 bvar::Status<uint64_t> selectdb_cloud_version_metrics("selectdb_cloud_version",
     [] { std::stringstream ss;
         ss << SELECTDB_BUILD_VERSION_MAJOR << 0 << SELECTDB_BUILD_VERSION_MINOR << 0 << SELECTDB_BUILD_VERSION_PATCH;
+        if (SELECTDB_BUILD_VERSION_HOTFIX > 0) ss << 0 << SELECTDB_BUILD_VERSION_HOTFIX;
         return std::strtoul(ss.str().c_str(), nullptr, 10);
     }());
 // clang-format on
