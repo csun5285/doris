@@ -1114,6 +1114,8 @@ public class Role implements Writable, GsonPostProcessable {
         tablePrivTable = new TablePrivTable();
         resourcePrivTable = new ResourcePrivTable();
         workloadGroupPrivTable = new WorkloadGroupPrivTable();
+        cloudClusterPrivTable = new ResourcePrivTable();
+        cloudStagePrivTable = new ResourcePrivTable();
         for (Entry<TablePattern, PrivBitSet> entry : tblPatternToPrivs.entrySet()) {
             try {
                 grantPrivs(entry.getKey(), entry.getValue().copy());
@@ -1126,6 +1128,26 @@ public class Role implements Writable, GsonPostProcessable {
                 grantPrivs(entry.getKey(), entry.getValue().copy());
             } catch (DdlException e) {
                 LOG.warn("grant failed,", e);
+            }
+        }
+        for (Entry<ResourcePattern, PrivBitSet> entry : clusterPatternToPrivs.entrySet()) {
+            try {
+                grantPrivs(entry.getKey(), entry.getValue().copy());
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("cloud cluster entry {}", entry);
+                }
+            } catch (DdlException e) {
+                LOG.warn("grant failed entry {}", entry, e);
+            }
+        }
+        for (Entry<ResourcePattern, PrivBitSet> entry : stagePatternToPrivs.entrySet()) {
+            try {
+                grantPrivs(entry.getKey(), entry.getValue().copy());
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("cloud stage entry {}", entry);
+                }
+            } catch (DdlException e) {
+                LOG.warn("grant failed entry {}", entry, e);
             }
         }
         for (Entry<WorkloadGroupPattern, PrivBitSet> entry : workloadGroupPatternToPrivs.entrySet()) {
