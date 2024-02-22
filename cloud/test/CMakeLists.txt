@@ -81,6 +81,10 @@ add_executable(stopwatch_test
     stopwatch_test.cpp
 )
 
+add_executable(util_test
+    util_test.cpp
+)
+
 message("Meta-service test dependencies: ${TEST_LINK_LIBS}")
 target_link_libraries(sync_point_test
     ${TEST_LINK_LIBS}
@@ -131,6 +135,10 @@ target_link_libraries(s3_accessor_test
 )
 
 target_link_libraries(stopwatch_test
+    ${TEST_LINK_LIBS}
+)
+
+target_link_libraries(util_test
     ${TEST_LINK_LIBS}
 )
 
