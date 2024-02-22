@@ -148,7 +148,7 @@ CONF_String(kms_cmk, "");
 CONF_Bool(focus_add_kms_data_key, "false");
 
 // Whether to retry the retryable errors that returns by the underlying txn store.
-CONF_Bool(enable_txn_store_retry, "false");
+CONF_Bool(enable_txn_store_retry, "true");
 CONF_Int32(txn_store_retry_times, "20");
 
 // If enabled, some high-risk HTTP api for emergency fix can be used
