@@ -263,7 +263,10 @@ public final class MetricRepo {
                 try {
                     return Long.parseLong("" + Version.DORIS_BUILD_VERSION_MAJOR + "0"
                                             + Version.DORIS_BUILD_VERSION_MINOR + "0"
-                                            + Version.DORIS_BUILD_VERSION_PATCH);
+                                            + Version.DORIS_BUILD_VERSION_PATCH
+                                            + (Version.DORIS_BUILD_VERSION_HOTFIX > 0
+                                                ? ("0" + Version.DORIS_BUILD_VERSION_HOTFIX)
+                                                : ""));
                 } catch (Throwable t) {
                     LOG.warn("failed to init version metrics", t);
                     return 0L;
