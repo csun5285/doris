@@ -20,6 +20,7 @@ package org.apache.doris.planner.external.jdbc;
 import org.apache.doris.analysis.Expr;
 import org.apache.doris.analysis.FunctionCallExpr;
 import org.apache.doris.analysis.FunctionName;
+import org.apache.doris.analysis.TimestampArithmeticExpr;
 import org.apache.doris.thrift.TOdbcTableType;
 
 import com.google.common.base.Preconditions;
@@ -61,10 +62,7 @@ public class JdbcFunctionPushDownRule {
 
     static {
         REPLACE_MYSQL_FUNCTIONS.put("nvl", "ifnull");
-    }
-
-    private static boolean isReplaceMysqlFunctions(String functionName) {
-        return REPLACE_MYSQL_FUNCTIONS.containsKey(functionName.toLowerCase());
+        REPLACE_MYSQL_FUNCTIONS.put("to_date", "date");
     }
 
     private static final Map<String, String> REPLACE_CLICKHOUSE_FUNCTIONS = Maps.newHashMap();
@@ -72,6 +70,10 @@ public class JdbcFunctionPushDownRule {
     static {
         REPLACE_CLICKHOUSE_FUNCTIONS.put("from_unixtime", "FROM_UNIXTIME");
         REPLACE_CLICKHOUSE_FUNCTIONS.put("unix_timestamp", "toUnixTimestamp");
+    }
+
+    private static boolean isReplaceMysqlFunctions(String functionName) {
+        return REPLACE_MYSQL_FUNCTIONS.containsKey(functionName.toLowerCase());
     }
 
     private static boolean isReplaceClickHouseFunctions(String functionName) {
@@ -115,6 +117,8 @@ public class JdbcFunctionPushDownRule {
             }
 
             replaceFunctionNameIfNecessary(func, replaceFunction, functionCallExpr, tableType);
+
+            expr = replaceGenericFunctionExpr(functionCallExpr, func);
         }
 
         List<Expr> children = expr.getChildren();
@@ -127,7 +131,7 @@ public class JdbcFunctionPushDownRule {
         return expr;
     }
 
-    private static String replaceFunctionNameIfNecessary(String func, Predicate<String> replaceFunction,
+    private static void replaceFunctionNameIfNecessary(String func, Predicate<String> replaceFunction,
             FunctionCallExpr functionCallExpr, TOdbcTableType tableType) {
         if (replaceFunction.test(func)) {
             String newFunc;
@@ -140,9 +144,48 @@ public class JdbcFunctionPushDownRule {
             }
             if (newFunc != null) {
                 functionCallExpr.setFnName(FunctionName.createBuiltinName(newFunc));
-                func = functionCallExpr.getFnName().getFunction();
             }
         }
-        return func;
+    }
+
+    // Function used to convert nereids planner's function to old planner's function
+    private static Expr replaceGenericFunctionExpr(FunctionCallExpr functionCallExpr, String func) {
+        Map<String, String> supportedTimeUnits = Maps.newHashMap();
+        supportedTimeUnits.put("years", "YEAR");
+        supportedTimeUnits.put("months", "MONTH");
+        supportedTimeUnits.put("weeks", "WEEK");
+        supportedTimeUnits.put("days", "DAY");
+        supportedTimeUnits.put("hours", "HOUR");
+        supportedTimeUnits.put("minutes", "MINUTE");
+        supportedTimeUnits.put("seconds", "SECOND");
+
+        String baseFuncName = null;
+        String timeUnit = null;
+
+        for (Map.Entry<String, String> entry : supportedTimeUnits.entrySet()) {
+            if (func.endsWith(entry.getKey() + "_add")) {
+                baseFuncName = "date_add";
+                timeUnit = entry.getValue();
+                break;
+            } else if (func.endsWith(entry.getKey() + "_sub")) {
+                baseFuncName = "date_sub";
+                timeUnit = entry.getValue();
+                break;
+            }
+        }
+
+        if (baseFuncName != null && timeUnit != null) {
+            if (functionCallExpr.getChildren().size() == 2) {
+                Expr child1 = functionCallExpr.getChild(0);
+                Expr child2 = functionCallExpr.getChild(1);
+                return new TimestampArithmeticExpr(
+                        baseFuncName,
+                        child1,
+                        child2,
+                        timeUnit
+                );
+            }
+        }
+        return functionCallExpr;
     }
 }
