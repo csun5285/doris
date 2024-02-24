@@ -197,7 +197,8 @@ int StreamLoadAction::on_header(HttpRequest* req) {
     }
 
     LOG(INFO) << "new income streaming load request." << ctx->brief() << ", db=" << ctx->db
-              << ", tbl=" << ctx->table << ", group_commit=" << ctx->group_commit;
+              << ", tbl=" << ctx->table << ", group_commit=" << ctx->group_commit
+              << ", HTTP headers=" << req->get_all_headers();
 
     if (st.ok()) {
         st = _on_header(req, ctx);

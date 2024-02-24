@@ -55,6 +55,8 @@ public:
     // return params
     const StringCaseUnorderedMap<std::string>& headers() { return _headers; }
 
+    const std::string get_all_headers() const;
+
     // return params
     std::map<std::string, std::string>* params() { return &_params; }
 
