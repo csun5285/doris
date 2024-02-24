@@ -54,6 +54,7 @@ import org.springframework.web.servlet.view.RedirectView;
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -227,8 +228,8 @@ public class LoadAction extends RestBaseController {
                 }
             }
 
-            LOG.info("redirect load action to destination={}, stream: {}, db: {}, tbl: {}, label: {}",
-                    redirectAddr.toString(), isStreamLoad, dbName, tableName, label);
+            LOG.info("redirect load action to destination={}, stream: {}, db: {}, tbl: {}, label: {}, headers: {}",
+                    redirectAddr.toString(), isStreamLoad, dbName, tableName, label, getAllHeaders(request));
 
             RedirectView redirectView = redirectTo(request, redirectAddr);
             return redirectView;
@@ -521,8 +522,8 @@ public class LoadAction extends RestBaseController {
             TNetworkAddress redirectAddr = selectRedirectBackend(clusterName, false);
 
             LOG.info("Redirect load action with auth token to destination={},"
-                        + "stream: {}, db: {}, tbl: {}, label: {}",
-                    redirectAddr.toString(), isStreamLoad, dbName, tableName, label);
+                        + "stream: {}, db: {}, tbl: {}, label: {}, headers: {}",
+                    redirectAddr.toString(), isStreamLoad, dbName, tableName, label, getAllHeaders(request));
 
             URI urlObj = null;
             URI resultUriObj = null;
@@ -551,5 +552,16 @@ public class LoadAction extends RestBaseController {
             LOG.warn("Failed to execute stream load with cluster token, {}", e);
             return new RestBaseResult(e.getMessage());
         }
+    }
+
+    private String getAllHeaders(HttpServletRequest request) {
+        StringBuilder headers = new StringBuilder();
+        Enumeration<String> headerNames = request.getHeaderNames();
+        while (headerNames.hasMoreElements()) {
+            String headerName = headerNames.nextElement();
+            String headerValue = request.getHeader(headerName);
+            headers.append(headerName).append(":").append(headerValue).append(", ");
+        }
+        return headers.toString();
     }
 }
