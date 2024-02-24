@@ -891,7 +891,7 @@ void VNodeChannel::try_send_block(RuntimeState* state) {
 // rpc request to truly release the load channel
 void VNodeChannel::cancel(const std::string& cancel_msg) {
     if (_is_closed) {
-        // skip the channels that have been closed.
+        // skip the channels that have been canceled or close_wait.
         return;
     }
     SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());

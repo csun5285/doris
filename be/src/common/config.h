@@ -828,6 +828,9 @@ DECLARE_mInt32(segment_compression_threshold_kb);
 // The connection timeout when connecting to external table such as odbc table.
 DECLARE_mInt32(external_table_connect_timeout_sec);
 
+// Time to clean up useless JDBC connection pool cache
+DECLARE_mInt32(jdbc_connection_pool_cache_clear_time_sec);
+
 // Global bitmap cache capacity for aggregation cache, size in bytes
 DECLARE_Int64(delete_bitmap_agg_cache_capacity);
 
@@ -1294,6 +1297,11 @@ DECLARE_Int32(ignore_invalid_partition_id_rowset_num);
 DECLARE_mDouble(base_compaction_thread_num_factor);
 
 DECLARE_mDouble(cumu_compaction_thread_num_factor);
+
+DECLARE_mInt32(report_query_statistics_interval_ms);
+DECLARE_mInt32(query_statistics_reserve_timeout_ms);
+
+DECLARE_mBool(check_segment_when_build_rowset_meta);
 
 #ifdef BE_TEST
 // test s3

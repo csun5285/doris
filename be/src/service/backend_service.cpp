@@ -55,6 +55,7 @@
 #include "io/cache/block/block_file_cache_downloader.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_reader.h"
+#include "io/fs/local_file_system.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/rowset/beta_rowset.h"
@@ -278,8 +279,8 @@ void _ingest_binlog(IngestBinlogArg* arg) {
                              << ", local_file_size=" << local_file_size;
                 return Status::InternalError("downloaded file size is not equal");
             }
-            chmod(local_segment_path.c_str(), S_IRUSR | S_IWUSR);
-            return Status::OK();
+            return io::global_local_filesystem()->permission(local_segment_path,
+                                                             io::LocalFileSystem::PERMS_OWNER_RW);
         };
 
         auto status = HttpClient::execute_with_retry(max_retry, 1, get_segment_file_cb);

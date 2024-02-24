@@ -801,6 +801,9 @@ DEFINE_mInt32(segment_compression_threshold_kb, "256");
 // The connection timeout when connecting to external table such as odbc table.
 DEFINE_mInt32(external_table_connect_timeout_sec, "30");
 
+// Time to clean up useless JDBC connection pool cache
+DEFINE_mInt32(jdbc_connection_pool_cache_clear_time_sec, "28800");
+
 // Global bitmap cache capacity for aggregation cache, size in bytes
 DEFINE_Int64(delete_bitmap_agg_cache_capacity, "419430400");
 
@@ -1276,6 +1279,12 @@ DEFINE_Int32(ignore_invalid_partition_id_rowset_num, "0");
 DEFINE_mDouble(base_compaction_thread_num_factor, "0.25");
 
 DEFINE_mDouble(cumu_compaction_thread_num_factor, "0.5");
+
+DEFINE_mInt32(report_query_statistics_interval_ms, "3000");
+// 30s
+DEFINE_mInt32(query_statistics_reserve_timeout_ms, "30000");
+
+DEFINE_mBool(check_segment_when_build_rowset_meta, "false");
 
 // clang-format off
 #ifdef BE_TEST

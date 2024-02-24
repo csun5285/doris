@@ -140,25 +140,13 @@ public class Config extends ConfigBase {
                     + "if the specified driver file path is not an absolute path, Doris will find jars from this path"})
     public static String jdbc_drivers_dir = System.getenv("DORIS_HOME") + "/jdbc_drivers";
 
-    @ConfField(description = {"JDBC Catalog FE 连接池的最小连接数",
-            "The minimum number of JDBC Catalog FE connection pool"})
-    public static int jdbc_min_pool_size = 1;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的最大连接数",
-            "The maximum number of JDBC Catalog FE connection pool"})
-    public static int jdbc_max_pool_size = 100;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的最大空闲连接时间",
-            "The maximum idle time of JDBC Catalog FE connection pool"})
-    public static int jdbc_max_idle_time = 300000;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的最大等待时间",
-            "The maximum wait time of JDBC Catalog FE connection pool"})
-    public static int jdbc_max_wait_time = 5000;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的 KeepAlive 策略",
-            "The keep alive strategy of JDBC Catalog FE connection pool"})
-    public static boolean jdbc_keep_alive = false;
+    @ConfField(description = {"JDBC 驱动的安全路径。在创建 JDBC Catalog 时，允许使用的文件或者网络路径，可配置多个，使用分号分隔"
+            + "默认为 * 全部允许，如果设置为空责全部不允许",
+            "The safe path of the JDBC driver. When creating a JDBC Catalog,"
+                    + "you can configure multiple files or network paths that are allowed to be used,"
+                    + "separated by semicolons"
+                    + "The default is * to allow all, if set to empty, all are not allowed"})
+    public static String jdbc_driver_secure_path = "*";
 
     @ConfField(mutable = true, masterOnly = true, description = {"broker load 时，单个节点上 load 执行计划的默认并行度",
             "The default parallelism of the load execution plan on a single node when the broker load is submitted"})
@@ -2607,6 +2595,16 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true, masterOnly = true)
     public static int publish_topic_info_interval_ms = 30000; // 30s
+
+    @ConfField(mutable = true)
+    public static int workload_runtime_status_thread_interval_ms = 2000;
+
+    // NOTE: it should bigger than be config report_query_statistics_interval_ms
+    @ConfField(mutable = true)
+    public static int query_audit_log_timeout_ms = 5000;
+
+    @ConfField(mutable = true)
+    public static int be_report_query_statistics_timeout_ms = 60000;
 
     @ConfField(masterOnly = true, description = {
         "设置 root 用户初始化2阶段 SHA-1 加密密码，默认为''，即不设置 root 密码。"

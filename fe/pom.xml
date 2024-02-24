@@ -251,7 +251,7 @@ under the License.
         <commons-io.version>2.7</commons-io.version>
         <json-simple.version>1.1.1</json-simple.version>
         <junit.version>5.8.2</junit.version>
-        <druid.version>1.2.5</druid.version>
+        <druid.version>1.2.20</druid.version>
         <clickhouse.version>0.4.6</clickhouse.version>
         <thrift.version>0.16.0</thrift.version>
         <tomcat-embed-core.version>8.5.86</tomcat-embed-core.version>
@@ -401,11 +401,6 @@ under the License.
                 <groupId>com.nimbusds</groupId>
                 <artifactId>nimbus-jose-jwt</artifactId>
                 <version>${nimbusds.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.amazonaws</groupId>
-                <artifactId>aws-java-sdk-bundle</artifactId>
-                <version>${aws-java-sdk.version}</version>
             </dependency>
             <!-- opentelemetry-->
             <dependency>
@@ -898,12 +893,17 @@ under the License.
                         <artifactId>logback-classic</artifactId>
                     </exclusion>
                     <exclusion>
-                        <artifactId>elasticsearch-rest-high-level-client</artifactId>
-                        <groupId>org.elasticsearch.client</groupId>
-                    </exclusion>
-                    <exclusion>
                         <groupId>org.apache.hive</groupId>
                         <artifactId>hive-storage-api</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>org.elasticsearch.client</groupId>
+                        <artifactId>elasticsearch-rest-high-level-client</artifactId>
+                    </exclusion>
+                    <!--ranger audit only depends on aws logs, which is provided alone-->
+                    <exclusion>
+                        <groupId>com.amazonaws</groupId>
+                        <artifactId>*</artifactId>
                     </exclusion>
                 </exclusions>
             </dependency>
@@ -1404,6 +1404,12 @@ under the License.
             <dependency>
                 <groupId>com.amazonaws</groupId>
                 <artifactId>aws-java-sdk-dynamodb</artifactId>
+                <version>${aws-java-sdk.version}</version>
+            </dependency>
+            <!--only for apache ranger audit-->
+            <dependency>
+                <groupId>com.amazonaws</groupId>
+                <artifactId>aws-java-sdk-logs</artifactId>
                 <version>${aws-java-sdk.version}</version>
             </dependency>
             <dependency>
