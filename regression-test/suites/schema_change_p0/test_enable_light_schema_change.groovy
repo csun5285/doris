@@ -97,7 +97,7 @@ suite("test_enable_light_schema_change", "p0") {
 
     test {
         sql """ alter table ${tableName1} set ("light_schema_change"="true") """
-        exception "errCode = 2, detailMessage = failed to enable light schema change for table"
+        exception "errCode = 2, detailMessage = Table default_cluster:regression_test_schema_change_p0.test_enable_lsc has already support light_schema_change=true"
     }
 
     sql """ select * from ${tableName1} """
