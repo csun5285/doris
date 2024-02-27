@@ -430,8 +430,6 @@ void ExecEnv::_destroy() {
     }
     _deregister_metrics();
     _wal_manager->stop();
-    SAFE_DELETE(_internal_client_cache);
-    SAFE_DELETE(_function_client_cache);
     SAFE_DELETE(_load_channel_mgr);
     SAFE_DELETE(_broker_mgr);
     SAFE_DELETE(_bfd_parser);
@@ -451,6 +449,8 @@ void ExecEnv::_destroy() {
     SAFE_DELETE(_scanner_scheduler);
     SAFE_DELETE(_group_commit_mgr);
     SAFE_DELETE(_file_meta_cache);
+    SAFE_DELETE(_function_client_cache);
+    SAFE_DELETE(_internal_client_cache);
     // Master Info is a thrift object, it could be the last one to deconstruct.
     // Master info should be deconstruct later than fragment manager, because fragment will
     // access master_info.backend id to access some info. If there is a running query and master
