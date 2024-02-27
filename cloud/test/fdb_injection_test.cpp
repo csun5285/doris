@@ -456,7 +456,6 @@ static Status prepare_rowset(MetaService* service, const std::string& instance_i
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(cloud_unique_id(instance_id));
-    req.set_temporary(true);
     req.mutable_rowset_meta()->CopyFrom(
             create_rowset(tablet_id, rowset_id, txn_id, index_id, partition_id));
 
@@ -484,7 +483,6 @@ static Status commit_rowset(MetaService* service, const std::string& instance_id
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(cloud_unique_id(instance_id));
-    req.set_temporary(true);
     req.mutable_rowset_meta()->CopyFrom(
             create_rowset(tablet_id, rowset_id, txn_id, index_id, partition_id));
     LOG_INFO("send commit rowset request");

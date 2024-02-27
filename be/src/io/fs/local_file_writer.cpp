@@ -107,7 +107,7 @@ Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::appendv",
                                       Status::IOError("inject io error"));
     if (_closed) [[unlikely]] {
-        return Status::InternalError("append to closed file: ", _path.native());
+        return Status::InternalError("append to closed file: {}", _path.native());
     }
     _dirty = true;
 

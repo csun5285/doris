@@ -82,7 +82,6 @@ void commit_rowset(MetaService* meta_service, const doris::RowsetMetaPB& rowset,
                    CreateRowsetResponse& res) {
     brpc::Controller cntl;
     CreateRowsetRequest req;
-    req.set_temporary(true);
     req.mutable_rowset_meta()->CopyFrom(rowset);
     meta_service->commit_rowset(&cntl, &req, &res, nullptr);
 }

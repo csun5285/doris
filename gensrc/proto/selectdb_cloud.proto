@@ -772,7 +772,7 @@ message GetTabletResponse {
 message CreateRowsetRequest {
     optional string cloud_unique_id = 1; // For auth
     optional doris.RowsetMetaPB rowset_meta = 2;
-    optional bool temporary = 3;
+    reserved 3; // deprecated optional bool temporary = 3;
 }
 
 message CreateRowsetResponse {

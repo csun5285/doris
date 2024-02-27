@@ -32,10 +32,10 @@ public:
     // If `warmup_delta_data` is true, download the new version rowset data in background
     virtual Status sync_tablet_rowsets(Tablet* tablet, bool warmup_delta_data = false) = 0;
 
-    virtual Status prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
+    virtual Status prepare_rowset(const RowsetMeta* rs_meta,
                                   std::shared_ptr<RowsetMeta>* existed_rs_meta = nullptr) = 0;
 
-    virtual Status commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
+    virtual Status commit_rowset(const RowsetMeta* rs_meta,
                                  std::shared_ptr<RowsetMeta>* existed_rs_meta = nullptr) = 0;
 
     virtual Status update_tmp_rowset(const RowsetMeta& rs_meta) = 0;

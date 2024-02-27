@@ -345,7 +345,6 @@ static Status prepare_rowset(selectdb::MetaService_Stub* service, uint64_t insta
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(cloud_unique_id(instance_id));
-    req.set_temporary(true);
     req.mutable_rowset_meta()->CopyFrom(create_rowset(tablet_id, rowset_id, txn_id));
 
     service->prepare_rowset(&ctrl, &req, &resp, nullptr);
@@ -367,7 +366,6 @@ static Status commit_rowset(selectdb::MetaService_Stub* service, uint64_t instan
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(cloud_unique_id(instance_id));
-    req.set_temporary(true);
     req.mutable_rowset_meta()->CopyFrom(create_rowset(tablet_id, rowset_id, txn_id));
 
     service->commit_rowset(&ctrl, &req, &resp, nullptr);

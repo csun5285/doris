@@ -301,7 +301,7 @@ Status DeltaWriter::init() {
 
     _schema.reset(new Schema(_tablet_schema));
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_rowset_writer->rowset_meta().get(), true));
+    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_rowset_writer->rowset_meta().get()));
 #endif
     _reset_mem_table();
 

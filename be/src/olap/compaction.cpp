@@ -337,8 +337,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     RETURN_IF_ERROR(construct_input_rowset_readers());
     RETURN_IF_ERROR(construct_output_rowset_writer(ctx, vertical_compaction));
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(
-            cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta().get(), true));
+    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta().get()));
 #endif
     if (compaction_type() == ReaderType::READER_COLD_DATA_COMPACTION) {
         Tablet::add_pending_remote_rowset(_output_rs_writer->rowset_id().to_string());
@@ -380,7 +379,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                                    fmt::format("rowset writer build failed. output_version: {}",
                                                _output_version.to_string()));
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get(), true));
+    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get()));
 #endif
 
     // Now we support delete in cumu compaction, to make all data in rowsets whose version

@@ -220,7 +220,7 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
     tasks.reserve(rowsets_to_commit.size());
     for (auto& rs : rowsets_to_commit) {
         tasks.push_back([&rs_meta = rs->rowset_meta()] {
-            return cloud::meta_mgr()->commit_rowset(rs_meta.get(), true);
+            return cloud::meta_mgr()->commit_rowset(rs_meta.get());
         });
     }
     _close_status = cloud::bthread_fork_and_join(tasks, 10);
