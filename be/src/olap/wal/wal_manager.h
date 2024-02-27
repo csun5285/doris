@@ -113,10 +113,10 @@ private:
     Status _scan_wals(const std::string& wal_path, std::vector<ScanWalInfo>& res);
     // use a background thread to do replay task
     Status _replay_background();
-    // replay wal function will split into tow part:
-    // 1.replay own wal
-    // 2.replay other be wal
-    Status _replay_wal();
+    // load wal function will split into tow part:
+    // 1.load own wal
+    // 2.load other be wal
+    Status _load_wal();
     void _stop_relay_wal();
 
 public:
