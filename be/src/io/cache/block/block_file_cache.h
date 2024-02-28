@@ -149,6 +149,8 @@ public:
     FileBlocksHolder get_or_set(const Key& key, size_t offset, size_t size,
                                 const CacheContext& context);
 
+    std::map<size_t, FileBlockSPtr> get_blocks_by_key(const Key& key);
+
     /// For debug.
     std::string dump_structure(const Key& key);
 
@@ -429,7 +431,7 @@ private:
     FileBlockCell* add_cell(const Key& key, const CacheContext& context, size_t offset, size_t size,
                             FileBlock::State state, std::lock_guard<doris::Mutex>& cache_lock);
 
-    void use_cell(const FileBlockCell& cell, FileBlocks& result, bool not_need_move,
+    void use_cell(const FileBlockCell& cell, FileBlocks* result, bool not_need_move,
                   std::lock_guard<doris::Mutex>& cache_lock);
 
     bool try_reserve_for_lru(const Key& key, QueryFileCacheContextPtr query_context,

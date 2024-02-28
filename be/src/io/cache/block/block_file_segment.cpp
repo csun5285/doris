@@ -58,6 +58,7 @@ FileBlock::FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache*
     /// or on reduceSizeToDownloaded() -- when file segment object is updated.
     case State::DOWNLOADED: {
         _downloaded_size = size;
+        _is_downloaded = true;
         break;
     }
     default: {

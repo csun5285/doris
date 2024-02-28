@@ -26,8 +26,10 @@
 
 #include "common/status.h"
 #include "io/cache/block/block_file_cache.h"
+#include "io/cache/block/block_file_segment.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_reader_options.h"
+#include "io/fs/file_reader_writer_fwd.h"
 #include "io/fs/file_system.h"
 #include "io/fs/path.h"
 #include "util/slice.h"
@@ -63,11 +65,14 @@ protected:
                                       const IOContext* io_ctx) override;
 
 private:
+    void _insert_file_reader(FileBlockSPtr file_block);
     FileReaderSPtr _remote_file_reader;
     Key _cache_key;
     BlockFileCachePtr _cache;
     MetricsHook _metrics_hook;
     bool _is_doris_table;
+    std::shared_mutex _mtx;
+    std::map<size_t, FileBlockSPtr> _cache_file_readers;
 
     void _update_state(const ReadStatistics& stats, FileCacheStatistics* state) const;
 

@@ -1192,6 +1192,8 @@ DEFINE_mBool(enable_check_segment_footer, "true");
 
 DEFINE_mBool(enable_file_cache_as_load_buffer, "false");
 
+DEFINE_mBool(enable_read_cache_file_directly, "false");
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================

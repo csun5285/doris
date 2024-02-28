@@ -49,6 +49,7 @@ using FileBlocks = std::list<FileBlockSPtr>;
 class FileBlock {
     friend class BlockFileCache;
     friend struct FileBlocksHolder;
+    friend class CachedRemoteFileReader;
 
 public:
     using LocalWriterPtr = std::unique_ptr<FileWriter>;

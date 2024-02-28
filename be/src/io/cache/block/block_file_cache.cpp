@@ -255,16 +255,19 @@ Status BlockFileCache::initialize_unlocked(std::lock_guard<doris::Mutex>& cache_
     return Status::OK();
 }
 
-void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks& result, bool move_iter_flag,
+void BlockFileCache::use_cell(const FileBlockCell& cell, FileBlocks* result, bool move_iter_flag,
                               std::lock_guard<doris::Mutex>& cache_lock) {
-    auto file_block = cell.file_block;
-    DCHECK(!(file_block->is_downloaded() &&
-             fs::file_size(get_path_in_local_cache(file_block->key(), file_block->expiration_time(),
-                                                   file_block->offset(), cell.cache_type)) == 0))
-            << "Cannot have zero size downloaded file segments. Current file segment: "
-            << file_block->range().to_string();
+    if (result) {
+        auto file_block = cell.file_block;
+        DCHECK(!(file_block->is_downloaded() &&
+                 fs::file_size(
+                         get_path_in_local_cache(file_block->key(), file_block->expiration_time(),
+                                                 file_block->offset(), cell.cache_type)) == 0))
+                << "Cannot have zero size downloaded file segments. Current file segment: "
+                << file_block->range().to_string();
 
-    result.push_back(cell.file_block);
+        result->push_back(std::move(file_block));
+    }
 
     if (cell.cache_type != FileCacheType::TTL) {
         auto& queue = get_queue(cell.cache_type);
@@ -646,7 +649,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
             return {};
         }
 
-        use_cell(cell, result, need_to_move(cell.cache_type, context.cache_type), cache_lock);
+        use_cell(cell, &result, need_to_move(cell.cache_type, context.cache_type), cache_lock);
     } else { /// segment_it <-- segmment{k}
         if (segment_it != file_blocks.begin()) {
             const auto& prev_cell = std::prev(segment_it)->second;
@@ -659,7 +662,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 ///       ^
                 ///       range.left
 
-                use_cell(prev_cell, result, need_to_move(prev_cell.cache_type, context.cache_type),
+                use_cell(prev_cell, &result, need_to_move(prev_cell.cache_type, context.cache_type),
                          cache_lock);
             }
         }
@@ -676,7 +679,7 @@ FileBlocks BlockFileCache::get_impl(const Key& key, const CacheContext& context,
                 break;
             }
 
-            use_cell(cell, result, need_to_move(cell.cache_type, context.cache_type), cache_lock);
+            use_cell(cell, &result, need_to_move(cell.cache_type, context.cache_type), cache_lock);
             ++segment_it;
         }
     }
@@ -792,6 +795,21 @@ void BlockFileCache::fill_holes_with_empty_file_blocks(FileBlocks& file_blocks, 
                            split_range_into_cells(key, context, current_pos, hole_size,
                                                   FileBlock::State::EMPTY, cache_lock));
     }
+}
+
+std::map<size_t, FileBlockSPtr> BlockFileCache::get_blocks_by_key(const Key& key) {
+    std::map<size_t, FileBlockSPtr> offset_to_block;
+    std::lock_guard cache_lock(_mutex);
+    if (_files.count(key) > 0) {
+        for (auto& [offset, cell] : _files[key]) {
+            if (cell.file_block->is_downloaded()) {
+                offset_to_block.emplace(offset, cell.file_block);
+                use_cell(cell, nullptr, need_to_move(cell.cache_type, FileCacheType::DISPOSABLE),
+                         cache_lock);
+            }
+        }
+    }
+    return offset_to_block;
 }
 
 FileBlocksHolder BlockFileCache::get_or_set(const Key& key, size_t offset, size_t size,
@@ -1791,13 +1809,17 @@ std::weak_ptr<FileReader> BlockFileCache::cache_file_reader(
     std::weak_ptr<FileReader> wp;
     if (config::file_cache_max_file_reader_cache_size != 0) [[likely]] {
         std::lock_guard lock(s_file_reader_cache_mtx);
-        if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
-            s_file_name_to_reader.erase(s_file_reader_cache.back().first);
-            s_file_reader_cache.pop_back();
+        if (s_file_name_to_reader.count(key) > 0) {
+            wp = s_file_name_to_reader[key]->second;
+        } else {
+            if (config::file_cache_max_file_reader_cache_size == s_file_reader_cache.size()) {
+                s_file_name_to_reader.erase(s_file_reader_cache.back().first);
+                s_file_reader_cache.pop_back();
+            }
+            wp = file_reader;
+            s_file_reader_cache.emplace_front(key, std::move(file_reader));
+            s_file_name_to_reader.insert(std::make_pair(key, s_file_reader_cache.begin()));
         }
-        wp = file_reader;
-        s_file_reader_cache.emplace_front(key, std::move(file_reader));
-        s_file_name_to_reader.insert(std::make_pair(key, s_file_reader_cache.begin()));
     }
     return wp;
 }
