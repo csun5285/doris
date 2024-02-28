@@ -23,6 +23,7 @@
 #include <gen_cpp/internal_service.pb.h>
 #include <gen_cpp/olap_file.pb.h>
 
+#include <atomic>
 #include <filesystem>
 #include <ostream>
 #include <string>
@@ -508,6 +509,7 @@ void DeltaWriter::update_tablet_stats() {
     _tablet->fetch_add_approximate_data_size(_cur_rowset->data_disk_size());
     _tablet->fetch_add_approximate_cumu_num_rowsets(1);
     _tablet->fetch_add_approximate_cumu_num_deltas(_cur_rowset->num_segments());
+    _tablet->write_count.fetch_add(1, std::memory_order_relaxed);
 }
 
 Status DeltaWriter::cloud_build_rowset(RowsetSharedPtr* rowset) {

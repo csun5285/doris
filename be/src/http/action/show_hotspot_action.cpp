@@ -10,7 +10,13 @@
 namespace doris {
 namespace {
 
-Status check_param(HttpRequest* req, int& top_n) {
+enum class Metrics {
+    READ_BLOCK = 0,
+    WRITE = 1,
+    COMPACTION = 2,
+};
+
+Status check_param(HttpRequest* req, int& top_n, Metrics& metrics) {
     const std::string TOPN_PARAM = "topn";
 
     auto& topn_str = req->param(TOPN_PARAM);
@@ -22,27 +28,44 @@ Status check_param(HttpRequest* req, int& top_n) {
         }
     }
 
+    const std::string METRICS_PARAM = "metrics";
+    auto& metrics_str = req->param(METRICS_PARAM);
+    if (metrics_str.empty()) {
+        return Status::InternalError("metrics must be specified");
+    }
+
+    if (metrics_str == "read_block") {
+        metrics = Metrics::READ_BLOCK;
+    } else if (metrics_str == "write") {
+        metrics = Metrics::WRITE;
+    } else if (metrics_str == "compaction") {
+        metrics = Metrics::COMPACTION;
+    } else {
+        return Status::InternalError("unknown metrics: {}", metrics_str);
+    }
+
     return Status::OK();
 }
 
-struct TabletReadCount {
+struct TabletCounter {
     int64_t tablet_id {0};
     int64_t count {0};
 };
 
 struct Comparator {
-    constexpr bool operator()(const TabletReadCount& lhs, const TabletReadCount& rhs) const {
+    constexpr bool operator()(const TabletCounter& lhs, const TabletCounter& rhs) const {
         return lhs.count > rhs.count;
     }
 };
 
-using MinHeap = std::priority_queue<TabletReadCount, std::vector<TabletReadCount>, Comparator>;
+using MinHeap = std::priority_queue<TabletCounter, std::vector<TabletCounter>, Comparator>;
 
 } // namespace
 
 void ShowHotspotAction::handle(HttpRequest* req) {
     int topn = 0;
-    auto st = check_param(req, topn);
+    Metrics metrics;
+    auto st = check_param(req, topn, metrics);
     if (!st.ok()) [[unlikely]] {
         HttpChannel::send_reply(req, HttpStatus::BAD_REQUEST, st.to_string());
         return;
@@ -50,12 +73,25 @@ void ShowHotspotAction::handle(HttpRequest* req) {
 
     auto tablets = cloud::tablet_mgr()->get_weak_tablets();
 
-    std::vector<TabletReadCount> buffer;
+    std::vector<TabletCounter> buffer;
     buffer.reserve(tablets.size());
+
+    std::function<int64_t(const Tablet&)> count_fn;
+    switch (metrics) {
+    case Metrics::READ_BLOCK:
+        count_fn = [](auto&& t) { return t.read_block_count.load(std::memory_order_relaxed); };
+        break;
+    case Metrics::WRITE:
+        count_fn = [](auto&& t) { return t.write_count.load(std::memory_order_relaxed); };
+        break;
+    case Metrics::COMPACTION:
+        count_fn = [](auto&& t) { return t.compaction_count.load(std::memory_order_relaxed); };
+        break;
+    }
+
     for (auto&& t : tablets) {
         if (auto tablet = t.lock(); tablet) {
-            buffer.push_back({tablet->tablet_id(),
-                              tablet->read_block_count.load(std::memory_order_relaxed)});
+            buffer.push_back({tablet->tablet_id(), count_fn(*tablet)});
         }
     }
 

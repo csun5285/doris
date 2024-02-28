@@ -22,6 +22,7 @@
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <list>
 #include <map>
@@ -101,6 +102,7 @@ void Compaction::init_profile(const std::string& label) {
 
 Status Compaction::execute_compact() {
     Status st = execute_compact_impl();
+    _tablet->compaction_count.fetch_add(1, std::memory_order_relaxed);
     if (!st.ok()) {
         garbage_collection();
     }
