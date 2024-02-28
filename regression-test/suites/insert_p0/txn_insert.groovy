@@ -72,4 +72,37 @@ suite("txn_insert") {
     sql "rollback"
     sql "sync"
     order_qt_select4 """select * from $table"""
+
+    table = "txn_insert_mow_tbl"
+    sql """ DROP TABLE IF EXISTS $table """
+    sql """
+        create table $table (
+                k1 int, 
+                k2 double,
+                k3 varchar(100),
+                k4 array<int>,
+                k5 array<boolean>
+                ) ENGINE=OLAP
+        UNIQUE KEY(`k1`)
+        distributed by hash(k1) buckets 1
+        properties(
+                "replication_num" = "1",
+                "enable_unique_key_merge_on_write" = "true"); 
+    """
+
+    // begin and commit
+    sql """begin"""
+    sql """insert into $table values(1, 2.2, "abc", [], [])"""
+    sql """insert into $table values(2, 3.3, "xyz", [1], [1, 0])"""
+    sql """insert into $table values(null, null, null, [null], [null, 0])"""
+    sql "commit"
+    sql "sync"
+    order_qt_select5 """select * from $table"""
+
+    sql """begin"""
+    sql """insert into $table values(1, 3.2, "abc", [], [])"""
+    sql """insert into $table values(2, 4.3, "xyz", [1], [1, 0])"""
+    sql "commit"
+    sql "sync"
+    order_qt_select6 """select * from $table"""
 }

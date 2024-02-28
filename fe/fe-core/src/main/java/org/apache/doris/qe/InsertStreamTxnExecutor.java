@@ -68,9 +68,11 @@ public class InsertStreamTxnExecutor {
         StreamLoadTask streamLoadTask = StreamLoadTask.fromTStreamLoadPutRequest(request);
         StreamLoadPlanner planner = new StreamLoadPlanner(
                 txnEntry.getDb(), (OlapTable) txnEntry.getTable(), streamLoadTask);
+        boolean isMowTable = ((OlapTable) txnEntry.getTable()).getEnableUniqueKeyMergeOnWrite();
         // Will using load id as query id in fragment
         if (Config.enable_pipeline_load) {
             TPipelineFragmentParams tRequest = planner.planForPipeline(streamLoadTask.getId());
+            tRequest.setIsMowTable(isMowTable);
             BeSelectionPolicy policy = new BeSelectionPolicy.Builder().needLoadAvailable().needQueryAvailable().build();
             List<Long> beIds = Env.getCurrentSystemInfo().selectBackendIdsByPolicy(policy, 1);
             if (beIds.isEmpty()) {
@@ -112,6 +114,7 @@ public class InsertStreamTxnExecutor {
             }
         } else {
             TExecPlanFragmentParams tRequest = planner.plan(streamLoadTask.getId());
+            tRequest.setIsMowTable(isMowTable);
             BeSelectionPolicy policy = new BeSelectionPolicy.Builder().needLoadAvailable().needQueryAvailable().build();
             List<Long> beIds = Env.getCurrentSystemInfo().selectBackendIdsByPolicy(policy, 1);
             if (beIds.isEmpty()) {
