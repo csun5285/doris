@@ -102,7 +102,7 @@ public class SystemInfoService {
 
     private volatile ImmutableMap<Long, DiskInfo> pathHashToDishInfoRef = ImmutableMap.of();
 
-    private InstanceInfoPB.Status instanceStatus;
+    private InstanceInfoPB.Status instanceStatus = InstanceInfoPB.Status.NORMAL;
 
     public static class HostInfo implements Comparable<HostInfo> {
         public String host;

@@ -210,8 +210,10 @@ public class BaseController {
     }
 
     protected void checkInstanceOverdue(UserIdentity currentUsr) {
+        InstanceInfoPB.Status s = Env.getCurrentSystemInfo().getInstanceStatus();
         if (!currentUsr.isRootUser()
-                && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+                && s == InstanceInfoPB.Status.OVERDUE) {
+            LOG.warn("this warehouse is overdue root:{}, status:{}", currentUsr.isRootUser(), s);
             throw new UnauthorizedException("The warehouse is overdue!");
         }
     }

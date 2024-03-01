@@ -473,8 +473,10 @@ public class ConnectProcessor {
         String originStmt = new String(bytes, 1, ending, StandardCharsets.UTF_8);
 
         if (Config.isCloudMode()) {
+            InstanceInfoPB.Status s = Env.getCurrentSystemInfo().getInstanceStatus();
             if (!ctx.getCurrentUserIdentity().isRootUser()
-                    && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+                    && s == InstanceInfoPB.Status.OVERDUE) {
+                LOG.warn("this warehouse is overdue root:{}, status:{}", ctx.getCurrentUserIdentity().isRootUser(), s);
                 Exception exception = new Exception("warehouse is overdue!");
                 handleQueryException(exception, originStmt, null, null);
                 return;
