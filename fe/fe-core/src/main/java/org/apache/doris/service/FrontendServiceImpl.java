@@ -3436,6 +3436,59 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         public long updatedRowCount;
     }
 
+    public static void commitTxnResp(CommitTxnResponse commitTxnResponse) {
+        long dbId = commitTxnResponse.getTxnInfo().getDbId();
+        long txnId = commitTxnResponse.getTxnInfo().getTxnId();
+        // update rowCountfor AnalysisManager
+        for (TableStatsPB tableStats : commitTxnResponse.getTableStatsList()) {
+            LOG.info("Update RowCount for AnalysisManager. transactionId:{}, table_id:{}, updated_row_count:{}",
+                        txnId, tableStats.getTableId(), tableStats.getUpdatedRowCount());
+            Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
+                                                                        tableStats.getUpdatedRowCount());
+        }
+
+        // notify partition first load
+        int totalPartitionNum = commitTxnResponse.getPartitionIdsList().size();
+        // a map to record <tableId, [partitionIds]>
+        Map<Long, List<Long>> tablePartitionMap = Maps.newHashMap();
+        for (int idx = 0; idx < totalPartitionNum; ++idx) {
+            long version = commitTxnResponse.getVersions(idx);
+            long tableId = commitTxnResponse.getTableIds(idx);
+            tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
+            tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
+            // 1. inform AnalysisManager
+            if (version == 2) {
+                Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
+            }
+            // 2. update CloudPartition
+            Env env = Env.getCurrentEnv();
+            OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(dbId)
+                    .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
+                    .orElse(null);
+            if (olapTable == null) {
+                continue;
+            }
+            CloudPartition partition = (CloudPartition) olapTable.getPartition(
+                    commitTxnResponse.getPartitionIds(idx));
+            if (partition == null) {
+                continue;
+            }
+            partition.setCachedVisibleVersion(version);
+        }
+        // tablePartitionMap to string
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Long, List<Long>> entry : tablePartitionMap.entrySet()) {
+            sb.append(entry.getKey()).append(":[");
+            for (Long partitionId : entry.getValue()) {
+                sb.append(partitionId).append(",");
+            }
+            sb.append("];");
+        }
+        if (sb.length() > 0) {
+            LOG.info("notify partition first load. {}", sb);
+        }
+    }
+
     public TStatus reportCommitTxnResult(TReportCommitTxnResultRequest request) throws TException {
         String clientAddr = getClientAddrAsString();
         // FE only has one master, this should not be a problem
@@ -3454,55 +3507,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 return new TStatus(TStatusCode.INVALID_ARGUMENT);
             }
             CommitTxnResponse commitTxnResponse = CommitTxnResponse.parseFrom(receivedProtobufBytes);
-
-            // update rowCountfor AnalysisManager
-            for (TableStatsPB tableStats : commitTxnResponse.getTableStatsList()) {
-                LOG.info("Update RowCount for AnalysisManager. transactionId:{}, table_id:{}, updated_row_count:{}",
-                         request.getTxnId(), tableStats.getTableId(), tableStats.getUpdatedRowCount());
-                Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
-                                                                           tableStats.getUpdatedRowCount());
-            }
-
-            // notify partition first load
-            int totalPartitionNum = commitTxnResponse.getPartitionIdsList().size();
-            // a map to record <tableId, [partitionIds]>
-            Map<Long, List<Long>> tablePartitionMap = Maps.newHashMap();
-            for (int idx = 0; idx < totalPartitionNum; ++idx) {
-                long version = commitTxnResponse.getVersions(idx);
-                if (version == 2) {
-                    long tableId = commitTxnResponse.getTableIds(idx);
-                    tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
-                    tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
-                    // 1. inform AnalysisManager
-                    Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
-                    // 2. update CloudPartition
-                    Env env = Env.getCurrentEnv();
-                    OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(request.getDbId())
-                            .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
-                            .orElse(null);
-                    if (olapTable == null) {
-                        continue;
-                    }
-                    CloudPartition partition = (CloudPartition) olapTable.getPartition(
-                            commitTxnResponse.getPartitionIds(idx));
-                    if (partition == null) {
-                        continue;
-                    }
-                    partition.setCachedVisibleVersion(2);
-                }
-            }
-            // tablePartitionMap to string
-            StringBuilder sb = new StringBuilder();
-            for (Map.Entry<Long, List<Long>> entry : tablePartitionMap.entrySet()) {
-                sb.append(entry.getKey()).append(":[");
-                for (Long partitionId : entry.getValue()) {
-                    sb.append(partitionId).append(",");
-                }
-                sb.append("];");
-            }
-            if (sb.length() > 0) {
-                LOG.info("notify partition first load. {}", sb);
-            }
+            commitTxnResp(commitTxnResponse);
         } catch (InvalidProtocolBufferException e) {
             // Handle the exception, log it, or take appropriate action
             e.printStackTrace();
