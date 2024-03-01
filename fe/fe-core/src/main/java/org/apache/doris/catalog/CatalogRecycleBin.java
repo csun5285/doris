@@ -23,6 +23,7 @@ import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.FeConstants;
 import org.apache.doris.common.FeMetaVersion;
+import org.apache.doris.common.Pair;
 import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.Daemon;
@@ -49,6 +50,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -1034,6 +1036,45 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
         });
 
         return Stream.of(dbInfos, tableInfos, partitionInfos).flatMap(Collection::stream).collect(Collectors.toList());
+    }
+
+    public synchronized Map<Long, Pair<Long, Long>> getDbToRecycleSize() {
+        Map<Long, Pair<Long, Long>> dbToRecycleSize = new HashMap<>();
+        for (Map.Entry<Long, RecycleTableInfo> entry : idToTable.entrySet()) {
+            RecycleTableInfo tableInfo = entry.getValue();
+            Table table = tableInfo.getTable();
+            if (!(table instanceof OlapTable)) {
+                continue;
+            }
+            long dataSize = table.getDataSize(false);
+            long remoteDataSize = ((OlapTable) table).getRemoteDataSize();
+            dbToRecycleSize.compute(tableInfo.getDbId(), (k, v) -> {
+                if (v == null) {
+                    return Pair.of(dataSize, remoteDataSize);
+                } else {
+                    v.first += dataSize;
+                    v.second += remoteDataSize;
+                    return v;
+                }
+            });
+        }
+
+        for (Map.Entry<Long, RecyclePartitionInfo> entry : idToPartition.entrySet()) {
+            RecyclePartitionInfo partitionInfo = entry.getValue();
+            Partition partition = partitionInfo.getPartition();
+            long dataSize = partition.getDataSize(false);
+            long remoteDataSize = partition.getRemoteDataSize();
+            dbToRecycleSize.compute(partitionInfo.getDbId(), (k, v) -> {
+                if (v == null) {
+                    return Pair.of(dataSize, remoteDataSize);
+                } else {
+                    v.first += dataSize;
+                    v.second += remoteDataSize;
+                    return v;
+                }
+            });
+        }
+        return dbToRecycleSize;
     }
 
     // Need to add "synchronized", because when calling /dump api to dump image,

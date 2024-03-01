@@ -17,8 +17,10 @@
 
 package org.apache.doris.metric;
 
+import org.apache.doris.catalog.CloudTabletStatMgr;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
+import org.apache.doris.common.Pair;
 import org.apache.doris.monitor.jvm.JvmStats;
 import org.apache.doris.monitor.jvm.JvmStats.GarbageCollector;
 import org.apache.doris.monitor.jvm.JvmStats.MemoryPool;
@@ -32,6 +34,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -285,7 +288,12 @@ public class PrometheusMetricVisitor extends MetricVisitor {
         StringBuilder rowsetCountBuilder = new StringBuilder();
         StringBuilder segmentCountBuilder = new StringBuilder();
         StringBuilder tableRowCountBuilder = new StringBuilder();
-        Env.getCurrentEnv().getCloudTabletStatMgr().getCloudTableStatsMap().values().forEach(stats -> {
+
+        long totalTableSize = 0;
+        for (CloudTabletStatMgr.CloudTableStats stats :
+                Env.getCurrentEnv().getCloudTabletStatMgr().getCloudTableStatsMap().values()) {
+            totalTableSize += stats.getTableDataSize();
+
             dataSizeBuilder.append("doris_fe_table_data_size{db_name=\"");
             dataSizeBuilder.append(stats.getDbName());
             dataSizeBuilder.append("\", table_name=\"");
@@ -317,7 +325,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
             tableRowCountBuilder.append("\"} ");
             tableRowCountBuilder.append(stats.getTableRowCount());
             tableRowCountBuilder.append("\n");
-        });
+        }
 
         if (dataSizeBuilder.length() > 0) {
             sb.append(Joiner.on(" ").join(HELP, "doris_fe_table_data_size", "table data size\n"));
@@ -342,6 +350,25 @@ public class PrometheusMetricVisitor extends MetricVisitor {
             sb.append(Joiner.on(" ").join(TYPE, "doris_fe_table_row_count", "gauge\n"));
             sb.append(tableRowCountBuilder.toString());
         }
+
+        // total table size
+        sb.append(Joiner.on(" ").join(HELP, "doris_fe_table_data_size_total", "total table data size\n"));
+        sb.append(Joiner.on(" ").join(TYPE, "doris_fe_table_data_size_total", "gauge\n"));
+        sb.append("doris_fe_table_data_size_total ");
+        sb.append(totalTableSize);
+        sb.append("\n");
+
+        // total recycle bin size
+        long totalRecycleSize = 0;
+        for (Map.Entry<Long, Pair<Long, Long>> entry : Env.getCurrentRecycleBin().getDbToRecycleSize().entrySet()) {
+            totalRecycleSize += entry.getValue().first;
+        }
+        sb.append(Joiner.on(" ").join(HELP, "doris_fe_recycle_data_size_total", "total recycle bin data size\n"));
+        sb.append(Joiner.on(" ").join(TYPE, "doris_fe_recycle_data_size_total", "gauge\n"));
+        sb.append("doris_fe_recycle_data_size_total ");
+        sb.append(totalRecycleSize);
+        sb.append("\n");
+
         return;
     }
 }
