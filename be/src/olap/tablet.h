@@ -234,6 +234,7 @@ public:
     int64_t fetch_add_approximate_data_size   (int64_t x) { return _approximate_data_size   .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_cumu_num_rowsets (int64_t x) { return _approximate_cumu_num_rowsets.fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_cumu_num_deltas   (int64_t x) { return _approximate_cumu_num_deltas.fetch_add(x, std::memory_order_relaxed); }
+    int64_t fetch_add_approximate_cumu_data_size(int64_t x) { return _approximate_cumu_data_size.fetch_add(x, std::memory_order_relaxed); }
     // clang-format on
     // meta lock must be held when calling this function
     void reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, int64_t num_rows,
@@ -809,6 +810,7 @@ private:
     std::atomic<int64_t> _approximate_cumu_num_rowsets {-1};
     // Number of sorted arrays (e.g. for rowset with N segments, if rowset is overlapping, delta is N, otherwise 1) after cumu point
     std::atomic<int64_t> _approximate_cumu_num_deltas {-1};
+    std::atomic<int64_t> _approximate_cumu_data_size {-1};
 
     // cumulative compaction policy
     std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;

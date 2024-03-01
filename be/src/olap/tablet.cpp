@@ -4201,14 +4201,17 @@ void Tablet::reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, 
     _approximate_data_size.store(data_size, std::memory_order_relaxed);
     int64_t cumu_num_deltas = 0;
     int64_t cumu_num_rowsets = 0;
+    int64_t cumu_data_size = 0;
     auto cp = _cumulative_point.load(std::memory_order_relaxed);
     for (auto& [v, r] : _rs_version_map) {
         if (v.second < cp) continue;
         cumu_num_deltas += r->is_segments_overlapping() ? r->num_segments() : 1;
         ++cumu_num_rowsets;
+        cumu_data_size += r->data_disk_size();
     }
     _approximate_cumu_num_rowsets.store(cumu_num_rowsets, std::memory_order_relaxed);
     _approximate_cumu_num_deltas.store(cumu_num_deltas, std::memory_order_relaxed);
+    _approximate_cumu_data_size.store(cumu_data_size, std::memory_order_relaxed);
 }
 
 int64_t Tablet::get_cloud_base_compaction_score() {
