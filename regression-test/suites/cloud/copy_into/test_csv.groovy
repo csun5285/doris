@@ -26,7 +26,7 @@ suite("test_csv") {
         assertEquals(code, 0)
     }
 
-    // case1 csv 5 col, table 3 col, load 3 col
+    // csv 5 col, table 3 col, load 5 col
     sql """ DROP TABLE IF EXISTS ${tableName}; """
     sql """
         CREATE TABLE IF NOT EXISTS ${tableName} (
@@ -43,14 +43,21 @@ suite("test_csv") {
     def remoteFileName = fileName + "test_internal_stage"
     uploadFile(remoteFileName, filePath)
 
-    def result = sql " copy into ${tableName} from (select \$1, \$2, \$4 from @~('${remoteFileName}')) properties ('file.type' = 'csv', 'file.column_separator' = ',', 'copy.async' = 'false'); "
+    def result = sql " copy into ${tableName} from (select * from @~('${remoteFileName}')) properties ('file.type' = 'csv', 'file.column_separator' = ',', 'copy.async' = 'false'); "
+    logger.info("copy result: " + result)
+    assertTrue(result.size() == 1)
+    assertTrue(result[0].size() == 8)
+    assertTrue(result[0][1].equals("CANCELLED"), "Finish copy into, state=" + result[0][1] + ", expected state=CANCELLED")
+
+    // csv 5 col, table 3 col, load 3 col
+    result = sql " copy into ${tableName} from (select \$1, \$2, \$4 from @~('${remoteFileName}')) properties ('file.type' = 'csv', 'file.column_separator' = ',', 'copy.async' = 'false'); "
     logger.info("copy result: " + result)
     assertTrue(result.size() == 1)
     assertTrue(result[0].size() == 8)
     assertTrue(result[0][1].equals("FINISHED"), "Finish copy into, state=" + result[0][1] + ", expected state=FINISHED")
     qt_sql " SELECT * FROM ${tableName}; "
 
-    // case2 csv 5 col, table 3 col, load 2 col
+    // csv 5 col, table 3 col, load 2 col
     sql """ DROP TABLE IF EXISTS ${tableName}; """
     sql """
         CREATE TABLE IF NOT EXISTS ${tableName} (
