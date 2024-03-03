@@ -1258,6 +1258,7 @@ DEFINE_Bool(enable_check_max_min_key, "false");
 
 // Dir of default timezone files
 DEFINE_String(default_tzfiles_path, "${DORIS_HOME}/zoneinfo");
+DEFINE_Bool(use_doris_tzfile, "false");
 
 // the max package bytes be thrift server can receive
 // avoid accepting error or too large package causing OOM,default 20000000(20M)
