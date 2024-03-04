@@ -258,12 +258,16 @@ Status GroupCommitTable::_create_group_commit_load(
     }
     TRequestGroupCommitFragmentResult result;
     TNetworkAddress master_addr = _exec_env->master_info()->network_address;
-    RETURN_IF_ERROR(ThriftRpcHelper::rpc<FrontendServiceClient>(
+    st = ThriftRpcHelper::rpc<FrontendServiceClient>(
             master_addr.hostname, master_addr.port,
             [&result, &request](FrontendServiceConnection& client) {
                 client->requestGroupCommitFragment(result, request);
             },
-            10000L));
+            10000L);
+    if (!st.ok()) {
+        LOG(WARNING) << "create group commit load rpc error, st=" << st.to_string();
+    }
+    RETURN_IF_ERROR(st);
     st = Status::create<false>(result.status);
     if (!st.ok()) {
         LOG(WARNING) << "create group commit load error, st=" << st.to_string();
