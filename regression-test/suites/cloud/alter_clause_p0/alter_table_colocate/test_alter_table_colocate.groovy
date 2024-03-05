@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 suite("test_alter_table_colocate") {
+    sql "DROP TABLE IF EXISTS t_event FORCE"
     sql """
         CREATE TABLE IF NOT EXISTS `t_event`
         (
@@ -44,8 +45,9 @@ suite("test_alter_table_colocate") {
             "dynamic_partition.buckets" = "10"
         );
     """
+    sql "DROP TABLE IF EXISTS t_user FORCE"
     sql """
-    CREATE TABLE `t_user`
+    CREATE TABLE IF NOT EXISTS `t_user`
     (
         `@user_id`bigint(20) NOT NULL COMMENT '用户id',
         `@account`bigint(20) REPLACE_IF_NOT_NULL NULL COMMENT '数字账号',
@@ -67,6 +69,4 @@ suite("test_alter_table_colocate") {
             assertEquals(result.IsStable, "true")
         }
     }
-    sql "DROP TABLE IF EXISTS t_event FORCE"
-    sql "DROP TABLE IF EXISTS t_user FORCE"
 }
