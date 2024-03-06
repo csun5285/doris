@@ -193,11 +193,19 @@ java_version="$(
 )"
 final_java_opt="${JAVA_OPTS}"
 if [[ "${java_version}" -gt 8 ]]; then
-    if [[ -z "${JAVA_OPTS_FOR_JDK_9}" ]]; then
-        echo "JAVA_OPTS_FOR_JDK_9 is not set in fe.conf" >>"${LOG_DIR}/fe.out"
-        exit 1
+    if [[ "${java_version}" -eq 17 ]]; then
+        if [[ -z "${JAVA_OPTS_FOR_JDK_17}" ]]; then
+            echo "JAVA_OPTS_FOR_JDK_17 is not set in fe.conf" >>"${LOG_DIR}/fe.out"
+            exit 1
+        fi
+        final_java_opt="${JAVA_OPTS_FOR_JDK_17}"
+    else
+        if [[ -z "${JAVA_OPTS_FOR_JDK_9}" ]]; then
+            echo "JAVA_OPTS_FOR_JDK_9 is not set in fe.conf" >>"${LOG_DIR}/fe.out"
+            exit 1
+        fi
+        final_java_opt="${JAVA_OPTS_FOR_JDK_9}"
     fi
-    final_java_opt="${JAVA_OPTS_FOR_JDK_9}"
 fi
 echo "using java version ${java_version}" >>"${LOG_DIR}/fe.out"
 echo "${final_java_opt}" >>"${LOG_DIR}/fe.out"
