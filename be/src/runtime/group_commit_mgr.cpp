@@ -211,13 +211,16 @@ Status GroupCommitTable::get_first_block_load_queue(
                         "schema version not match, maybe a schema change is in process. Please "
                         "retry this load manually.");
             }
-            if (!_need_plan_fragment) {
-                _need_plan_fragment = true;
+            if (!_is_creating_plan_fragment) {
+                _is_creating_plan_fragment = true;
                 RETURN_IF_ERROR(_thread_pool->submit_func([&] {
                     auto st = _create_group_commit_load(load_block_queue, be_exe_version);
                     if (!st.ok()) {
-                        LOG(WARNING) << "fail to create block queue,st=" << st.to_string();
+                        LOG(WARNING) << "create group commit load error, st=" << st.to_string();
                         load_block_queue.reset();
+                        std::unique_lock l(_lock);
+                        _is_creating_plan_fragment = false;
+                        _cv.notify_all();
                     }
                 }));
             }
@@ -246,13 +249,6 @@ Status GroupCommitTable::get_first_block_load_queue(
 Status GroupCommitTable::_create_group_commit_load(
         std::shared_ptr<LoadBlockQueue>& load_block_queue, int be_exe_version) {
     Status st = Status::OK();
-    std::unique_ptr<int, std::function<void(int*)>> finish_plan_func((int*)0x01, [&](int*) {
-        if (!st.ok()) {
-            std::unique_lock l(_lock);
-            _need_plan_fragment = false;
-            _cv.notify_all();
-        }
-    });
     TRequestGroupCommitFragmentRequest request;
     request.__set_db_id(_db_id);
     request.__set_table_id(_table_id);
@@ -269,8 +265,8 @@ Status GroupCommitTable::_create_group_commit_load(
             10000L);
     if (!st.ok()) {
         LOG(WARNING) << "create group commit load rpc error, st=" << st.to_string();
+        return st;
     }
-    RETURN_IF_ERROR(st);
     st = Status::create<false>(result.status);
     if (!st.ok()) {
         LOG(WARNING) << "create group commit load error, st=" << st.to_string();
@@ -318,7 +314,7 @@ Status GroupCommitTable::_create_group_commit_load(
                     be_exe_version));
         }
         _load_block_queues.emplace(instance_id, load_block_queue);
-        _need_plan_fragment = false;
+        _is_creating_plan_fragment = false;
         _cv.notify_all();
     }
     st = _exec_plan_fragment(_db_id, _table_id, label, txn_id, is_pipeline, params,
