@@ -53,6 +53,7 @@
 #include "io/fs/local_file_system.h"
 #include "io/fs/path.h"
 #include "io/fs/s3_file_system.h"
+#include "olap/cumulative_compaction_time_series_policy.h"
 #include "olap/data_dir.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/rowset_meta.h"
@@ -440,8 +441,8 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.compaction_policy) {
-                if (tablet_meta_info.compaction_policy != "size_based" &&
-                    tablet_meta_info.compaction_policy != "time_series") {
+                if (tablet_meta_info.compaction_policy != CUMULATIVE_SIZE_BASED_POLICY &&
+                    tablet_meta_info.compaction_policy != CUMULATIVE_TIME_SERIES_POLICY) {
                     status = Status::InvalidArgument(
                             "invalid compaction policy, only support for size_based or "
                             "time_series");
@@ -451,7 +452,7 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.time_series_compaction_goal_size_mbytes) {
-                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                if (tablet->tablet_meta()->compaction_policy() != CUMULATIVE_TIME_SERIES_POLICY) {
                     status = Status::InvalidArgument(
                             "only time series compaction policy support time series config");
                     continue;
@@ -461,7 +462,7 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.time_series_compaction_file_count_threshold) {
-                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                if (tablet->tablet_meta()->compaction_policy() != CUMULATIVE_TIME_SERIES_POLICY) {
                     status = Status::InvalidArgument(
                             "only time series compaction policy support time series config");
                     continue;
@@ -471,7 +472,7 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.time_series_compaction_time_threshold_seconds) {
-                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                if (tablet->tablet_meta()->compaction_policy() != CUMULATIVE_TIME_SERIES_POLICY) {
                     status = Status::InvalidArgument(
                             "only time series compaction policy support time series config");
                     continue;
@@ -481,13 +482,23 @@ void TaskWorkerPool::_update_tablet_meta_worker_thread_callback() {
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.time_series_compaction_empty_rowsets_threshold) {
-                if (tablet->tablet_meta()->compaction_policy() != "time_series") {
+                if (tablet->tablet_meta()->compaction_policy() != CUMULATIVE_TIME_SERIES_POLICY) {
                     status = Status::InvalidArgument(
                             "only time series compaction policy support time series config");
                     continue;
                 }
                 tablet->tablet_meta()->set_time_series_compaction_empty_rowsets_threshold(
                         tablet_meta_info.time_series_compaction_empty_rowsets_threshold);
+                need_to_save = true;
+            }
+            if (tablet_meta_info.__isset.time_series_compaction_level_threshold) {
+                if (tablet->tablet_meta()->compaction_policy() != CUMULATIVE_TIME_SERIES_POLICY) {
+                    status = Status::InvalidArgument(
+                            "only time series compaction policy support time series config");
+                    continue;
+                }
+                tablet->tablet_meta()->set_time_series_compaction_level_threshold(
+                        tablet_meta_info.time_series_compaction_level_threshold);
                 need_to_save = true;
             }
             if (tablet_meta_info.__isset.replica_id) {

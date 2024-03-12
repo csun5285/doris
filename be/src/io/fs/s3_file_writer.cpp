@@ -103,6 +103,7 @@ S3FileWriter::S3FileWriter(std::string key, std::shared_ptr<S3FileSystem> fs,
     s3_file_writer_total << 1;
     s3_file_being_written << 1;
 
+    _create_empty_file = true;
     Aws::Http::SetCompliantRfc3986Encoding(true);
 
     if (config::enable_file_cache && _write_file_cache) {

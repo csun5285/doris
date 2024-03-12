@@ -1067,6 +1067,11 @@ public class Config extends ConfigBase {
     @ConfField(masterOnly = true, mutable = true)
     public static int balance_slot_num_per_path = 1;
 
+    // when execute admin set replica status = 'drop', the replica will marked as user drop.
+    // will try to drop this replica within time not exceeds manual_drop_replica_valid_second
+    @ConfField(masterOnly = true, mutable = true)
+    public static long manual_drop_replica_valid_second = 24 * 3600L;
+
     // This threshold is to avoid piling up too many report task in FE, which may cause OOM exception.
     // In some large Doris cluster, eg: 100 Backends with ten million replicas, a tablet report may cost
     // several seconds after some modification of metadata(drop partition, etc..).
@@ -1815,6 +1820,10 @@ public class Config extends ConfigBase {
     @ConfField(mutable = false, masterOnly = false, description = {"远程文件系统缓存的最大数量",
         "Max cache number of remote file system."})
     public static long max_remote_file_system_cache_num = 100;
+
+    @ConfField(mutable = false, masterOnly = false, description = {"外表行数缓存最大数量",
+        "Max cache number of external table row count"})
+    public static long max_external_table_row_count_cache_num = 100000;
 
     /**
      * Max cache loader thread-pool size.

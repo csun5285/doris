@@ -1107,7 +1107,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
         // add this log so that we can track this stmt
         LOG.debug("receive forwarded stmt {} from FE: {}", params.getStmtId(), params.getClientNodeHost());
-        ConnectContext context = new ConnectContext();
+        ConnectContext context = new ConnectContext(null, true);
         // Set current connected FE to the client address, so that we can know where this request come from.
         context.setCurrentConnectedFEIp(params.getClientNodeHost());
         if (Config.isCloudMode() && !Strings.isNullOrEmpty(params.getCloudCluster())) {
@@ -1575,6 +1575,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         LOG.debug("txn {} has multi table {}", request.getTxnId(), transactionState.getTableIdList());
         if (transactionState == null) {
             throw new UserException("transaction [" + request.getTxnId() + "] not found");
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("txn {} has multi table {}", request.getTxnId(), transactionState.getTableIdList());
         }
         List<Long> tableIdList = transactionState.getTableIdList();
         String txnOperation = request.getOperation().trim();

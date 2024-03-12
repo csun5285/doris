@@ -111,6 +111,7 @@ void CachedRemoteFileReader::_insert_file_reader(FileBlockSPtr file_block) {
 Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, size_t* bytes_read,
                                                 const IOContext* io_ctx) {
     size_t bytes_req = result.size;
+    bytes_req = std::min(bytes_req, size() - offset);
     ReadStatistics stats;
     auto defer_func = [&](int*) {
         if (io_ctx && io_ctx->file_cache_stats && _metrics_hook) {

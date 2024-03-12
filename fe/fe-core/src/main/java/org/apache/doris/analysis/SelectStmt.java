@@ -1863,6 +1863,7 @@ public class SelectStmt extends QueryStmt {
         if (havingClauseAfterAnalyzed != null) {
             havingClauseAfterAnalyzed = rewriter.rewrite(havingClauseAfterAnalyzed, analyzer);
             havingClauseAfterAnalyzed.collect(Subquery.class, subqueryExprs);
+            havingClause = havingClauseAfterAnalyzed.clone();
         }
 
         for (Subquery subquery : subqueryExprs) {
