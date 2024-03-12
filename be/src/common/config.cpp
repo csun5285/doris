@@ -938,6 +938,7 @@ DEFINE_mInt64(file_cache_max_size_per_disk, "0"); // zero for no limit
 DEFINE_mInt32(file_cache_enter_disk_resource_limit_mode_percent, "90");
 DEFINE_mInt32(file_cache_exit_disk_resource_limit_mode_percent, "80");
 DEFINE_mInt64(file_cache_ttl_valid_check_interval_second, "0"); // zero for not checking
+DEFINE_mBool(file_cache_enable_evict_from_other_queue_by_size, "false");
 
 DEFINE_Int32(s3_transfer_buffer_size_mb, "500");
 DEFINE_Int32(s3_transfer_executor_pool_size, "2");
