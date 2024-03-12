@@ -60,6 +60,7 @@ import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.TransactionEntry;
 import org.apache.doris.transaction.TransactionStatus;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -924,24 +925,53 @@ public class ConnectContext {
         return cloudCluster;
     }
 
-    public void setCloudCluster() {
+    public static class CloudClusterResult {
+        public enum Comment {
+            FOUND_BY_DEFAULT_CLUSTER,
+            DEFAULT_CLUSTER_SET_BUT_NOT_EXIST,
+            FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
+        }
+
+        public String clusterName;
+        public Comment comment;
+
+        public CloudClusterResult(final String name, Comment c) {
+            this.clusterName = name;
+            this.comment = c;
+        }
+
+        @Override
+        public String toString() {
+            return "CloudClusterResult{"
+                + "clusterName='" + clusterName + '\''
+                + ", comment=" + comment
+                + '}';
+        }
+    }
+
+    // can't get cluster from context, use the following strategy to obtain the cluster name
+    // 当用户有多个集群的权限时，会按照如下策略进行拉取：
+    // 如果有设置默认集群，优先拉起该集群。
+    // 如果没有设置默认集群，在对于多个集群按字母序排序，拉起第一个。
+    public CloudClusterResult getCloudClusterByPolicy() {
         List<String> cloudClusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
         // try set default cluster
         String defaultCloudCluster = Env.getCurrentEnv().getAuth().getDefaultCloudCluster(getQualifiedUser());
         if (!Strings.isNullOrEmpty(defaultCloudCluster)) {
             // check cluster validity
+            CloudClusterResult r;
             if (cloudClusterNames.contains(defaultCloudCluster)) {
                 // valid
-                setCloudCluster(defaultCloudCluster);
+                r = new CloudClusterResult(defaultCloudCluster,
+                        CloudClusterResult.Comment.FOUND_BY_DEFAULT_CLUSTER);
                 LOG.info("use default cluster {}", defaultCloudCluster);
-                return;
             } else {
                 // invalid
-                LOG.warn("default cluster {} current invalid, please change it", defaultCloudCluster);
-                getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
-                        "default cluster " + defaultCloudCluster + "current invalid, please change it");
-                return;
+                r = new CloudClusterResult(defaultCloudCluster,
+                        CloudClusterResult.Comment.DEFAULT_CLUSTER_SET_BUT_NOT_EXIST);
+                LOG.warn("default cluster {} current invalid, please change it", r);
             }
+            return r;
         }
 
         // get all available cluster of the user
@@ -957,19 +987,36 @@ public class ConnectContext {
                 });
                 if (hasAliveBe.get()) {
                     // set a cluster to context cloudCluster
-                    setCloudCluster(cloudClusterName);
-                    LOG.debug("set context cluster name {}", cloudClusterName);
-                    break;
+                    CloudClusterResult r = new CloudClusterResult(cloudClusterName,
+                            CloudClusterResult.Comment.FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE);
+                    LOG.debug("set context {}", r);
+                    return r;
                 }
             }
         }
-        if (Strings.isNullOrEmpty(this.cloudCluster)) {
+        return null;
+    }
+
+    public void setCloudCluster() {
+        CloudClusterResult cloudClusterTypeAndName = getCloudClusterByPolicy();
+        if (cloudClusterTypeAndName == null) {
             LOG.warn("cant get a valid cluster for user {} to use", getCurrentUserIdentity());
             getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
                     "Cant get a Valid cluster for you to use, plz connect admin");
             return;
         }
-        LOG.info("finally set context cluster name {}", cloudCluster);
+        if (cloudClusterTypeAndName.comment ==  CloudClusterResult.Comment.DEFAULT_CLUSTER_SET_BUT_NOT_EXIST) {
+            getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
+                    "default cluster " + cloudClusterTypeAndName.clusterName + "current invalid, please change it");
+        }
+
+        Preconditions.checkState(cloudClusterTypeAndName.comment
+                    == CloudClusterResult.Comment.FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
+                "get cluster name type err");
+        Preconditions.checkState(!Strings.isNullOrEmpty(cloudClusterTypeAndName.clusterName),
+                "get cluster name empty");
+        setCloudCluster(cloudClusterTypeAndName.clusterName);
+        LOG.info("finally set context cluster {}",  cloudClusterTypeAndName);
     }
 
     public StatsErrorEstimator getStatsErrorEstimator() {

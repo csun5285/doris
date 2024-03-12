@@ -260,7 +260,8 @@ public class SystemInfoService {
     }
 
     public List<String> getCloudClusterNames() {
-        return new ArrayList<>(clusterNameToId.keySet());
+        return new ArrayList<>(clusterNameToId.keySet()).stream().filter(c -> !Strings.isNullOrEmpty(c))
+            .sorted(Comparator.naturalOrder()).collect(Collectors.toList());
     }
 
     // use cluster $clusterName

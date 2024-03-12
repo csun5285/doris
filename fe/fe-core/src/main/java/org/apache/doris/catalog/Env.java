@@ -5527,10 +5527,39 @@ public class Env {
         }
     }
 
-    public static void waitForAutoStart(final String clusterName) throws DdlException {
+    public static String getClusterNameAutoStart(final String clusterName) {
+        if (!Strings.isNullOrEmpty(clusterName)) {
+            return clusterName;
+        }
+
+        ConnectContext context = ConnectContext.get();
+        if (context == null) {
+            LOG.warn("auto start cant get context so new it");
+            context = new ConnectContext();
+        }
+        ConnectContext.CloudClusterResult cloudClusterTypeAndName = context.getCloudClusterByPolicy();
+        if (cloudClusterTypeAndName == null) {
+            LOG.warn("get cluster from ctx err");
+            return null;
+        }
+        if (cloudClusterTypeAndName.comment
+                == ConnectContext.CloudClusterResult.Comment.DEFAULT_CLUSTER_SET_BUT_NOT_EXIST) {
+            LOG.warn("get default cluster from ctx err");
+            return null;
+        }
+        Preconditions.checkState(cloudClusterTypeAndName.comment
+                == ConnectContext.CloudClusterResult.Comment.FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
+                "get cluster name type err");
+        Preconditions.checkState(!Strings.isNullOrEmpty(cloudClusterTypeAndName.clusterName),
+                "get cluster name empty");
+        return cloudClusterTypeAndName.clusterName;
+    }
+
+    public static void waitForAutoStart(String clusterName) throws DdlException {
         if (Config.isNotCloudMode()) {
             return;
         }
+        clusterName = getClusterNameAutoStart(clusterName);
         if (Strings.isNullOrEmpty(clusterName)) {
             LOG.warn("auto start in cloud mode, but clusterName empty {}", clusterName);
             return;
