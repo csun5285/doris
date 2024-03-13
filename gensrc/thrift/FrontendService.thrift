@@ -408,7 +408,7 @@ struct TQueryStatistics {
 
 struct TReportWorkloadRuntimeStatusParams {
     1: optional i64 backend_id
-    2: map<string, TQueryStatistics> query_statistics_map
+    2: optional map<string, TQueryStatistics> query_statistics_map
 }
 
 // The results of an INSERT query, sent to the coordinator as part of
@@ -473,7 +473,7 @@ struct TReportExecStatusParams {
 
   24: optional TQueryStatistics query_statistics
 
-  25: TReportWorkloadRuntimeStatusParams report_workload_runtime_status
+  25: optional TReportWorkloadRuntimeStatusParams report_workload_runtime_status
 }
 
 struct TFeResult {
@@ -540,6 +540,7 @@ struct TMasterOpResult {
     5: optional string status;
     6: optional i32 statusCode;
     7: optional string errMessage;
+    8: optional list<binary> queryResultBufList;
 }
 
 struct TUpdateExportTaskStatusRequest {

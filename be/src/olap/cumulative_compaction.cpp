@@ -81,13 +81,17 @@ Status CumulativeCompaction::execute_compact_impl() {
     // 4. set state to success
     _compaction_succeed = true;
 
-    // 5. set cumulative point
-    StorageEngine::instance()->cumu_compaction_policy()->update_cumulative_point(
+    // 5. set cumulative level
+    _tablet->get_cumulative_compaction_policy()->update_compaction_level(
+            _tablet.get(), _input_rowsets, _output_rowset);
+
+    // 6. set cumulative point
+    _tablet->get_cumulative_compaction_policy()->update_cumulative_point(
             _tablet.get(), _input_rowsets, _output_rowset, _last_delete_version);
     VLOG_CRITICAL << "after cumulative compaction, current cumulative point is "
                   << _tablet->cumulative_layer_point() << ", tablet=" << _tablet->full_name();
 
-    // 6. add metric to cumulative compaction
+    // 7. add metric to cumulative compaction
     DorisMetrics::instance()->cumulative_compaction_deltas_total->increment(_input_rowsets.size());
     DorisMetrics::instance()->cumulative_compaction_bytes_total->increment(_input_rowsets_size);
 
@@ -113,7 +117,7 @@ Status CumulativeCompaction::pick_rowsets_to_compact() {
     }
 
     size_t compaction_score = 0;
-    StorageEngine::instance()->cumu_compaction_policy()->pick_input_rowsets(
+    _tablet->get_cumulative_compaction_policy()->pick_input_rowsets(
             _tablet.get(), candidate_rowsets, config::cumulative_compaction_max_deltas,
             config::cumulative_compaction_min_deltas, &_input_rowsets, &_last_delete_version,
             &compaction_score, allow_delete_in_cumu_compaction());

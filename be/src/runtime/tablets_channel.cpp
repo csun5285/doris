@@ -674,7 +674,7 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
             << ", tablet_ids_size: " << request.tablet_ids_size();
 
     auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
-    auto write_tablet_data = [&](uint32_t tablet_id,
+    auto write_tablet_data = [&](int64_t tablet_id,
                                  std::function<Status(DeltaWriter * writer)> write_func) {
         google::protobuf::RepeatedPtrField<PTabletError>* tablet_errors =
                 response->mutable_tablet_errors();

@@ -57,7 +57,7 @@
 #include "olap/base_compaction.h"
 #include "olap/binlog.h"
 #include "olap/cumulative_compaction.h"
-#include "olap/cumulative_compaction_policy.h"
+#include "olap/cumulative_compaction_time_series_policy.h"
 #include "olap/data_dir.h"
 #include "olap/memtable_flush_executor.h"
 #include "olap/olap_define.h"
@@ -143,14 +143,19 @@ StorageEngine::StorageEngine(const EngineOptions& options)
           _memtable_flush_executor(nullptr),
           _calc_delete_bitmap_executor(nullptr),
           _default_rowset_type(BETA_ROWSET),
-          _heartbeat_flags(nullptr),
-          _cumulative_compaction_policy(
-                  CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy()) {
+          _heartbeat_flags(nullptr) {
     _s_instance = this;
     REGISTER_HOOK_METRIC(unused_rowsets_count, [this]() {
         // std::lock_guard<std::mutex> lock(_gc_mutex);
         return _unused_rowsets.size();
     });
+
+    _cumulative_compaction_policies[CUMULATIVE_SIZE_BASED_POLICY] =
+            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                    CUMULATIVE_SIZE_BASED_POLICY);
+    _cumulative_compaction_policies[CUMULATIVE_TIME_SERIES_POLICY] =
+            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                    CUMULATIVE_TIME_SERIES_POLICY);
 }
 
 StorageEngine::~StorageEngine() {
@@ -1038,6 +1043,14 @@ Status StorageEngine::get_compaction_status_json(std::string* result) {
     root.Accept(writer);
     *result = std::string(strbuf.GetString());
     return Status::OK();
+}
+
+std::shared_ptr<CumulativeCompactionPolicy> StorageEngine::get_cumu_compaction_policy(
+        const std::string_view& compaction_policy) const {
+    if (!_cumulative_compaction_policies.count(compaction_policy)) {
+        return _cumulative_compaction_policies.at(CUMULATIVE_SIZE_BASED_POLICY);
+    }
+    return _cumulative_compaction_policies.at(compaction_policy);
 }
 
 } // namespace doris

@@ -1535,19 +1535,6 @@ load tablets from header failed, failed tablets size: xxx, path=xxx
 * 描述: be节点thrift端口最大接收包大小(字节)
 * 默认值: 20000000
 
-#### `group_commit_wal_path`
-
-* 描述:  group commit 存放 WAL 文件的目录，请参考 [Group Commit](../../data-operate/import/import-way/group-commit-manual.md)
-* 默认值: 默认在用户配置的`storage_root_path`的各个目录下创建一个名为`wal`的目录。配置示例：
-  ```
-  group_commit_wal_path=/data1/storage/wal;/data2/storage/wal;/data3/storage/wal
-  ```
-
-#### `group_commit_memory_rows_for_max_filter_ratio`
-
-* 描述:  当 group commit 导入的总行数不高于该值，`max_filter_ratio` 正常工作，否则不工作，请参考 [Group Commit](../../data-operate/import/import-way/group-commit-manual.md)
-* 默认值: 10000
-
 #### `default_tzfiles_path`
 
 * 描述：Doris 自带的时区数据库。如果系统目录下未找到时区文件，则启用该目录下的数据。

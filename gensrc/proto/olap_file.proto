@@ -117,6 +117,7 @@ message RowsetMetaPB {
     reserved 50;
     // to indicate whether the data between the segments overlap
     optional SegmentsOverlapPB segments_overlap_pb = 51 [default = OVERLAP_UNKNOWN];
+    optional int64 compaction_level = 52 [default = 0];
 
     // cloud
     // the field is a vector, rename it
@@ -335,6 +336,7 @@ message TabletMetaPB {
     optional int64 group_commit_interval_ms = 35 [default = 10000];
     optional int64 group_commit_data_bytes = 36 [default = 134217728];
     optional int64 time_series_compaction_empty_rowsets_threshold = 37 [default = 5];
+    optional int64 time_series_compaction_level_threshold = 38 [default = 1];
     
     // Use for selectdb-cloud
     optional string table_name = 101;
