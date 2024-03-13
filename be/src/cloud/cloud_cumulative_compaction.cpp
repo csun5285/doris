@@ -180,7 +180,7 @@ Status CloudCumulativeCompaction::modify_rowsets(const Merger::Statistics* merge
     // calculate new cumulative point
     int64_t input_cumulative_point = _tablet->cumulative_layer_point();
     int64_t new_cumulative_point =
-            StorageEngine::instance()->cumu_compaction_policy()->new_cumulative_point(
+            _tablet->get_cumulative_compaction_policy()->new_cumulative_point(
                     _tablet.get(), _output_rowset, _last_delete_version, input_cumulative_point);
     // commit compaction job
     selectdb::TabletJobInfoPB job;
@@ -332,7 +332,7 @@ Status CloudCumulativeCompaction::pick_rowsets_to_compact() {
     }
 
     size_t compaction_score = 0;
-    StorageEngine::instance()->cumu_compaction_policy()->pick_input_rowsets(
+    _tablet->get_cumulative_compaction_policy()->pick_input_rowsets(
             _tablet.get(), candidate_rowsets, config::cumulative_compaction_max_deltas,
             config::cumulative_compaction_min_deltas, &_input_rowsets, &_last_delete_version,
             &compaction_score);

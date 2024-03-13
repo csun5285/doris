@@ -174,7 +174,8 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
                 return nullptr;
             }
 
-            auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir());
+            auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir(),
+                                                   tablet_meta->compaction_policy());
             auto value = std::make_unique<Value>(Value {
                     .tablet = tablet,
                     .tablet_map = *_tablet_map,

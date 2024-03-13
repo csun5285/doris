@@ -145,7 +145,6 @@ public:
     uint64_t segment_count() const;
     Version max_version() const;
     Version max_version_unlocked() const;
-    CumulativeCompactionPolicy* cumulative_compaction_policy();
     bool enable_unique_key_merge_on_write() const;
 
     // properties encapsulated in TabletSchema
@@ -814,7 +813,6 @@ private:
 
     // cumulative compaction policy
     std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
-    std::string_view _cumulative_compaction_type;
 
     // use a seperate thread to check all tablets paths existance
     std::atomic<bool> _is_tablet_path_exists;

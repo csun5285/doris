@@ -128,7 +128,7 @@ public:
             int64_t compaction_min_size = config::compaction_min_size_mbytes * 1024 * 1024);
 
     /// Destructor function of SizeBasedCumulativeCompactionPolicy.
-    ~SizeBasedCumulativeCompactionPolicy() {}
+    ~SizeBasedCumulativeCompactionPolicy() override = default;
 
     // CLOUD_MODE
     int64_t new_cumulative_point(Tablet* tablet, const RowsetSharedPtr& output_rowset,
@@ -201,7 +201,8 @@ class CumulativeCompactionPolicyFactory {
 public:
     /// Static factory function. It can product different policy according to the `policy` parameter and use tablet ptr
     /// to construct the policy. Now it can product size based and num based policies.
-    static std::shared_ptr<CumulativeCompactionPolicy> create_cumulative_compaction_policy();
+    static std::shared_ptr<CumulativeCompactionPolicy> create_cumulative_compaction_policy(
+            const std::string_view& compaction_policy);
 };
 
 } // namespace doris

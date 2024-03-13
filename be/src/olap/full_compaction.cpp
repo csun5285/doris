@@ -75,12 +75,12 @@ Status FullCompaction::execute_compact_impl() {
     _compaction_succeed = true;
 
     // 4. set cumulative level
-    _tablet->cumulative_compaction_policy()->update_compaction_level(_tablet.get(), _input_rowsets,
-                                                                     _output_rowset);
+    _tablet->get_cumulative_compaction_policy()->update_compaction_level(
+            _tablet.get(), _input_rowsets, _output_rowset);
 
     // 5. set cumulative point
     Version last_version = _input_rowsets.back()->version();
-    StorageEngine::instance()->cumu_compaction_policy()->update_cumulative_point(
+    _tablet->get_cumulative_compaction_policy()->update_cumulative_point(
             _tablet.get(), _input_rowsets, _output_rowset, last_version);
     VLOG_CRITICAL << "after cumulative compaction, current cumulative point is "
                   << _tablet->cumulative_layer_point() << ", tablet=" << _tablet->full_name();

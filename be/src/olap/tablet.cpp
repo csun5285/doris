@@ -294,10 +294,12 @@ Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
           _cumulative_point(K_INVALID_CUMULATIVE_POINT),
           _newly_created_rowset_num(0),
           _last_checkpoint_time(0),
-          _cumulative_compaction_type(cumulative_compaction_type),
           _is_tablet_path_exists(true),
           _last_missed_version(-1),
           _last_missed_time_s(0) {
+    _cumulative_compaction_policy =
+            StorageEngine::instance()->get_cumu_compaction_policy(cumulative_compaction_type);
+
     // construct _timestamped_versioned_tracker from rs and stale rs meta
     _timestamped_version_tracker.construct_versioned_tracker(_tablet_meta->all_rs_metas(),
                                                              _tablet_meta->all_stale_rs_metas());
@@ -1591,7 +1593,7 @@ void Tablet::calculate_cumulative_point() {
     std::lock_guard<std::shared_mutex> wrlock(_meta_lock);
     SCOPED_SIMPLE_TRACE_IF_TIMEOUT(TRACE_TABLET_LOCK_THRESHOLD);
     int64_t ret_cumulative_point;
-    StorageEngine::instance()->cumu_compaction_policy()->calculate_cumulative_point(
+    get_cumulative_compaction_policy()->calculate_cumulative_point(
             this, _tablet_meta->all_rs_metas(), _cumulative_point, &ret_cumulative_point);
 
     if (ret_cumulative_point == K_INVALID_CUMULATIVE_POINT) {
@@ -1905,7 +1907,7 @@ void Tablet::get_compaction_status(std::string* json_result) {
         _timestamped_version_tracker.get_stale_version_path_json_doc(path_arr);
     }
     rapidjson::Value cumulative_policy_type;
-    auto policy_type_str = StorageEngine::instance()->cumu_compaction_policy()->name();
+    auto policy_type_str = get_cumulative_compaction_policy()->name();
     cumulative_policy_type.SetString(policy_type_str.data(), policy_type_str.length(),
                                      root.GetAllocator());
     root.AddMember("cumulative policy type", cumulative_policy_type, root.GetAllocator());

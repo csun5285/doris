@@ -384,4 +384,19 @@ void TimeSeriesCumulativeCompactionPolicy::update_compaction_level(
     output_rowset->rowset_meta()->set_compaction_level(first_level + 1);
 }
 
+int64_t TimeSeriesCumulativeCompactionPolicy::new_cumulative_point(
+        Tablet* tablet, const RowsetSharedPtr& output_rowset, Version& last_delete_version,
+        int64_t last_cumulative_point) {
+    if (tablet->tablet_state() != TABLET_RUNNING || output_rowset->num_segments() == 0) {
+        return last_cumulative_point;
+    }
+
+    if (tablet->tablet_meta()->time_series_compaction_level_threshold() >= 2 &&
+        output_rowset->rowset_meta()->compaction_level() < 2) {
+        return last_cumulative_point;
+    }
+
+    return output_rowset->end_version() + 1;
+}
+
 } // namespace doris

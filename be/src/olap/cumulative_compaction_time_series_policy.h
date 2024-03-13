@@ -33,7 +33,12 @@ inline constexpr std::string_view CUMULATIVE_TIME_SERIES_POLICY = "time_series";
 class TimeSeriesCumulativeCompactionPolicy : public CumulativeCompactionPolicy {
 public:
     TimeSeriesCumulativeCompactionPolicy() = default;
-    ~TimeSeriesCumulativeCompactionPolicy() {}
+    ~TimeSeriesCumulativeCompactionPolicy() override = default;
+
+    // CLOUD_MODE
+    int64_t new_cumulative_point(Tablet* tablet, const RowsetSharedPtr& output_rowset,
+                                 Version& last_delete_version,
+                                 int64_t last_cumulative_point) override;
 
     // Its main policy is calculating the accumulative compaction score after current cumulative_point in tablet.
     uint32_t calc_cumulative_compaction_score(Tablet* tablet) override;
