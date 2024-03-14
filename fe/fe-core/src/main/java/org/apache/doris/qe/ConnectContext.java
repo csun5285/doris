@@ -73,6 +73,7 @@ import org.json.JSONObject;
 import org.xnio.StreamConnection;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -933,6 +934,7 @@ public class ConnectContext {
             FOUND_BY_DEFAULT_CLUSTER,
             DEFAULT_CLUSTER_SET_BUT_NOT_EXIST,
             FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
+            FOUND_BY_FRIST_CLUSTER_HAS_AUTH,
         }
 
         public String clusterName;
@@ -954,8 +956,9 @@ public class ConnectContext {
 
     // can't get cluster from context, use the following strategy to obtain the cluster name
     // 当用户有多个集群的权限时，会按照如下策略进行拉取：
-    // 如果有设置默认集群，优先拉起该集群。
-    // 如果没有设置默认集群，在对于多个集群按字母序排序，拉起第一个。
+    // 如果当前mysql用户没有指定cluster(没有default 或者 use), 选择有权限的cluster。
+    // 如果有多个cluster满足权限条件,优先选活的，按字母序选
+    // 如果没有活的，则拉起一个，按字母序选
     public CloudClusterResult getCloudClusterByPolicy() {
         List<String> cloudClusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
         // try set default cluster
@@ -977,10 +980,12 @@ public class ConnectContext {
             return r;
         }
 
+        List<String> hasAuthCluster = new ArrayList<>();
         // get all available cluster of the user
         for (String cloudClusterName : cloudClusterNames) {
             if (Env.getCurrentEnv().getAuth().checkCloudPriv(getCurrentUserIdentity(),
                     cloudClusterName, PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
+                hasAuthCluster.add(cloudClusterName);
                 // find a cluster has more than one alive be
                 List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);
                 AtomicBoolean hasAliveBe = new AtomicBoolean(false);
@@ -997,7 +1002,8 @@ public class ConnectContext {
                 }
             }
         }
-        return null;
+        return hasAuthCluster.isEmpty() ? null
+            : new CloudClusterResult(hasAuthCluster.get(0), CloudClusterResult.Comment.FOUND_BY_FRIST_CLUSTER_HAS_AUTH);
     }
 
     public void setCloudCluster() {
@@ -1013,9 +1019,6 @@ public class ConnectContext {
                     "default cluster " + cloudClusterTypeAndName.clusterName + "current invalid, please change it");
         }
 
-        Preconditions.checkState(cloudClusterTypeAndName.comment
-                    == CloudClusterResult.Comment.FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
-                "get cluster name type err");
         Preconditions.checkState(!Strings.isNullOrEmpty(cloudClusterTypeAndName.clusterName),
                 "get cluster name empty");
         setCloudCluster(cloudClusterTypeAndName.clusterName);

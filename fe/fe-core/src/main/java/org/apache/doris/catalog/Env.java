@@ -5556,11 +5556,10 @@ public class Env {
             LOG.warn("get default cluster from ctx err");
             return null;
         }
-        Preconditions.checkState(cloudClusterTypeAndName.comment
-                == ConnectContext.CloudClusterResult.Comment.FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
-                "get cluster name type err");
+
         Preconditions.checkState(!Strings.isNullOrEmpty(cloudClusterTypeAndName.clusterName),
                 "get cluster name empty");
+        LOG.info("get cluster to resume {}", cloudClusterTypeAndName);
         return cloudClusterTypeAndName.clusterName;
     }
 
@@ -5616,8 +5615,8 @@ public class Env {
             ++retryTime;
             // sleep random millis [0.5, 1] s
             int randomSeconds =  500 + (int) (Math.random() * (1000 - 500));
-            LOG.info("change cluster retry times {}, wait randomMillis: {}, current status: {}",
-                    retryTime, randomSeconds, clusterStatus);
+            LOG.info("resume cluster {} retry times {}, wait randomMillis: {}, current status: {}",
+                    clusterName, retryTime, randomSeconds, clusterStatus);
             try {
                 if (retryTime > retryTimes / 2) {
                     // sleep random millis [1, 1.5] s
