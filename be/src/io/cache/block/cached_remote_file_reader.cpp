@@ -289,13 +289,13 @@ Status CachedRemoteFileReader::_read_from_cache(size_t offset, Slice result, siz
                 RETURN_IF_ERROR(_remote_file_reader->read_at(
                         current_offset, Slice(result.data + (current_offset - offset), read_size),
                         &bytes_read));
-                DCHECK(bytes_read == read_size);
+                DCHECK_EQ(bytes_read, read_size);
             }
         }
         *bytes_read += read_size;
         current_offset = right + 1;
     }
-    DCHECK(*bytes_read == bytes_req);
+    DCHECK_EQ(*bytes_read, bytes_req);
     DorisMetrics::instance()->s3_bytes_read_total->increment(*bytes_read);
     return Status::OK();
 }
