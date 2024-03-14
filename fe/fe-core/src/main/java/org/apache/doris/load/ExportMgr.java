@@ -426,6 +426,7 @@ public class ExportMgr extends MasterDaemon {
         infoMap.put("tablet_num", job.getTabletsNum());
         infoMap.put("max_file_size", job.getMaxFileSize());
         infoMap.put("delete_existing_files", job.getDeleteExistingFiles());
+        infoMap.put("data_consistency", job.getDataConsistency());
         jobInfo.add(new Gson().toJson(infoMap));
         // path
         jobInfo.add(job.getExportPath());

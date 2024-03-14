@@ -32,6 +32,7 @@ import org.apache.doris.common.util.PrintableMap;
 import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.common.util.URI;
 import org.apache.doris.common.util.Util;
+import org.apache.doris.load.ExportJob;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
@@ -63,6 +64,7 @@ public class ExportStmt extends StatementBase {
     private static final Logger LOG = LogManager.getLogger(ExportStmt.class);
     public static final String PARALLELISM = "parallelism";
     public static final String LABEL = "label";
+    public static final String DATA_CONSISTENCY = "data_consistency";
 
     private static final String DEFAULT_COLUMN_SEPARATOR = "\t";
     private static final String DEFAULT_LINE_DELIMITER = "\n";
@@ -72,6 +74,7 @@ public class ExportStmt extends StatementBase {
     private static final ImmutableSet<String> PROPERTIES_SET = new ImmutableSet.Builder<String>()
             .add(LABEL)
             .add(PARALLELISM)
+            .add(DATA_CONSISTENCY)
             .add(LoadStmt.EXEC_MEM_LIMIT)
             .add(LoadStmt.TIMEOUT_PROPERTY)
             .add(LoadStmt.KEY_IN_PARAM_COLUMNS)
@@ -106,6 +109,7 @@ public class ExportStmt extends StatementBase {
     private String maxFileSize;
     private String deleteExistingFiles;
     private String withBom;
+    private String dataConsistency;
     private SessionVariable sessionVariables;
 
     private String qualifiedUser;
@@ -178,6 +182,10 @@ public class ExportStmt extends StatementBase {
 
     public String getLabel() {
         return label;
+    }
+
+    public String getDataConsistency() {
+        return dataConsistency;
     }
 
     public SessionVariable getSessionVariables() {
@@ -376,6 +384,16 @@ public class ExportStmt extends StatementBase {
         this.deleteExistingFiles = properties.getOrDefault(OutFileClause.PROP_DELETE_EXISTING_FILES, "");
         // with_bom
         this.withBom = properties.getOrDefault(OutFileClause.PROP_WITH_BOM, "false");
+        // data consistency
+        String dataConsistencyStr = properties.get(DATA_CONSISTENCY);
+        if (dataConsistencyStr != null) {
+            if (!dataConsistencyStr.equalsIgnoreCase(ExportJob.CONSISTENT_PARTITION)) {
+                throw new UserException("The value of data_consistency is invalid, only `partition` is allowed");
+            }
+            this.dataConsistency = ExportJob.CONSISTENT_PARTITION;
+        } else {
+            this.dataConsistency = ExportJob.CONSISTENT_ALL;
+        }
 
         // timeout
         String timeoutString = properties.getOrDefault(LoadStmt.TIMEOUT_PROPERTY,
