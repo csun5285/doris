@@ -330,7 +330,6 @@ public class ConnectProcessor {
                             ? ctx.cloudCluster : "UNKNOWN")
                 .setWorkloadGroup(ctx.getWorkloadGroupName())
                 .setFuzzyVariables(!printFuzzyVariables ? "" : ctx.getSessionVariable().printFuzzyVariables());
-
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
             MetricRepo.USER_COUNTER_QUERY_ALL.getOrAdd(ctx.getQualifiedUser()).increase(1L);
@@ -388,7 +387,9 @@ public class ConnectProcessor {
                     ctx.getAuditEventBuilder().setSqlDigest(sqlDigest);
                 }
             }
-            ctx.getAuditEventBuilder().setIsQuery(true);
+            ctx.getAuditEventBuilder().setIsQuery(true)
+                .setScanBytesFromLocalStorage(statistics == null ? 0 : statistics.getScanBytesFromLocalStorage())
+                .setScanBytesFromRemoteStorage(statistics == null ? 0 : statistics.getScanBytesFromRemoteStorage());
             if (ctx.getQueryDetail() != null) {
                 ctx.getQueryDetail().setEventTime(endTime);
                 ctx.getQueryDetail().setEndTime(endTime);

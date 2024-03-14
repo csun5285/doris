@@ -43,6 +43,8 @@ void QueryStatistics::merge(const QueryStatistics& other) {
     scan_rows += other.scan_rows;
     scan_bytes += other.scan_bytes;
     cpu_nanos += other.cpu_nanos;
+    _scan_bytes_from_local_storage += other._scan_bytes_from_local_storage;
+    _scan_bytes_from_remote_storage += other._scan_bytes_from_remote_storage;
 
     int64_t other_peak_mem = other.max_peak_memory_bytes.load();
     if (other_peak_mem > this->max_peak_memory_bytes) {
@@ -60,6 +62,8 @@ void QueryStatistics::to_pb(PQueryStatistics* statistics) {
     DCHECK(statistics != nullptr);
     statistics->set_scan_rows(scan_rows);
     statistics->set_scan_bytes(scan_bytes);
+    statistics->set_scan_bytes_from_remote_storage(_scan_bytes_from_remote_storage);
+    statistics->set_scan_bytes_from_local_storage(_scan_bytes_from_local_storage);
     statistics->set_returned_rows(returned_rows);
     statistics->set_max_peak_memory_bytes(max_peak_memory_bytes);
     for (auto iter = _nodes_statistics_map.begin(); iter != _nodes_statistics_map.end(); ++iter) {
@@ -72,6 +76,8 @@ void QueryStatistics::to_pb(PQueryStatistics* statistics) {
 void QueryStatistics::to_thrift(TQueryStatistics* statistics) const {
     DCHECK(statistics != nullptr);
     statistics->__set_scan_bytes(scan_bytes);
+    statistics->__set_scan_bytes_from_remote_storage(_scan_bytes_from_remote_storage);
+    statistics->__set_scan_bytes_from_local_storage(_scan_bytes_from_local_storage);
     statistics->__set_scan_rows(scan_rows);
     statistics->__set_cpu_ms(cpu_nanos.load() / NANOS_PER_MILLIS);
     statistics->__set_returned_rows(returned_rows);
@@ -81,6 +87,8 @@ void QueryStatistics::to_thrift(TQueryStatistics* statistics) const {
 void QueryStatistics::from_pb(const PQueryStatistics& statistics) {
     scan_rows = statistics.scan_rows();
     scan_bytes = statistics.scan_bytes();
+    _scan_bytes_from_local_storage = statistics.scan_bytes_from_local_storage();
+    _scan_bytes_from_remote_storage = statistics.scan_bytes_from_remote_storage();
     for (auto& p_node_statistics : statistics.nodes_statistics()) {
         int64_t node_id = p_node_statistics.node_id();
         auto node_statistics = add_nodes_statistics(node_id);

@@ -68,6 +68,8 @@ public class WorkloadRuntimeStatusMgr {
                 if (queryStats != null) {
                     auditEvent.scanRows = queryStats.scan_rows;
                     auditEvent.scanBytes = queryStats.scan_bytes;
+                    auditEvent.scanBytesFromLocalStorage = queryStats.scan_bytes_from_local_storage;
+                    auditEvent.scanBytesFromRemoteStorage = queryStats.scan_bytes_from_remote_storage;
                     auditEvent.peakMemoryBytes = queryStats.max_peak_memory_bytes;
                     auditEvent.cpuTimeMs = queryStats.cpu_ms;
                 }
@@ -170,6 +172,8 @@ public class WorkloadRuntimeStatusMgr {
     private void mergeQueryStatistics(TQueryStatistics dst, TQueryStatistics src) {
         dst.scan_rows += src.scan_rows;
         dst.scan_bytes += src.scan_bytes;
+        dst.scan_bytes_from_local_storage += src.scan_bytes_from_local_storage;
+        dst.scan_bytes_from_remote_storage += src.scan_bytes_from_remote_storage;
         dst.cpu_ms += src.cpu_ms;
         if (dst.max_peak_memory_bytes < src.max_peak_memory_bytes) {
             dst.max_peak_memory_bytes = src.max_peak_memory_bytes;

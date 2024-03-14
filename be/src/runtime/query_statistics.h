@@ -73,6 +73,14 @@ public:
 
     void add_scan_bytes(int64_t scan_bytes) { this->scan_bytes += scan_bytes; }
 
+    void add_scan_bytes_from_local_storage(int64_t scan_bytes_from_local_storage) {
+        this->_scan_bytes_from_local_storage += scan_bytes_from_local_storage;
+    }
+
+    void add_scan_bytes_from_remote_storage(int64_t scan_bytes_from_remote_storage) {
+        this->_scan_bytes_from_remote_storage += scan_bytes_from_remote_storage;
+    }
+
     void add_cpu_nanos(int64_t cpu_nanos) { this->cpu_nanos += cpu_nanos; }
 
     NodeStatistics* add_nodes_statistics(int64_t node_id) {
@@ -104,6 +112,8 @@ public:
     void clear() {
         scan_rows.store(0);
         scan_bytes.store(0);
+        _scan_bytes_from_local_storage.store(0);
+        _scan_bytes_from_remote_storage.store(0);
 
         cpu_nanos = 0;
         returned_rows = 0;
@@ -127,6 +137,8 @@ private:
     std::atomic<int64_t> scan_rows;
     std::atomic<int64_t> scan_bytes;
     std::atomic<int64_t> cpu_nanos;
+    std::atomic<int64_t> _scan_bytes_from_local_storage;
+    std::atomic<int64_t> _scan_bytes_from_remote_storage;
 
     // number rows returned by query.
     // only set once by result sink when closing.

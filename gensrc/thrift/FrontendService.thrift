@@ -404,6 +404,8 @@ struct TQueryStatistics {
     3: optional i64 returned_rows
     4: optional i64 cpu_ms
     5: optional i64 max_peak_memory_bytes
+    6: optional i64 scan_bytes_from_local_storage
+    7: optional i64 scan_bytes_from_remote_storage
 }
 
 struct TReportWorkloadRuntimeStatusParams {

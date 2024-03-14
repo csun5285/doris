@@ -94,6 +94,10 @@ public class AuditEvent {
     public String sqlDigest = "";
     @AuditField(value = "cloudClusterName")
     public String cloudClusterName = "";
+    @AuditField(value = "scanBytesFromLocalStorage")
+    public long scanBytesFromLocalStorage = -1;
+    @AuditField(value = "scanBytesFromRemoteStorage")
+    public long scanBytesFromRemoteStorage = -1;
 
     @AuditField(value = "TraceId")
     public String traceId = "";
@@ -243,6 +247,16 @@ public class AuditEvent {
 
         public AuditEventBuilder setWorkloadGroup(String workloadGroup) {
             auditEvent.workloadGroup = workloadGroup;
+            return this;
+        }
+
+        public AuditEventBuilder setScanBytesFromLocalStorage(long scanBytesFromLocalStorage) {
+            auditEvent.scanBytesFromLocalStorage = scanBytesFromLocalStorage;
+            return this;
+        }
+
+        public AuditEventBuilder setScanBytesFromRemoteStorage(long scanBytesFromRemoteStorage) {
+            auditEvent.scanBytesFromRemoteStorage = scanBytesFromRemoteStorage;
             return this;
         }
 
