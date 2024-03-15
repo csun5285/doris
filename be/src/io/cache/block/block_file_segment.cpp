@@ -38,6 +38,11 @@
 namespace doris {
 namespace io {
 
+std::ostream& operator<<(std::ostream& os, const FileBlock::State& value) {
+    os << FileBlock::state_to_string(value);
+    return os;
+}
+
 FileBlock::FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache,
                      State download_state, FileCacheType cache_type, uint64_t expiration_time)
         : _segment_range(offset, offset + size - 1),

@@ -1307,6 +1307,8 @@ DECLARE_mInt32(query_statistics_reserve_timeout_ms);
 
 DECLARE_mBool(check_segment_when_build_rowset_meta);
 
+DECLARE_mInt64(max_ttl_cache_ratio);
+
 #ifdef BE_TEST
 // test s3
 DECLARE_String(test_s3_resource);

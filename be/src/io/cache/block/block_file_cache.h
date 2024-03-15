@@ -405,6 +405,7 @@ private:
 
     CachedFiles _files;
     size_t _cur_cache_size = 0;
+    size_t _cur_ttl_size = 0;
     std::multimap<uint64_t, Key> _time_to_key;
     std::unordered_map<Key, uint64_t, HashCachedFileKey> _key_to_time;
 

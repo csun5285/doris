@@ -290,6 +290,7 @@ Status BlockFileCache::clear_file_cache_directly() {
     RETURN_IF_ERROR(global_local_filesystem()->create_directory(_cache_base_path));
     _files.clear();
     _cur_cache_size = 0;
+    _cur_ttl_size = 0;
     _time_to_key.clear();
     _key_to_time.clear();
     _index_queue.clear(cache_lock);
@@ -847,7 +848,9 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
 
     auto& offsets = _files[key];
     DCHECK((context.expiration_time == 0 && context.cache_type != FileCacheType::TTL) ||
-           (context.cache_type == FileCacheType::TTL && context.expiration_time != 0));
+           (context.cache_type == FileCacheType::TTL && context.expiration_time != 0))
+            << fmt::format("expiration time {}, cache type {}", context.expiration_time,
+                           context.cache_type);
     auto key_path = get_path_in_local_cache(key, context.expiration_time);
     if (offsets.empty()) {
         Status st = global_local_filesystem()->create_directory(key_path);
@@ -879,6 +882,7 @@ BlockFileCache::FileBlockCell* BlockFileCache::add_cell(const Key& key, const Ca
             _key_to_time[key] = context.expiration_time;
             _time_to_key.insert(std::make_pair(context.expiration_time, key));
         }
+        _cur_ttl_size += cell.size();
     }
     auto [it, inserted] = offsets.insert({offset, std::move(cell)});
     _cur_cache_size += size;
@@ -920,6 +924,10 @@ const BlockFileCache::LRUQueue& BlockFileCache::get_queue(FileCacheType type) co
 bool BlockFileCache::try_reserve_for_ttl(size_t size, std::lock_guard<doris::Mutex>& cache_lock) {
     size_t removed_size = 0;
     size_t cur_cache_size = _cur_cache_size;
+    auto limit = config::max_ttl_cache_ratio * _total_size;
+    if ((_cur_ttl_size + size) * 100 > limit) {
+        return false;
+    }
     auto remove_file_block_if = [&](FileBlockCell* cell) {
         FileBlockSPtr file_block = cell->file_block;
         if (file_block) {
@@ -1390,6 +1398,9 @@ void BlockFileCache::remove(FileBlockSPtr file_block, T& cache_lock, U& segment_
     *_queue_evict_size_metrics[file_block->cache_type()] << file_block->range().size();
     *_total_evict_size_metrics << file_block->range().size();
     _cur_cache_size -= file_block->range().size();
+    if (FileCacheType::TTL == type) {
+        _cur_ttl_size -= file_block->range().size();
+    }
     auto& offsets = _files[file_block->key()];
     offsets.erase(file_block->offset());
 

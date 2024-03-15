@@ -1290,6 +1290,8 @@ DEFINE_mInt32(query_statistics_reserve_timeout_ms, "30000");
 
 DEFINE_mBool(check_segment_when_build_rowset_meta, "false");
 
+DEFINE_mInt64(max_ttl_cache_ratio, "90");
+
 // clang-format off
 #ifdef BE_TEST
 // test s3
