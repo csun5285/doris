@@ -945,6 +945,10 @@ public class StmtExecutor {
             context.getState().setError(ErrorCode.ERR_UNKNOWN_ERROR, e.getMessage());
             throw e;
         } catch (UserException e) {
+            // insert into select
+            if (e.getMessage().contains("E-230")) {
+                throw e;
+            }
             // analysis exception only print message, not print the stack
             LOG.warn("execute Exception. {}", context.getQueryIdentifier(), e);
             context.getState().setError(e.getMysqlErrorCode(), e.getMessage());
@@ -973,8 +977,6 @@ public class StmtExecutor {
                         Env.getCurrentGlobalTransactionMgr().abortTransaction(
                                 insertStmt.getDbObj().getId(), insertStmt.getTransactionId(),
                                 (errMsg == null ? "unknown reason" : errMsg));
-                        // TODO(meiyi)
-                        // insertStmt.afterFinishTxn(false);
                     } catch (Exception abortTxnException) {
                         LOG.warn("errors when abort txn. {}", context.getQueryIdentifier(), abortTxnException);
                     }
@@ -2123,8 +2125,6 @@ public class StmtExecutor {
                 } else {
                     txnStatus = TransactionStatus.COMMITTED;
                 }
-                // TODO(meiyi)
-                // insertStmt.afterFinishTxn(true);
                 String clusterName = context.getCloudCluster();
                 if (context.getSessionVariable().enableMultiClusterSyncLoad()
                         && clusterName != null && !clusterName.isEmpty()) {
@@ -2174,12 +2174,20 @@ public class StmtExecutor {
                     Env.getCurrentGlobalTransactionMgr().abortTransaction(
                             insertStmt.getDbObj().getId(), insertStmt.getTransactionId(),
                             t.getMessage() == null ? "unknown reason" : t.getMessage());
-                    // TODO(meiyi)
-                    // insertStmt.afterFinishTxn(false);
                 } catch (Exception abortTxnException) {
                     // just print a log if abort txn failed. This failure do not need to pass to user.
                     // user only concern abort how txn failed.
                     LOG.warn("errors when abort txn", abortTxnException);
+                }
+
+                // insert into select
+                if (t.getMessage().contains("E-230")) {
+                    LOG.warn("insert into select meet E-230, retry again");
+                    resetAnalyzerAndStmt();
+                    if (insertStmt instanceof NativeInsertStmt) {
+                        ((NativeInsertStmt) insertStmt).resetPrepare();
+                    }
+                    throw t;
                 }
 
                 if (!Config.using_old_load_usage_pattern) {
