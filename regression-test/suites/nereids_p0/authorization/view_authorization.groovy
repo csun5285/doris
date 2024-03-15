@@ -46,6 +46,10 @@ suite("view_authorization") {
     sql "create user ${user1}"
     sql "grant SELECT_PRIV on ${db}.${view1} to '${user1}'@'%';"
     sql "grant SELECT_PRIV on ${db}.${view3} to '${user1}'@'%';"
+    //grant cluster to user
+    def res = sql_return_maparray "show clusters;"
+    logger.info("show clusters from ${res}")
+    sql """GRANT USAGE_PRIV ON CLUSTER "${res[0].cluster}" TO "${user1}"; """
 
     sql 'sync'
 
