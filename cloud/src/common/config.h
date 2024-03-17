@@ -81,6 +81,7 @@ CONF_String(test_s3_sk, "sk");
 CONF_String(test_s3_endpoint, "endpoint");
 CONF_String(test_s3_region, "region");
 CONF_String(test_s3_bucket, "bucket");
+CONF_Int32(brpc_max_dump_multi_dimension_metric_number, "2048");
 // CONF_Int64(a, "1073741824");
 // CONF_Bool(b, "true");
 

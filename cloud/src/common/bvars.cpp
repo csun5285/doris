@@ -163,8 +163,3 @@ BvarStatusWithTag<long> g_bvar_checker_check_cost_s("checker", "check_cost_secon
 BvarStatusWithTag<long> g_bvar_checker_enqueue_cost_s("checker", "enqueue_cost_seconds");
 BvarStatusWithTag<long> g_bvar_checker_last_success_time_ms("checker", "last_success_time_ms");
 BvarStatusWithTag<long> g_bvar_checker_instance_volume("checker", "instance_volume");
-
-// recycler's bvars unit is ms
-BvarLatencyRecorderWithTag g_bvar_recycler_list_objects("recycler", "list_objects");
-BvarLatencyRecorderWithTag g_bvar_recycler_delete_objects("recycler", "delete_objects");
-BvarLatencyRecorderWithTag g_bvar_recycler_delete_object("recycler", "delete_object");

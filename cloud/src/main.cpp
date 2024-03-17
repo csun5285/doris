@@ -141,6 +141,9 @@ namespace brpc {
 DECLARE_uint64(max_body_size);
 DECLARE_int64(socket_max_unwritten_bytes);
 } // namespace brpc
+namespace bvar {
+DECLARE_int32(bvar_max_dump_multi_dimension_metric_number);
+}
 
 int main(int argc, char** argv) {
     if (argc > 1) {
@@ -208,6 +211,8 @@ int main(int argc, char** argv) {
     brpc::Server server;
     brpc::FLAGS_max_body_size = config::brpc_max_body_size;
     brpc::FLAGS_socket_max_unwritten_bytes = config::brpc_socket_max_unwritten_bytes;
+    bvar::FLAGS_bvar_max_dump_multi_dimension_metric_number =
+            config::brpc_max_dump_multi_dimension_metric_number;
 
     std::shared_ptr<TxnKv> txn_kv;
     if (config::use_mem_kv) {

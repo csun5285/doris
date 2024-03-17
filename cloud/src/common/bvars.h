@@ -217,8 +217,3 @@ extern BvarStatusWithTag<long> g_bvar_checker_check_cost_s;
 extern BvarStatusWithTag<long> g_bvar_checker_enqueue_cost_s;
 extern BvarStatusWithTag<long> g_bvar_checker_last_success_time_ms;
 extern BvarStatusWithTag<long> g_bvar_checker_instance_volume;
-
-//recycler
-extern BvarLatencyRecorderWithTag g_bvar_recycler_list_objects;
-extern BvarLatencyRecorderWithTag g_bvar_recycler_delete_objects;
-extern BvarLatencyRecorderWithTag g_bvar_recycler_delete_object;
