@@ -322,8 +322,9 @@ Status S3FileSystem::exists_impl(const Path& path, bool* res) const {
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
     SCOPED_BVAR_LATENCY(s3_bvar::s3_head_latency);
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            client->HeadObject(request), "s3_file_system::head_object", std::ref(request).get());
+    auto outcome =
+            SYNC_POINT_HOOK_RETURN_VALUE(DO_S3_GET_RATE_LIMIT(client->HeadObject(request)),
+                                         "s3_file_system::head_object", std::ref(request).get());
     if (outcome.IsSuccess()) {
         *res = true;
     } else if (outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
@@ -344,8 +345,9 @@ Status S3FileSystem::file_size_impl(const Path& file, int64_t* file_size) const 
     request.WithBucket(_s3_conf.bucket).WithKey(key);
 
     SCOPED_BVAR_LATENCY(s3_bvar::s3_head_latency);
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            client->HeadObject(request), "s3_file_system::head_object", std::ref(request).get());
+    auto outcome =
+            SYNC_POINT_HOOK_RETURN_VALUE(DO_S3_GET_RATE_LIMIT(client->HeadObject(request)),
+                                         "s3_file_system::head_object", std::ref(request).get());
     if (outcome.IsSuccess()) {
         *file_size = outcome.GetResult().GetContentLength();
     } else {
@@ -375,9 +377,9 @@ Status S3FileSystem::list_impl(const Path& dir, bool only_file, std::vector<File
         Aws::S3::Model::ListObjectsV2Outcome outcome;
         {
             SCOPED_BVAR_LATENCY(s3_bvar::s3_list_latency);
-            outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->ListObjectsV2(request),
-                                                   "s3_file_system::list_object",
-                                                   std::ref(request).get());
+            outcome = SYNC_POINT_HOOK_RETURN_VALUE(
+                    DO_S3_GET_RATE_LIMIT(client->ListObjectsV2(request)),
+                    "s3_file_system::list_object", std::ref(request).get());
         }
         if (!outcome.IsSuccess()) {
             return s3fs_error(outcome.GetError(),

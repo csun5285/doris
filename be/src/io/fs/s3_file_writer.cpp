@@ -157,7 +157,7 @@ Status S3FileWriter::_open() {
 
     SCOPED_BVAR_LATENCY(s3_bvar::s3_multi_part_upload_latency);
     auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            _client->CreateMultipartUploadCallable(create_request).get(),
+            DO_S3_PUT_RATE_LIMIT(_client->CreateMultipartUpload(create_request)),
             "s3_file_writer::create_multi_part_upload", std::cref(create_request).get());
     SYNC_POINT_CALLBACK("s3_file_writer::_open", &outcome);
 
@@ -195,7 +195,7 @@ Status S3FileWriter::_abort() {
     request.WithBucket(_bucket).WithKey(_key).WithUploadId(_upload_id);
     SCOPED_BVAR_LATENCY(s3_bvar::s3_multi_part_upload_latency);
     auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            _client->AbortMultipartUploadCallable(request).get(),
+            DO_S3_PUT_RATE_LIMIT(_client->AbortMultipartUpload(request)),
             "s3_file_writer::abort_multi_part", std::cref(request).get());
     if (outcome.IsSuccess() ||
         outcome.GetError().GetErrorType() == Aws::S3::S3Errors::NO_SUCH_UPLOAD ||
@@ -339,8 +339,8 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     {
         SCOPED_BVAR_LATENCY(s3_bvar::s3_multi_part_upload_latency);
         upload_part_outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-                _client->UploadPartCallable(upload_request).get(), "s3_file_writer::upload_part",
-                std::cref(upload_request).get(), &buf);
+                DO_S3_PUT_RATE_LIMIT(_client->UploadPart(upload_request)),
+                "s3_file_writer::upload_part", std::cref(upload_request).get(), &buf);
     }
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
@@ -408,7 +408,7 @@ Status S3FileWriter::_complete() {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("S3FileWriter::_complete:3", Status(), this);
     SCOPED_BVAR_LATENCY(s3_bvar::s3_multi_part_upload_latency);
     auto complete_outcome = SYNC_POINT_HOOK_RETURN_VALUE(
-            _client->CompleteMultipartUploadCallable(complete_request).get(),
+            DO_S3_PUT_RATE_LIMIT(_client->CompleteMultipartUpload(complete_request)),
             "s3_file_writer::complete_multi_part", std::cref(complete_request).get());
 
     if (!complete_outcome.IsSuccess()) {
@@ -457,7 +457,7 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     request.SetContentType("application/octet-stream");
     TEST_SYNC_POINT_RETURN_WITH_VOID("S3FileWriter::_put_object", this, &buf);
     SCOPED_BVAR_LATENCY(s3_bvar::s3_put_latency);
-    auto response = SYNC_POINT_HOOK_RETURN_VALUE(_client->PutObjectCallable(request).get(),
+    auto response = SYNC_POINT_HOOK_RETURN_VALUE(DO_S3_PUT_RATE_LIMIT(_client->PutObject(request)),
                                                  "s3_file_writer::put_object",
                                                  std::cref(request).get(), &buf);
     if (!response.IsSuccess()) {

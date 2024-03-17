@@ -1306,6 +1306,14 @@ DECLARE_mInt32(report_query_statistics_interval_ms);
 DECLARE_mInt32(query_statistics_reserve_timeout_ms);
 
 DECLARE_mBool(check_segment_when_build_rowset_meta);
+DECLARE_mBool(enable_s3_rate_limiter);
+DECLARE_mInt64(s3_get_bucket_tokens);
+DECLARE_mInt64(s3_get_token_per_second);
+DECLARE_mInt64(s3_get_token_limit);
+
+DECLARE_mInt64(s3_put_bucket_tokens);
+DECLARE_mInt64(s3_put_token_per_second);
+DECLARE_mInt64(s3_put_token_limit);
 
 DECLARE_mInt64(max_ttl_cache_ratio);
 

@@ -1289,6 +1289,14 @@ DEFINE_mInt32(report_query_statistics_interval_ms, "3000");
 DEFINE_mInt32(query_statistics_reserve_timeout_ms, "30000");
 
 DEFINE_mBool(check_segment_when_build_rowset_meta, "false");
+DEFINE_mBool(enable_s3_rate_limiter, "false");
+DEFINE_mInt64(s3_get_bucket_tokens, "1000000000000000000");
+DEFINE_mInt64(s3_get_token_per_second, "1000000000000000000");
+DEFINE_mInt64(s3_get_token_limit, "0");
+
+DEFINE_mInt64(s3_put_bucket_tokens, "1000000000000000000");
+DEFINE_mInt64(s3_put_token_per_second, "1000000000000000000");
+DEFINE_mInt64(s3_put_token_limit, "0");
 
 DEFINE_mInt64(max_ttl_cache_ratio, "90");
 

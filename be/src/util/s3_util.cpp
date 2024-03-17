@@ -30,7 +30,9 @@
 #include <atomic>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <ostream>
+#include <shared_mutex>
 #include <utility>
 
 #include "common/config.h"
@@ -38,6 +40,7 @@
 #include "common/sync_point.h"
 #include "runtime/exec_env.h"
 #include "s3_uri.h"
+#include "util/s3_rate_limiter.h"
 #include "vec/exec/scan/scanner_scheduler.h"
 
 namespace doris {
@@ -53,6 +56,11 @@ bvar::LatencyRecorder s3_list_object_versions_latency("s3_list_object_versions")
 bvar::LatencyRecorder s3_get_bucket_version_latency("s3_get_bucket_version");
 bvar::LatencyRecorder s3_copy_object_latency("s3_copy_object");
 } // namespace s3_bvar
+
+S3RateLimiterHolder* S3ClientFactory::rate_limiter(S3RateLimitType type) {
+    CHECK(type == S3RateLimitType::GET || type == S3RateLimitType::PUT) << to_string(type);
+    return _rate_limiters[static_cast<size_t>(type)].get();
+}
 
 class DorisAWSLogger final : public Aws::Utils::Logging::LogSystemInterface {
 public:
@@ -112,6 +120,12 @@ S3ClientFactory::S3ClientFactory() {
     _aws_options.loggingOptions.logger_create_fn = [logLevel] {
         return std::make_shared<DorisAWSLogger>(logLevel);
     };
+    _rate_limiters = {std::make_unique<S3RateLimiterHolder>(
+                              S3RateLimitType::GET, config::s3_get_token_per_second,
+                              config::s3_get_bucket_tokens, config::s3_get_token_limit),
+                      std::make_unique<S3RateLimiterHolder>(
+                              S3RateLimitType::PUT, config::s3_put_token_per_second,
+                              config::s3_put_bucket_tokens, config::s3_put_token_limit)};
     Aws::InitAPI(_aws_options);
 }
 
