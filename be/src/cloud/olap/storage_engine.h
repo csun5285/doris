@@ -233,8 +233,8 @@ public:
         return _calc_tablet_delete_bitmap_task_thread_pool;
     }
 
-    std::shared_ptr<CumulativeCompactionPolicy> get_cumu_compaction_policy(
-            const std::string_view& compaction_policy) const;
+    static std::shared_ptr<CumulativeCompactionPolicy> get_cumulative_compaction_policy(
+            std::string_view compaction_policy);
 
 private:
     // Instance should be inited from `static open()`
@@ -422,8 +422,9 @@ private:
 
     std::shared_ptr<StreamLoadRecorder> _stream_load_recorder;
 
-    std::unordered_map<std::string_view, std::shared_ptr<CumulativeCompactionPolicy>>
-            _cumulative_compaction_policies;
+    using CumuPolices =
+            std::unordered_map<std::string_view, std::shared_ptr<CumulativeCompactionPolicy>>;
+    static CumuPolices _cumulative_compaction_policies;
 
     scoped_refptr<Thread> _cooldown_tasks_producer_thread;
 

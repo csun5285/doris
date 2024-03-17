@@ -380,7 +380,11 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     RETURN_NOT_OK_STATUS_WITH_WARN(_output_rs_writer->build(_output_rowset),
                                    fmt::format("rowset writer build failed. output_version: {}",
                                                _output_version.to_string()));
+
 #ifdef CLOUD_MODE
+    _tablet->get_cumulative_compaction_policy()->update_compaction_level(
+            _tablet.get(), _input_rowsets, _output_rowset);
+
     RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get()));
 #endif
 

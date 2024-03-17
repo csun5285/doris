@@ -110,6 +110,14 @@ DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(unused_rowsets_count, MetricUnit::ROWSETS);
 
 StorageEngine* StorageEngine::_s_instance = nullptr;
 
+StorageEngine::CumuPolices StorageEngine::_cumulative_compaction_policies = {
+        {CUMULATIVE_SIZE_BASED_POLICY,
+         CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                 CUMULATIVE_SIZE_BASED_POLICY)},
+        {CUMULATIVE_TIME_SERIES_POLICY,
+         CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                 CUMULATIVE_TIME_SERIES_POLICY)}};
+
 static Status _validate_options(const EngineOptions& options) {
     if (options.store_paths.empty()) {
         return Status::InternalError("store paths is empty");
@@ -149,13 +157,6 @@ StorageEngine::StorageEngine(const EngineOptions& options)
         // std::lock_guard<std::mutex> lock(_gc_mutex);
         return _unused_rowsets.size();
     });
-
-    _cumulative_compaction_policies[CUMULATIVE_SIZE_BASED_POLICY] =
-            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
-                    CUMULATIVE_SIZE_BASED_POLICY);
-    _cumulative_compaction_policies[CUMULATIVE_TIME_SERIES_POLICY] =
-            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
-                    CUMULATIVE_TIME_SERIES_POLICY);
 }
 
 StorageEngine::~StorageEngine() {
@@ -1045,9 +1046,9 @@ Status StorageEngine::get_compaction_status_json(std::string* result) {
     return Status::OK();
 }
 
-std::shared_ptr<CumulativeCompactionPolicy> StorageEngine::get_cumu_compaction_policy(
-        const std::string_view& compaction_policy) const {
-    if (!_cumulative_compaction_policies.count(compaction_policy)) {
+std::shared_ptr<CumulativeCompactionPolicy> StorageEngine::get_cumulative_compaction_policy(
+        std::string_view compaction_policy) {
+    if (!_cumulative_compaction_policies.contains(compaction_policy)) {
         return _cumulative_compaction_policies.at(CUMULATIVE_SIZE_BASED_POLICY);
     }
     return _cumulative_compaction_policies.at(compaction_policy);

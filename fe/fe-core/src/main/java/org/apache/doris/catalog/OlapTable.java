@@ -2080,7 +2080,7 @@ public class OlapTable extends Table {
         if (tableProperty != null) {
             return tableProperty.timeSeriesCompactionGoalSizeMbytes();
         }
-        return null;
+        return PropertyAnalyzer.TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES_DEFAULT_VALUE;
     }
 
     public void setTimeSeriesCompactionFileCountThreshold(long timeSeriesCompactionFileCountThreshold) {
@@ -2094,7 +2094,7 @@ public class OlapTable extends Table {
         if (tableProperty != null) {
             return tableProperty.timeSeriesCompactionFileCountThreshold();
         }
-        return null;
+        return PropertyAnalyzer.TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD_DEFAULT_VALUE;
     }
 
     public void setTimeSeriesCompactionTimeThresholdSeconds(long timeSeriesCompactionTimeThresholdSeconds) {
@@ -2109,7 +2109,7 @@ public class OlapTable extends Table {
         if (tableProperty != null) {
             return tableProperty.timeSeriesCompactionTimeThresholdSeconds();
         }
-        return null;
+        return PropertyAnalyzer.TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS_DEFAULT_VALUE;
     }
 
     public Boolean isDynamicSchema() {
@@ -2137,7 +2137,7 @@ public class OlapTable extends Table {
         if (tableProperty != null) {
             return tableProperty.timeSeriesCompactionEmptyRowsetsThreshold();
         }
-        return null;
+        return PropertyAnalyzer.TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD_DEFAULT_VALUE;
     }
 
     public void setTimeSeriesCompactionLevelThreshold(long timeSeriesCompactionLevelThreshold) {
@@ -2151,7 +2151,7 @@ public class OlapTable extends Table {
         if (tableProperty != null) {
             return tableProperty.timeSeriesCompactionLevelThreshold();
         }
-        return null;
+        return PropertyAnalyzer.TIME_SERIES_COMPACTION_LEVEL_THRESHOLD_DEFAULT_VALUE;
     }
 
     public int getBaseSchemaVersion() {

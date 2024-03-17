@@ -298,7 +298,7 @@ Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
           _last_missed_version(-1),
           _last_missed_time_s(0) {
     _cumulative_compaction_policy =
-            StorageEngine::instance()->get_cumu_compaction_policy(cumulative_compaction_type);
+            StorageEngine::get_cumulative_compaction_policy(cumulative_compaction_type);
 
     // construct _timestamped_versioned_tracker from rs and stale rs meta
     _timestamped_version_tracker.construct_versioned_tracker(_tablet_meta->all_rs_metas(),
@@ -830,6 +830,47 @@ Status Tablet::cloud_sync_meta() {
             }
         }
     }
+
+    auto new_compaction_policy = tablet_meta->compaction_policy();
+    if (_tablet_meta->compaction_policy() != new_compaction_policy) {
+        _tablet_meta->set_compaction_policy(new_compaction_policy);
+    }
+    auto new_time_series_compaction_goal_size_mbytes =
+            tablet_meta->time_series_compaction_goal_size_mbytes();
+    if (_tablet_meta->time_series_compaction_goal_size_mbytes() !=
+        new_time_series_compaction_goal_size_mbytes) {
+        _tablet_meta->set_time_series_compaction_goal_size_mbytes(
+                new_time_series_compaction_goal_size_mbytes);
+    }
+    auto new_time_series_compaction_file_count_threshold =
+            tablet_meta->time_series_compaction_file_count_threshold();
+    if (_tablet_meta->time_series_compaction_file_count_threshold() !=
+        new_time_series_compaction_file_count_threshold) {
+        _tablet_meta->set_time_series_compaction_file_count_threshold(
+                new_time_series_compaction_file_count_threshold);
+    }
+    auto new_time_series_compaction_time_threshold_seconds =
+            tablet_meta->time_series_compaction_time_threshold_seconds();
+    if (_tablet_meta->time_series_compaction_time_threshold_seconds() !=
+        new_time_series_compaction_time_threshold_seconds) {
+        _tablet_meta->set_time_series_compaction_time_threshold_seconds(
+                new_time_series_compaction_time_threshold_seconds);
+    }
+    auto new_time_series_compaction_empty_rowsets_threshold =
+            tablet_meta->time_series_compaction_empty_rowsets_threshold();
+    if (_tablet_meta->time_series_compaction_empty_rowsets_threshold() !=
+        new_time_series_compaction_empty_rowsets_threshold) {
+        _tablet_meta->set_time_series_compaction_empty_rowsets_threshold(
+                new_time_series_compaction_empty_rowsets_threshold);
+    }
+    auto new_time_series_compaction_level_threshold =
+            tablet_meta->time_series_compaction_level_threshold();
+    if (_tablet_meta->time_series_compaction_level_threshold() !=
+        new_time_series_compaction_level_threshold) {
+        _tablet_meta->set_time_series_compaction_level_threshold(
+                new_time_series_compaction_level_threshold);
+    }
+
     return Status::OK();
 }
 
@@ -1907,7 +1948,7 @@ void Tablet::get_compaction_status(std::string* json_result) {
         _timestamped_version_tracker.get_stale_version_path_json_doc(path_arr);
     }
     rapidjson::Value cumulative_policy_type;
-    auto policy_type_str = get_cumulative_compaction_policy()->name();
+    auto policy_type_str = _cumulative_compaction_policy->name();
     cumulative_policy_type.SetString(policy_type_str.data(), policy_type_str.length(),
                                      root.GetAllocator());
     root.AddMember("cumulative policy type", cumulative_policy_type, root.GetAllocator());
@@ -4226,6 +4267,10 @@ void Tablet::reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, 
 }
 
 int64_t Tablet::get_cloud_base_compaction_score() {
+    if (_cumulative_compaction_policy->name() == CUMULATIVE_TIME_SERIES_POLICY) {
+        return 0;
+    }
+
     auto cp = _cumulative_point.load(std::memory_order_relaxed);
     [[maybe_unused]] int64_t data_size_score = 0;
     [[maybe_unused]] int64_t num_rowsets_score = 0;

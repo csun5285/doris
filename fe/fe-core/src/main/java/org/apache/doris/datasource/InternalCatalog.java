@@ -1683,7 +1683,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                     singlePartitionDesc.getTabletType(), olapTable.getCompressionType(),
                     olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                     olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema(),
-                    olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn());
+                    olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn(),
+                    olapTable.getCompactionPolicy(), olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                    olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                    olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                    olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                    olapTable.getTimeSeriesCompactionLevelThreshold());
                 commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
             }
 
@@ -2649,7 +2654,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getCopiedIndexes(), isInMemory, storageFormat, tabletType, compressionType,
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
                         isPersistent, isDynamicSchema, olapTable.getName(), olapTable.getTTLSeconds(),
-                        olapTable.storeRowColumn());
+                        olapTable.storeRowColumn(), olapTable.getCompactionPolicy(),
+                        olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                        olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                        olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                        olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                        olapTable.getTimeSeriesCompactionLevelThreshold());
                     commitCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList());
                 }
                 olapTable.addPartition(partition);
@@ -2725,7 +2735,13 @@ public class InternalCatalog implements CatalogIf<Database> {
                                 partitionInfo.getTabletType(entry.getValue()), compressionType,
                                 olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                                 storagePolicy, isPersistent, isDynamicSchema,  olapTable.getName(),
-                                olapTable.getTTLSeconds(), olapTable.storeRowColumn());
+                                olapTable.getTTLSeconds(), olapTable.storeRowColumn(),
+                                olapTable.getCompactionPolicy(),
+                                olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                                olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                                olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                                olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                                olapTable.getTimeSeriesCompactionLevelThreshold());
                         olapTable.addPartition(partition);
                         continue;
                     }
@@ -3188,7 +3204,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                             copiedTbl.getCompressionType(), copiedTbl.getDataSortInfo(),
                             copiedTbl.getEnableUniqueKeyMergeOnWrite(), olapTable.getStoragePolicy(),
                             copiedTbl.isPersistent(), olapTable.isDynamicSchema(), olapTable.getName(),
-                            olapTable.getTTLSeconds(), olapTable.storeRowColumn());
+                            olapTable.getTTLSeconds(), olapTable.storeRowColumn(), olapTable.getCompactionPolicy(),
+                            olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                            olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                            olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                            olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                            olapTable.getTimeSeriesCompactionLevelThreshold());
                     newPartitions.add(newPartition);
                     continue;
                 }
@@ -3603,7 +3624,13 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                                       boolean isDynamicSchema, String tableName,
                                                                       long ttlSeconds,
                                                                       boolean enableUniqueKeyMergeOnWrite,
-                                                                      boolean storeRowColumn, int schemaVersion)
+                                                                      boolean storeRowColumn, int schemaVersion,
+                                                                      String compactionPolicy,
+                                                                      Long timeSeriesCompactionGoalSizeMbytes,
+                                                                      Long timeSeriesCompactionFileCountThreshold,
+                                                                      Long timeSeriesCompactionTimeThresholdSeconds,
+                                                                      Long timeSeriesCompactionEmptyRowsetsThreshold,
+                                                                      Long timeSeriesCompactionLevelThreshold)
             throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
@@ -3633,6 +3660,13 @@ public class InternalCatalog implements CatalogIf<Database> {
 
         builder.setReplicaId(tablet.getReplicas().get(0).getId());
         builder.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
+
+        builder.setCompactionPolicy(compactionPolicy);
+        builder.setTimeSeriesCompactionGoalSizeMbytes(timeSeriesCompactionGoalSizeMbytes);
+        builder.setTimeSeriesCompactionFileCountThreshold(timeSeriesCompactionFileCountThreshold);
+        builder.setTimeSeriesCompactionTimeThresholdSeconds(timeSeriesCompactionTimeThresholdSeconds);
+        builder.setTimeSeriesCompactionEmptyRowsetsThreshold(timeSeriesCompactionEmptyRowsetsThreshold);
+        builder.setTimeSeriesCompactionLevelThreshold(timeSeriesCompactionLevelThreshold);
 
         OlapFile.TabletSchemaPB.Builder schemaBuilder = OlapFile.TabletSchemaPB.newBuilder();
         schemaBuilder.setSchemaVersion(schemaVersion);
@@ -3733,7 +3767,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                       DataSortInfo dataSortInfo, boolean enableUniqueKeyMergeOnWrite,
                                                       String storagePolicy, boolean isPersistent,
                                                       boolean isDynamicSchema, String tableName, long ttlSeconds,
-                                                      boolean storeRowColumn)
+                                                      boolean storeRowColumn, String compactionPolicy,
+                                                      Long timeSeriesCompactionGoalSizeMbytes,
+                                                      Long timeSeriesCompactionFileCountThreshold,
+                                                      Long timeSeriesCompactionTimeThresholdSeconds,
+                                                      Long timeSeriesCompactionEmptyRowsetsThreshold,
+                                                      Long timeSeriesCompactionLevelThreshold)
             throws DdlException {
         // create base index first.
         Preconditions.checkArgument(baseIndexId != -1);
@@ -3787,7 +3826,10 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
                         storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds,
-                        enableUniqueKeyMergeOnWrite, storeRowColumn, indexMeta.getSchemaVersion());
+                        enableUniqueKeyMergeOnWrite, storeRowColumn, indexMeta.getSchemaVersion(), compactionPolicy,
+                        timeSeriesCompactionGoalSizeMbytes, timeSeriesCompactionFileCountThreshold,
+                        timeSeriesCompactionTimeThresholdSeconds, timeSeriesCompactionEmptyRowsetsThreshold,
+                        timeSeriesCompactionLevelThreshold);
                 requestBuilder.addTabletMetas(builder);
             }
 
