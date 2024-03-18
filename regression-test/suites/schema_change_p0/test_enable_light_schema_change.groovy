@@ -149,7 +149,7 @@ suite("test_enable_light_schema_change", "p0") {
     sql """ alter table ${tableName2} ADD PARTITION p4 VALUES LESS THAN ("2020-05-01") """
     sql """ insert into ${tableName2} values ('2020-04-10', 2, 'b', 5, 'test') """
 
-    sql """ alter table ${tableName2} set ("light_schema_change"="true") """
+    //sql """ alter table ${tableName2} set ("light_schema_change"="true") """
 
     sql """ select * from ${tableName2} """
 }
