@@ -331,6 +331,10 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     auto skip = [now, compaction_type](Tablet* t) {
         if (compaction_type == CompactionType::BASE_COMPACTION) {
+            // too many delete, may result in performance penelty or too many versions for load
+            if (t->get_cloud_base_compaction_delete_score() > config::cloud_base_compaction_delete_threshold) {
+                return false;
+            }
             return now - t->last_base_compaction_success_time() < config::base_compaction_interval_seconds_since_last_operation * 1000;
         }
         // If tablet has too many rowsets but not be compacted for a long time, compaction should be performed

@@ -1315,6 +1315,8 @@ DECLARE_mInt64(s3_put_bucket_tokens);
 DECLARE_mInt64(s3_put_token_per_second);
 DECLARE_mInt64(s3_put_token_limit);
 
+DECLARE_mInt32(cloud_base_compaction_delete_threshold);
+
 DECLARE_mInt64(max_ttl_cache_ratio);
 
 #ifdef BE_TEST

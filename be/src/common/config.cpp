@@ -1298,6 +1298,8 @@ DEFINE_mInt64(s3_put_bucket_tokens, "1000000000000000000");
 DEFINE_mInt64(s3_put_token_per_second, "1000000000000000000");
 DEFINE_mInt64(s3_put_token_limit, "0");
 
+DEFINE_mInt32(cloud_base_compaction_delete_threshold, "200");
+
 DEFINE_mInt64(max_ttl_cache_ratio, "90");
 
 // clang-format off

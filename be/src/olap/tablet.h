@@ -240,6 +240,7 @@ public:
                                  int64_t data_size);
     int64_t get_cloud_base_compaction_score();
     int64_t get_cloud_cumu_compaction_score();
+    int64_t get_cloud_base_compaction_delete_score();
     ////////////////////////////////////////////////////////////////////////////
     // end CLOUD_MODE functions
     ////////////////////////////////////////////////////////////////////////////

@@ -4287,6 +4287,21 @@ int64_t Tablet::get_cloud_base_compaction_score() {
     return num_rowsets_score;
 }
 
+int64_t Tablet::get_cloud_base_compaction_delete_score() {
+    auto cp = _cumulative_point.load(std::memory_order_relaxed);
+    int64_t delete_score = 0;
+    std::shared_lock meta_rlock(_meta_lock); // This lock may be bottle neck
+    for (auto& [v, r] : _rs_version_map) {
+        if (v.second >= cp) {
+            continue;
+        }
+        if (v.first == v.second && r->rowset_meta()->has_delete_predicate()) {
+            ++delete_score;
+        }
+    }
+    return delete_score;
+}
+
 int64_t Tablet::get_cloud_cumu_compaction_score() {
     // TODO(plat1ko): Propose an algorithm that considers tablet's key type, number of delete rowsets,
     //  number of tablet versions simultaneously.
