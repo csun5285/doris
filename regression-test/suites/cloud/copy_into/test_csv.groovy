@@ -11,7 +11,7 @@ suite("test_csv") {
 
     def uploadFile = { remoteFilePath, localFilePath ->
         StringBuilder strBuilder = new StringBuilder()
-        strBuilder.append("""curl -u """ + context.config.feCloudHttpUser + ":" + context.config.feCloudHttpPassword)
+        strBuilder.append("""curl -v -u """ + context.config.feCloudHttpUser + ":" + context.config.feCloudHttpPassword)
         strBuilder.append(""" -H fileName:""" + remoteFilePath)
         strBuilder.append(""" -T """ + localFilePath)
         strBuilder.append(""" -L http://""" + context.config.feCloudHttpAddress + """/copy/upload""")
