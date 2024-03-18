@@ -1705,9 +1705,6 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                     olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
                     olapTable.getTimeSeriesCompactionLevelThreshold());
-                if (!isCreateTable) {
-                    commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
-                }
             }
 
             // check again
@@ -1803,6 +1800,14 @@ public class InternalCatalog implements CatalogIf<Database> {
                         isTempPartition, partitionInfo.getIsPersistent(partitionId),
                         partitionInfo.getIsMutable(partitionId));
                 }
+
+                List<Long> partitionIds = new ArrayList<Long>();
+                partitionIds.add(partitionId);
+                List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
+                if (!isCreateTable) {
+                    commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
+                }
+
                 Env.getCurrentEnv().getEditLog().logAddPartition(info);
 
                 LOG.info("succeed in creating partition[{}], temp: {}", partitionId, isTempPartition);
