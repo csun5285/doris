@@ -201,6 +201,10 @@ suite("test_mysql_jdbc_catalog", "p0,external,mysql,external_docker,external_doc
             }
 
             sql """GRANT LOAD_PRIV ON ${catalog_name}.${ex_db_name}.${test_insert} TO ${user}"""
+            //grant cluster to user
+            def res = sql_return_maparray "show clusters;"
+            logger.info("show clusters from ${res}")
+            sql """GRANT USAGE_PRIV ON CLUSTER "${res[0].cluster}" TO "${user}"; """
 
             connect(user=user, password="${pwd}", url=url) {
                 try {
