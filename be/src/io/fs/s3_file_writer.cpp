@@ -202,13 +202,13 @@ Status S3FileWriter::_abort() {
         outcome.GetError().GetResponseCode() == Aws::Http::HttpResponseCode::NOT_FOUND) {
         LOG(INFO) << "Abort multipart upload successfully"
                   << "bucket=" << _bucket << ", key=" << _path.native()
-                  << ", upload_id=" << _upload_id;
+                  << ", upload_id=" << _upload_id << ", whole_parts=" << _dump_completed_part();
         _aborted = true;
         return Status::OK();
     }
     return s3fs_error(outcome.GetError(),
-                      fmt::format("failed to abort multipart upload {} upload_id={}",
-                                  _path.native(), _upload_id));
+                      fmt::format("failed to abort multipart upload {} upload_id={} whole parts {}",
+                                  _path.native(), _upload_id, _dump_completed_part()));
 }
 
 Status S3FileWriter::close() {
@@ -382,8 +382,9 @@ Status S3FileWriter::_complete() {
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_complete:1",
                              std::make_pair(&_failed, &_completed_parts));
     if (_failed || _completed_parts.size() != _cur_part_num) {
-        _st = Status::InternalError("error status {}, complete parts {}, cur part num {}", _st,
-                                    _completed_parts.size(), _cur_part_num);
+        _st = Status::InternalError(
+                "error status {}, complete parts {}, cur part num {}, whole parts {}", _st,
+                _completed_parts.size(), _cur_part_num, _dump_completed_part());
         LOG(WARNING) << _st;
         return _st;
     }
@@ -395,8 +396,11 @@ Status S3FileWriter::_complete() {
     for (size_t i = 0; i < _completed_parts.size(); i++) {
         if (_completed_parts[i]->GetPartNumber() != i + 1) [[unlikely]] {
             _st = Status::InternalError(
-                    "error status {}, part num not continous, expected num {}, actual num {}", _st,
-                    i + 1, _completed_parts[i]->GetPartNumber());
+                    "error status {}, part num not continous, expected num {}, actual num {}, "
+                    "upload_id {}, "
+                    "whole parts {}",
+                    _st, i + 1, _completed_parts[i]->GetPartNumber(), _upload_id,
+                    _dump_completed_part());
             LOG(WARNING) << _st;
             return _st;
         }
@@ -412,9 +416,10 @@ Status S3FileWriter::_complete() {
             "s3_file_writer::complete_multi_part", std::cref(complete_request).get());
 
     if (!complete_outcome.IsSuccess()) {
-        _st = s3fs_error(complete_outcome.GetError(),
-                         fmt::format("failed to complete multi part upload {}, upload_id={}",
-                                     _path.native(), _upload_id));
+        _st = s3fs_error(
+                complete_outcome.GetError(),
+                fmt::format("failed to complete multi part upload {}, upload_id={}, whole parts {}",
+                            _path.native(), _upload_id, _dump_completed_part()));
         LOG(WARNING) << _st;
         return _st;
     }
@@ -470,6 +475,14 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
     _bytes_written += buf.get_size();
     s3_bytes_uploaded_total << buf.get_size();
     s3_file_created_total << 1;
+}
+
+std::string S3FileWriter::_dump_completed_part() const {
+    std::string view;
+    for (const auto& part : _completed_parts) {
+        view.append(fmt::format("part {}, ", view, part->GetPartNumber()));
+    }
+    return view;
 }
 
 } // namespace io

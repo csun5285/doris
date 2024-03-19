@@ -72,6 +72,7 @@ private:
     Status _open();
     Status _close();
     Status _abort();
+    [[nodiscard]] std::string _dump_completed_part() const;
 
     [[nodiscard]] int64_t upload_cost_ms() const { return *_upload_cost_ms; }
 
