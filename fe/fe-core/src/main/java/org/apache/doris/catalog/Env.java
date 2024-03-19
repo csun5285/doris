@@ -1643,11 +1643,11 @@ public class Env {
             // Tablet checker and scheduler
             tabletChecker.start();
             tabletScheduler.start();
+            // Colocate tables checker and balancer
+            ColocateTableCheckerAndBalancer.getInstance().start();
         } else {
             cloudTabletRebalancer.start();
         }
-        // Colocate tables checker and balancer
-        ColocateTableCheckerAndBalancer.getInstance().start();
         // Publish Version Daemon
         if (Config.isNotCloudMode()) {
             publishVersionDaemon.start();
