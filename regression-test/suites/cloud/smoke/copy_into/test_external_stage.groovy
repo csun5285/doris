@@ -14,7 +14,8 @@ suite("smoke_test_external_stage", "smoke") {
             C_PHONE       CHAR(15) NOT NULL,
             C_ACCTBAL     DECIMAL(15,2)   NOT NULL,
             C_MKTSEGMENT  CHAR(10) NOT NULL,
-            C_COMMENT     VARCHAR(117) NOT NULL
+            C_COMMENT     VARCHAR(117) NOT NULL,
+            tmp           CHAR(10) NOT NULL
             )
             UNIQUE KEY(C_CUSTKEY)
             DISTRIBUTED BY HASH(C_CUSTKEY) BUCKETS 1

@@ -92,8 +92,8 @@ suite("load") {
     def tableList = [customer: 150000, lineitem: 6001215, nation: 25, orders: 1500000, part: 200000, partsupp: 800000, region: 5, supplier: 10000]
     def hdfsFs = getHdfsFs()
     def hdfsUser = getHdfsUser()
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
 
     def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
     tableList.each { table, rows ->

@@ -19,8 +19,8 @@ suite("test_warmup_show_stmt_3") {
         |PROPERTIES(
         |"exec_mem_limit" = "8589934592",
         |"load_parallelism" = "3")""".stripMargin()
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
 
     def load_customer_once =  { 
         def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()

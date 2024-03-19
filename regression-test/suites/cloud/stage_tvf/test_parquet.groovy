@@ -117,8 +117,8 @@ suite("test_parquet", "p0") {
                      ]
 
 
-     // set fe configuration
-     sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+     
+     
 
      def do_insert_into = {table, targetColumns, selectColumns, stageName, prefix, whereExpr ->
          try {

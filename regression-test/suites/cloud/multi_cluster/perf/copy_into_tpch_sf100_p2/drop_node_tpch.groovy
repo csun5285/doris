@@ -137,7 +137,7 @@ suite("drop_node_tpch") {
         );
     """
 
-    // set fe configuration
+    
     sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '1610612736000')"
 
     tables.each { table, rows ->

@@ -101,7 +101,8 @@ suite("test_external_stage") {
             `lo_supplycost` bigint(20) NOT NULL COMMENT "",
             `lo_tax` bigint(20) NOT NULL COMMENT "",
             `lo_commitdate` bigint(20) NOT NULL COMMENT "",
-            `lo_shipmode` varchar(11) NOT NULL COMMENT ""
+            `lo_shipmode` varchar(11) NOT NULL COMMENT "",
+            `tmp` varchar(11) NOT NULL COMMENT ""
             )
             PARTITION BY RANGE(`lo_orderdate`)
             (PARTITION p1992 VALUES [("-2147483648"), ("19930101")),
@@ -113,7 +114,7 @@ suite("test_external_stage") {
             PARTITION p1998 VALUES [("19980101"), ("19990101")))
             DISTRIBUTED BY HASH(`lo_orderkey`) BUCKETS 8;
         """
-        result = sql " copy into lineorder from ( select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17 from @${externalStageName}('ssb/sf1/lineorder.tbl.gz')) properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false', 'copy.force'='true', 'copy.load_parallelism'='2'); "
+        result = sql " copy into lineorder from @${externalStageName}('ssb/sf1/lineorder.tbl.gz') properties ('file.type' = 'csv', 'file.compression' = 'gz', 'copy.async' = 'false', 'copy.force'='true', 'copy.load_parallelism'='2'); "
         logger.info("copy result: " + result)
         assertTrue(result.size() == 1)
         assertTrue(result[0].size() == 8)

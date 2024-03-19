@@ -127,8 +127,8 @@ suite("decommission_load") {
         endTs - startTs
     }
 
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
 
     for (int tableCnt = 0; tableCnt < 1; ++tableCnt) {
         sql """ DROP TABLE IF EXISTS supplier_${tableCnt}; """
