@@ -38,6 +38,11 @@
 namespace doris {
 namespace io {
 
+std::ostream& operator<<(std::ostream& os, const FileBlock::State& value) {
+    os << FileBlock::state_to_string(value);
+    return os;
+}
+
 FileBlock::FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache* cache,
                      State download_state, FileCacheType cache_type, uint64_t expiration_time)
         : _segment_range(offset, offset + size - 1),
@@ -58,6 +63,7 @@ FileBlock::FileBlock(size_t offset, size_t size, const Key& key, BlockFileCache*
     /// or on reduceSizeToDownloaded() -- when file segment object is updated.
     case State::DOWNLOADED: {
         _downloaded_size = size;
+        _is_downloaded = true;
         break;
     }
     default: {

@@ -143,10 +143,11 @@ suite("test_show_data", "p0") {
         sql """ ALTER TABLE ${testTable} ADD INDEX idx_request (`request`) USING INVERTED PROPERTIES("parser" = "english") """
         wait_for_latest_op_on_table_finish(testTable, timeout)
 
-        // BUILD INDEX and expect state is RUNNING
-        sql """ BUILD INDEX idx_request ON ${testTable} """
-        def state = wait_for_last_build_index_on_table_finish(testTable, timeout)
-        assertEquals(state, "FINISHED")
+        // light BUILD INDEX is not suitable for cloud
+        // // BUILD INDEX and expect state is RUNNING
+        // sql """ BUILD INDEX idx_request ON ${testTable} """
+        // def state = wait_for_last_build_index_on_table_finish(testTable, timeout)
+        // assertEquals(state, "FINISHED")
         def with_index_size = wait_for_show_data_finish(testTable, 300000, no_index_size)
         assertTrue(with_index_size != "wait_timeout")
     } finally {

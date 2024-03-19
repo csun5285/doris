@@ -47,6 +47,7 @@ import org.apache.doris.mysql.MysqlCapability;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.mysql.MysqlSslContext;
+import org.apache.doris.mysql.ProxyMysqlChannel;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
@@ -60,6 +61,7 @@ import org.apache.doris.thrift.TUniqueId;
 import org.apache.doris.transaction.TransactionEntry;
 import org.apache.doris.transaction.TransactionStatus;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -71,6 +73,7 @@ import org.json.JSONObject;
 import org.xnio.StreamConnection;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -298,20 +301,22 @@ public class ConnectContext {
     }
 
     public ConnectContext(StreamConnection connection) {
+        this(connection, false);
         state = new QueryState();
         returnRows = 0;
+    }
+
+    public ConnectContext(StreamConnection connection, boolean isProxy) {
         serverCapability = MysqlCapability.DEFAULT_CAPABILITY;
         isKilled = false;
         if (connection != null) {
             mysqlChannel = new MysqlChannel(connection, this);
+        } else if (isProxy) {
+            mysqlChannel = new ProxyMysqlChannel();
         } else {
             mysqlChannel = new DummyMysqlChannel();
         }
-        sessionVariable = VariableMgr.newSessionVariable();
-        command = MysqlCommand.COM_SLEEP;
-        if (Config.use_fuzzy_session_variable) {
-            sessionVariable.initFuzzyModeVariables();
-        }
+        init();
     }
 
     public boolean isTxnModel() {
@@ -843,7 +848,7 @@ public class ConnectContext {
     public class ThreadInfo {
         public boolean isFull;
 
-        public List<String> toRow(int connId, long nowMs) {
+        public List<String> toRow(int connId, long nowMs, boolean showFe) {
             List<String> row = Lists.newArrayList();
             if (connId == connectionId) {
                 row.add("Yes");
@@ -874,6 +879,11 @@ public class ConnectContext {
             } else {
                 row.add("");
             }
+
+            if (showFe) {
+                row.add(Env.getCurrentEnv().getSelfNode().getHost());
+            }
+
             return row;
         }
     }
@@ -919,30 +929,63 @@ public class ConnectContext {
         return cloudCluster;
     }
 
-    public void setCloudCluster() {
+    public static class CloudClusterResult {
+        public enum Comment {
+            FOUND_BY_DEFAULT_CLUSTER,
+            DEFAULT_CLUSTER_SET_BUT_NOT_EXIST,
+            FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE,
+            FOUND_BY_FRIST_CLUSTER_HAS_AUTH,
+        }
+
+        public String clusterName;
+        public Comment comment;
+
+        public CloudClusterResult(final String name, Comment c) {
+            this.clusterName = name;
+            this.comment = c;
+        }
+
+        @Override
+        public String toString() {
+            return "CloudClusterResult{"
+                + "clusterName='" + clusterName + '\''
+                + ", comment=" + comment
+                + '}';
+        }
+    }
+
+    // can't get cluster from context, use the following strategy to obtain the cluster name
+    // 当用户有多个集群的权限时，会按照如下策略进行拉取：
+    // 如果当前mysql用户没有指定cluster(没有default 或者 use), 选择有权限的cluster。
+    // 如果有多个cluster满足权限条件,优先选活的，按字母序选
+    // 如果没有活的，则拉起一个，按字母序选
+    public CloudClusterResult getCloudClusterByPolicy() {
         List<String> cloudClusterNames = Env.getCurrentSystemInfo().getCloudClusterNames();
         // try set default cluster
         String defaultCloudCluster = Env.getCurrentEnv().getAuth().getDefaultCloudCluster(getQualifiedUser());
         if (!Strings.isNullOrEmpty(defaultCloudCluster)) {
             // check cluster validity
+            CloudClusterResult r;
             if (cloudClusterNames.contains(defaultCloudCluster)) {
                 // valid
-                setCloudCluster(defaultCloudCluster);
+                r = new CloudClusterResult(defaultCloudCluster,
+                        CloudClusterResult.Comment.FOUND_BY_DEFAULT_CLUSTER);
                 LOG.info("use default cluster {}", defaultCloudCluster);
-                return;
             } else {
                 // invalid
-                LOG.warn("default cluster {} current invalid, please change it", defaultCloudCluster);
-                getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
-                        "default cluster " + defaultCloudCluster + "current invalid, please change it");
-                return;
+                r = new CloudClusterResult(defaultCloudCluster,
+                        CloudClusterResult.Comment.DEFAULT_CLUSTER_SET_BUT_NOT_EXIST);
+                LOG.warn("default cluster {} current invalid, please change it", r);
             }
+            return r;
         }
 
+        List<String> hasAuthCluster = new ArrayList<>();
         // get all available cluster of the user
         for (String cloudClusterName : cloudClusterNames) {
             if (Env.getCurrentEnv().getAuth().checkCloudPriv(getCurrentUserIdentity(),
                     cloudClusterName, PrivPredicate.USAGE, ResourceTypeEnum.CLUSTER)) {
+                hasAuthCluster.add(cloudClusterName);
                 // find a cluster has more than one alive be
                 List<Backend> bes = Env.getCurrentSystemInfo().getBackendsByClusterName(cloudClusterName);
                 AtomicBoolean hasAliveBe = new AtomicBoolean(false);
@@ -952,19 +995,34 @@ public class ConnectContext {
                 });
                 if (hasAliveBe.get()) {
                     // set a cluster to context cloudCluster
-                    setCloudCluster(cloudClusterName);
-                    LOG.debug("set context cluster name {}", cloudClusterName);
-                    break;
+                    CloudClusterResult r = new CloudClusterResult(cloudClusterName,
+                            CloudClusterResult.Comment.FOUND_BY_FIRST_CLUSTER_WITH_ALIVE_BE);
+                    LOG.debug("set context {}", r);
+                    return r;
                 }
             }
         }
-        if (Strings.isNullOrEmpty(this.cloudCluster)) {
+        return hasAuthCluster.isEmpty() ? null
+            : new CloudClusterResult(hasAuthCluster.get(0), CloudClusterResult.Comment.FOUND_BY_FRIST_CLUSTER_HAS_AUTH);
+    }
+
+    public void setCloudCluster() {
+        CloudClusterResult cloudClusterTypeAndName = getCloudClusterByPolicy();
+        if (cloudClusterTypeAndName == null) {
             LOG.warn("cant get a valid cluster for user {} to use", getCurrentUserIdentity());
             getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
                     "Cant get a Valid cluster for you to use, plz connect admin");
             return;
         }
-        LOG.info("finally set context cluster name {}", cloudCluster);
+        if (cloudClusterTypeAndName.comment ==  CloudClusterResult.Comment.DEFAULT_CLUSTER_SET_BUT_NOT_EXIST) {
+            getState().setError(ErrorCode.ERR_NO_CLUSTER_ERROR,
+                    "default cluster " + cloudClusterTypeAndName.clusterName + "current invalid, please change it");
+        }
+
+        Preconditions.checkState(!Strings.isNullOrEmpty(cloudClusterTypeAndName.clusterName),
+                "get cluster name empty");
+        setCloudCluster(cloudClusterTypeAndName.clusterName);
+        LOG.info("finally set context cluster {}",  cloudClusterTypeAndName);
     }
 
     public StatsErrorEstimator getStatsErrorEstimator() {

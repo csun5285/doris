@@ -405,14 +405,13 @@ int64_t SizeBasedCumulativeCompactionPolicy::new_cumulative_point(
 }
 
 std::shared_ptr<CumulativeCompactionPolicy>
-CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy() {
-#ifndef CLOUD_MODE
-    if (config::compaction_policy == CUMULATIVE_TIME_SERIES_POLICY) {
+CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+        const std::string_view& compaction_policy) {
+    if (compaction_policy == CUMULATIVE_TIME_SERIES_POLICY) {
         return std::make_shared<TimeSeriesCumulativeCompactionPolicy>();
     } else if (compaction_policy == CUMULATIVE_SIZE_BASED_POLICY) {
         return std::make_shared<SizeBasedCumulativeCompactionPolicy>();
     }
-#endif
     return std::make_shared<SizeBasedCumulativeCompactionPolicy>();
 }
 

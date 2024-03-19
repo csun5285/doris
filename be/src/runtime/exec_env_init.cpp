@@ -66,6 +66,7 @@
 #include "runtime/result_buffer_mgr.h"
 #include "runtime/result_queue_mgr.h"
 #include "runtime/routine_load/routine_load_task_executor.h"
+#include "runtime/runtime_query_statistics_mgr.h"
 #include "runtime/small_file_mgr.h"
 #include "runtime/stream_load/new_load_stream_mgr.h"
 #include "runtime/stream_load/stream_load_executor.h"
@@ -183,6 +184,7 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
             .set_max_queue_size(config::fragment_pool_queue_size)
             .build(&_join_node_thread_pool);
 
+    _runtime_query_statistics_mgr = new RuntimeQueryStatiticsMgr();
     RETURN_IF_ERROR(init_pipeline_task_scheduler());
     _task_group_manager = new taskgroup::TaskGroupManager();
     _scanner_scheduler = new doris::vectorized::ScannerScheduler();
@@ -428,8 +430,6 @@ void ExecEnv::_destroy() {
     }
     _deregister_metrics();
     _wal_manager->stop();
-    SAFE_DELETE(_internal_client_cache);
-    SAFE_DELETE(_function_client_cache);
     SAFE_DELETE(_load_channel_mgr);
     SAFE_DELETE(_broker_mgr);
     SAFE_DELETE(_bfd_parser);
@@ -449,6 +449,8 @@ void ExecEnv::_destroy() {
     SAFE_DELETE(_scanner_scheduler);
     SAFE_DELETE(_group_commit_mgr);
     SAFE_DELETE(_file_meta_cache);
+    SAFE_DELETE(_function_client_cache);
+    SAFE_DELETE(_internal_client_cache);
     // Master Info is a thrift object, it could be the last one to deconstruct.
     // Master info should be deconstruct later than fragment manager, because fragment will
     // access master_info.backend id to access some info. If there is a running query and master
@@ -470,6 +472,7 @@ void ExecEnv::_destroy() {
     _brpc_iobuf_block_memory_tracker.reset();
     InvertedIndexSearcherCache::reset_global_instance();
 
+    SAFE_DELETE(_runtime_query_statistics_mgr);
     _is_init = false;
 }
 

@@ -117,7 +117,7 @@ Status PushHandler::cloud_process_streaming_ingestion(const TabletSharedPtr& tab
         return st;
     }
     rowset->rowset_meta()->set_delete_predicate(del_pred);
-    st = cloud::meta_mgr()->commit_rowset(rowset->rowset_meta().get(), true);
+    st = cloud::meta_mgr()->commit_rowset(rowset->rowset_meta().get());
     if (!st.ok() && !st.is<ALREADY_EXIST>()) {
         return st;
     }

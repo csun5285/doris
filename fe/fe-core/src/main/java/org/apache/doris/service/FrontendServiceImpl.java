@@ -181,6 +181,8 @@ import org.apache.doris.thrift.TRestoreSnapshotRequest;
 import org.apache.doris.thrift.TRestoreSnapshotResult;
 import org.apache.doris.thrift.TRollbackTxnRequest;
 import org.apache.doris.thrift.TRollbackTxnResult;
+import org.apache.doris.thrift.TShowProcessListRequest;
+import org.apache.doris.thrift.TShowProcessListResult;
 import org.apache.doris.thrift.TShowVariableRequest;
 import org.apache.doris.thrift.TShowVariableResult;
 import org.apache.doris.thrift.TSnapshotLoaderReportRequest;
@@ -1105,7 +1107,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
 
         // add this log so that we can track this stmt
         LOG.debug("receive forwarded stmt {} from FE: {}", params.getStmtId(), params.getClientNodeHost());
-        ConnectContext context = new ConnectContext();
+        ConnectContext context = new ConnectContext(null, true);
         // Set current connected FE to the client address, so that we can know where this request come from.
         context.setCurrentConnectedFEIp(params.getClientNodeHost());
         if (Config.isCloudMode() && !Strings.isNullOrEmpty(params.getCloudCluster())) {
@@ -1224,6 +1226,10 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             status.setStatusCode(TStatusCode.LABEL_ALREADY_EXISTS);
             status.addToErrorMsgs(e.getMessage());
             result.setJobStatus(e.getJobStatus());
+        } catch (MetaNotFoundException e) {
+            LOG.warn("failed to begin: {}", e.getMessage());
+            status.setStatusCode(TStatusCode.NOT_FOUND);
+            status.addToErrorMsgs(e.getMessage());
         } catch (UserException e) {
             LOG.warn("failed to begin: {}", e.getMessage());
             status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
@@ -1263,7 +1269,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             Pair<Database, Table> pair = env.getInternalCatalog()
                     .getDbAndTableByTableId(request.getTableId(), TableType.OLAP);
             if (pair == null) {
-                throw new UserException("unknown table_id=" + request.getTableId());
+                throw new MetaNotFoundException("unknown table_id=" + request.getTableId());
             }
             db = pair.first;
             table = (OlapTable) pair.second;
@@ -1275,7 +1281,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 if (Strings.isNullOrEmpty(request.getCluster())) {
                     dbName = request.getDb();
                 }
-                throw new UserException("unknown database, database=" + dbName);
+                throw new MetaNotFoundException("unknown database, database=" + dbName);
             }
 
             table = (OlapTable) db.getTableOrMetaException(request.tbl, TableType.OLAP);
@@ -1379,7 +1385,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             if (Strings.isNullOrEmpty(request.getCluster())) {
                 dbName = request.getDb();
             }
-            throw new UserException("unknown database, database=" + dbName);
+            throw new MetaNotFoundException("unknown database, database=" + dbName);
         }
 
         // step 4: fetch all tableIds
@@ -1453,8 +1459,11 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         // if it has multi table, use multi table and update multi table running transaction table ids
         if (CollectionUtils.isNotEmpty(request.getTbls())) {
             List<Long> multiTableIds = tables.stream().map(Table::getId).collect(Collectors.toList());
-            ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr()).getDatabaseTransactionMgr(db.getId())
-                    .updateMultiTableRunningTransactionTableIds(request.getTxnId(), multiTableIds);
+            if (!Config.isCloudMode()) {
+                ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr())
+                    .getDatabaseTransactionMgr(db.getId())
+                        .updateMultiTableRunningTransactionTableIds(request.getTxnId(), multiTableIds);
+            }
             LOG.debug("txn {} has multi table {}", request.getTxnId(), request.getTbls());
         }
         return tables;
@@ -1566,6 +1575,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         LOG.debug("txn {} has multi table {}", request.getTxnId(), transactionState.getTableIdList());
         if (transactionState == null) {
             throw new UserException("transaction [" + request.getTxnId() + "] not found");
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("txn {} has multi table {}", request.getTxnId(), transactionState.getTableIdList());
         }
         List<Long> tableIdList = transactionState.getTableIdList();
         String txnOperation = request.getOperation().trim();
@@ -1813,8 +1825,12 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
         try {
             loadTxnRollbackImpl(request);
+        } catch (MetaNotFoundException e) {
+            LOG.warn("failed to rollback txn, id: {}, label: {}", request.getTxnId(), request.getLabel(), e);
+            status.setStatusCode(TStatusCode.NOT_FOUND);
+            status.addToErrorMsgs(e.getMessage());
         } catch (UserException e) {
-            LOG.warn("failed to rollback txn {}: {}", request.getTxnId(), e.getMessage());
+            LOG.warn("failed to rollback txn, id: {}, label: {}", request.getTxnId(), request.getLabel(), e);
             status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
             status.addToErrorMsgs(e.getMessage());
         } catch (Throwable e) {
@@ -2039,6 +2055,43 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         TStatus status = new TStatus(TStatusCode.OK);
         result.setStatus(status);
         List<String> tableNames = request.getTableNames();
+
+        if (Config.isCloudMode()) {
+            try {
+                ConnectContext ctx = new ConnectContext();
+                ctx.setThreadLocalInfo();
+                ctx.setQualifiedUser(request.getUser());
+                ctx.setRemoteIP(request.getUserIp());
+                String fullUserName = ClusterNamespace
+                                        .getFullName(SystemInfoService.DEFAULT_CLUSTER, request.getUser());
+                if (fullUserName != null) {
+                    List<UserIdentity> currentUser = Lists.newArrayList();
+                    try {
+                        Env.getCurrentEnv().getAuth().checkPlainPassword(fullUserName,
+                                request.getUserIp(), request.getPasswd(), currentUser);
+                    } catch (AuthenticationException e) {
+                        throw new UserException(e.formatErrMsg());
+                    }
+                    Preconditions.checkState(currentUser.size() == 1);
+                    ctx.setCurrentUserIdentity(currentUser.get(0));
+                }
+                LOG.info("one stream multi table load use cloud cluster {}", request.getCloudCluster());
+                if (Strings.isNullOrEmpty(request.getCloudCluster())) {
+                    ctx.setCloudCluster();
+                } else {
+                    if (Strings.isNullOrEmpty(request.getUser())) {
+                        ctx.setCloudCluster(request.getCloudCluster());
+                    } else {
+                        Env.getCurrentEnv().changeCloudCluster(request.getCloudCluster(), ctx);
+                    }
+                }
+            } catch (UserException e) {
+                LOG.warn("failed to set ConnectContext info: {}", e.getMessage());
+                status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
+                status.addToErrorMsgs(e.getMessage());
+            }
+        }
+
         try {
             if (CollectionUtils.isEmpty(tableNames)) {
                 throw new MetaNotFoundException("table not found");
@@ -2082,7 +2135,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         }
         long timeoutMs = request.isSetThriftRpcTimeoutMs() ? request.getThriftRpcTimeoutMs() : 5000;
         List planFragmentParamsList = new ArrayList<>(tableNames.size());
-        List<Long> tableIds = olapTables.stream().map(OlapTable::getId).collect(Collectors.toList());
         // todo: if is multi table, we need consider the lock time and the timeout
         boolean enablePipelineLoad = Config.enable_pipeline_load;
         try {
@@ -2100,9 +2152,6 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 }
                 multiTableFragmentInstanceIdIndexMap.put(request.getTxnId(), ++index);
             }
-            ((GlobalTransactionMgr) Env.getCurrentGlobalTransactionMgr()).getDatabaseTransactionMgr(db.getId())
-                    .putTransactionTableNames(request.getTxnId(),
-                            tableIds);
             LOG.debug("receive stream load multi table put request result: {}", result);
         } catch (Throwable e) {
             LOG.warn("catch unknown result.", e);
@@ -3242,7 +3291,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         if (tableStats == null) {
             return new TStatus(TStatusCode.OK);
         }
-        analysisManager.invalidateLocalStats(target.tableId, target.columns, tableStats);
+        analysisManager.invalidateLocalStats(target.catalogId, target.dbId, target.tableId, target.columns, tableStats);
         return new TStatus(TStatusCode.OK);
     }
 
@@ -3390,6 +3439,59 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         public long updatedRowCount;
     }
 
+    public static void commitTxnResp(CommitTxnResponse commitTxnResponse) {
+        long dbId = commitTxnResponse.getTxnInfo().getDbId();
+        long txnId = commitTxnResponse.getTxnInfo().getTxnId();
+        // update rowCountfor AnalysisManager
+        for (TableStatsPB tableStats : commitTxnResponse.getTableStatsList()) {
+            LOG.info("Update RowCount for AnalysisManager. transactionId:{}, table_id:{}, updated_row_count:{}",
+                        txnId, tableStats.getTableId(), tableStats.getUpdatedRowCount());
+            Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
+                                                                        tableStats.getUpdatedRowCount());
+        }
+
+        // notify partition first load
+        int totalPartitionNum = commitTxnResponse.getPartitionIdsList().size();
+        // a map to record <tableId, [partitionIds]>
+        Map<Long, List<Long>> tablePartitionMap = Maps.newHashMap();
+        for (int idx = 0; idx < totalPartitionNum; ++idx) {
+            long version = commitTxnResponse.getVersions(idx);
+            long tableId = commitTxnResponse.getTableIds(idx);
+            tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
+            tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
+            // 1. inform AnalysisManager
+            if (version == 2) {
+                Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
+            }
+            // 2. update CloudPartition
+            Env env = Env.getCurrentEnv();
+            OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(dbId)
+                    .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
+                    .orElse(null);
+            if (olapTable == null) {
+                continue;
+            }
+            CloudPartition partition = (CloudPartition) olapTable.getPartition(
+                    commitTxnResponse.getPartitionIds(idx));
+            if (partition == null) {
+                continue;
+            }
+            partition.setCachedVisibleVersion(version);
+        }
+        // tablePartitionMap to string
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Long, List<Long>> entry : tablePartitionMap.entrySet()) {
+            sb.append(entry.getKey()).append(":[");
+            for (Long partitionId : entry.getValue()) {
+                sb.append(partitionId).append(",");
+            }
+            sb.append("];");
+        }
+        if (sb.length() > 0) {
+            LOG.info("notify partition first load. {}", sb);
+        }
+    }
+
     public TStatus reportCommitTxnResult(TReportCommitTxnResultRequest request) throws TException {
         String clientAddr = getClientAddrAsString();
         // FE only has one master, this should not be a problem
@@ -3408,55 +3510,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 return new TStatus(TStatusCode.INVALID_ARGUMENT);
             }
             CommitTxnResponse commitTxnResponse = CommitTxnResponse.parseFrom(receivedProtobufBytes);
-
-            // update rowCountfor AnalysisManager
-            for (TableStatsPB tableStats : commitTxnResponse.getTableStatsList()) {
-                LOG.info("Update RowCount for AnalysisManager. transactionId:{}, table_id:{}, updated_row_count:{}",
-                         request.getTxnId(), tableStats.getTableId(), tableStats.getUpdatedRowCount());
-                Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
-                                                                           tableStats.getUpdatedRowCount());
-            }
-
-            // notify partition first load
-            int totalPartitionNum = commitTxnResponse.getPartitionIdsList().size();
-            // a map to record <tableId, [partitionIds]>
-            Map<Long, List<Long>> tablePartitionMap = Maps.newHashMap();
-            for (int idx = 0; idx < totalPartitionNum; ++idx) {
-                long version = commitTxnResponse.getVersions(idx);
-                if (version == 2) {
-                    long tableId = commitTxnResponse.getTableIds(idx);
-                    tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
-                    tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
-                    // 1. inform AnalysisManager
-                    Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
-                    // 2. update CloudPartition
-                    Env env = Env.getCurrentEnv();
-                    OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(request.getDbId())
-                            .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
-                            .orElse(null);
-                    if (olapTable == null) {
-                        continue;
-                    }
-                    CloudPartition partition = (CloudPartition) olapTable.getPartition(
-                            commitTxnResponse.getPartitionIds(idx));
-                    if (partition == null) {
-                        continue;
-                    }
-                    partition.setCachedVisibleVersion(2);
-                }
-            }
-            // tablePartitionMap to string
-            StringBuilder sb = new StringBuilder();
-            for (Map.Entry<Long, List<Long>> entry : tablePartitionMap.entrySet()) {
-                sb.append(entry.getKey()).append(":[");
-                for (Long partitionId : entry.getValue()) {
-                    sb.append(partitionId).append(",");
-                }
-                sb.append("];");
-            }
-            if (sb.length() > 0) {
-                LOG.info("notify partition first load. {}", sb);
-            }
+            commitTxnResp(commitTxnResponse);
         } catch (InvalidProtocolBufferException e) {
             // Handle the exception, log it, or take appropriate action
             e.printStackTrace();
@@ -3581,4 +3635,18 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             throw e;
         }
     }
+
+    @Override
+    public TShowProcessListResult showProcessList(TShowProcessListRequest request) {
+        boolean isShowFullSql = false;
+        if (request.isSetShowFullSql()) {
+            isShowFullSql = request.isShowFullSql();
+        }
+        List<List<String>> processList = ExecuteEnv.getInstance().getScheduler()
+                .listConnectionWithoutAuth(isShowFullSql, true);
+        TShowProcessListResult result = new TShowProcessListResult();
+        result.setProcessList(processList);
+        return result;
+    }
+
 }

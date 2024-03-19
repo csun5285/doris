@@ -108,6 +108,8 @@ public class KafkaTaskInfo extends RoutineLoadTaskInfo {
         } else {
             tRoutineLoadTask.setFormat(TFileFormatType.FORMAT_CSV_PLAIN);
         }
+        tRoutineLoadTask.setQualifiedUser(routineLoadJob.getQualifiedUser());
+        tRoutineLoadTask.setCloudCluster(routineLoadJob.getCloudCluster());
         return tRoutineLoadTask;
     }
 
@@ -118,7 +120,7 @@ public class KafkaTaskInfo extends RoutineLoadTaskInfo {
     }
 
     @Override
-    boolean hasMoreDataToConsume() {
+    boolean hasMoreDataToConsume() throws UserException {
         KafkaRoutineLoadJob routineLoadJob = (KafkaRoutineLoadJob) routineLoadManager.getJob(jobId);
         return routineLoadJob.hasMoreDataToConsume(id, partitionIdToOffset);
     }

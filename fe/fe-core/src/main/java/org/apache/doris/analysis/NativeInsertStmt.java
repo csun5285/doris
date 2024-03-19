@@ -888,10 +888,11 @@ public class NativeInsertStmt extends InsertStmt {
                         && col.getName().equals(Column.SEQUENCE_COL)
                         && ((OlapTable) targetTable).getSequenceMapCol() != null) {
                     if (resultExprByName.stream().map(Pair::key)
-                            .anyMatch(key -> key.equals(((OlapTable) targetTable).getSequenceMapCol()))) {
+                            .anyMatch(key -> key.equalsIgnoreCase(((OlapTable) targetTable).getSequenceMapCol()))) {
                         resultExprByName.add(Pair.of(Column.SEQUENCE_COL,
                                 resultExprByName.stream()
-                                        .filter(p -> p.key().equals(((OlapTable) targetTable).getSequenceMapCol()))
+                                        .filter(p -> p.key()
+                                                .equalsIgnoreCase(((OlapTable) targetTable).getSequenceMapCol()))
                                         .map(Pair::value).findFirst().orElse(null)));
                     }
                     continue;
@@ -1039,7 +1040,7 @@ public class NativeInsertStmt extends InsertStmt {
         targetColumns.clear();
     }
 
-    protected void resetPrepare() {
+    public void resetPrepare() {
         label = null;
         isTransactionBegin = false;
     }

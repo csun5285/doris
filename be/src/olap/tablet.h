@@ -145,7 +145,6 @@ public:
     uint64_t segment_count() const;
     Version max_version() const;
     Version max_version_unlocked() const;
-    CumulativeCompactionPolicy* cumulative_compaction_policy();
     bool enable_unique_key_merge_on_write() const;
 
     // properties encapsulated in TabletSchema
@@ -234,12 +233,14 @@ public:
     int64_t fetch_add_approximate_data_size   (int64_t x) { return _approximate_data_size   .fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_cumu_num_rowsets (int64_t x) { return _approximate_cumu_num_rowsets.fetch_add(x, std::memory_order_relaxed); }
     int64_t fetch_add_approximate_cumu_num_deltas   (int64_t x) { return _approximate_cumu_num_deltas.fetch_add(x, std::memory_order_relaxed); }
+    int64_t fetch_add_approximate_cumu_data_size(int64_t x) { return _approximate_cumu_data_size.fetch_add(x, std::memory_order_relaxed); }
     // clang-format on
     // meta lock must be held when calling this function
     void reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, int64_t num_rows,
                                  int64_t data_size);
     int64_t get_cloud_base_compaction_score();
     int64_t get_cloud_cumu_compaction_score();
+    int64_t get_cloud_base_compaction_delete_score();
     ////////////////////////////////////////////////////////////////////////////
     // end CLOUD_MODE functions
     ////////////////////////////////////////////////////////////////////////////
@@ -276,7 +277,7 @@ public:
     std::mutex& get_base_compaction_lock() { return _base_compaction_lock; }
     std::mutex& get_cumulative_compaction_lock() { return _cumulative_compaction_lock; }
 
-    std::shared_mutex& get_migration_lock() { return _migration_lock; }
+    std::shared_timed_mutex& get_migration_lock() { return _migration_lock; }
 
     std::mutex& get_schema_change_lock() { return _schema_change_lock; }
 
@@ -547,8 +548,8 @@ public:
                               DeleteBitmapPtr delete_bitmap, int64_t version,
                               CalcDeleteBitmapToken* token, RowsetWriter* rowset_writer = nullptr);
 
-    std::vector<RowsetSharedPtr> get_rowset_by_ids(
-            const RowsetIdUnorderedSet* specified_rowset_ids);
+    std::vector<RowsetSharedPtr> get_rowset_by_ids(const RowsetIdUnorderedSet* specified_rowset_ids,
+                                                   bool include_stale = false);
 
     Status calc_segment_delete_bitmap(RowsetSharedPtr rowset,
                                       const segment_v2::SegmentSharedPtr& seg,
@@ -745,7 +746,7 @@ private:
     std::mutex _base_compaction_lock;
     std::mutex _cumulative_compaction_lock;
     std::mutex _schema_change_lock;
-    std::shared_mutex _migration_lock;
+    std::shared_timed_mutex _migration_lock;
     std::mutex _build_inverted_index_lock;
 
     // CLOUD_MODE
@@ -809,10 +810,10 @@ private:
     std::atomic<int64_t> _approximate_cumu_num_rowsets {-1};
     // Number of sorted arrays (e.g. for rowset with N segments, if rowset is overlapping, delta is N, otherwise 1) after cumu point
     std::atomic<int64_t> _approximate_cumu_num_deltas {-1};
+    std::atomic<int64_t> _approximate_cumu_data_size {-1};
 
     // cumulative compaction policy
     std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
-    std::string_view _cumulative_compaction_type;
 
     // use a seperate thread to check all tablets paths existance
     std::atomic<bool> _is_tablet_path_exists;
@@ -853,6 +854,8 @@ public:
     IntCounter* flush_finish_count;
     std::atomic<int64_t> publised_count = 0;
     std::atomic<int64_t> read_block_count = 0;
+    std::atomic<int64_t> write_count = 0;
+    std::atomic<int64_t> compaction_count = 0;
     // For auto compaction scheduling
     int64_t last_load_time_ms = 0;
 };

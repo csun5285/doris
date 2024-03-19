@@ -22,6 +22,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.common.ClientPool;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.telemetry.Telemetry;
 import org.apache.doris.thrift.FrontendService;
 import org.apache.doris.thrift.TMasterOpRequest;
@@ -40,7 +41,9 @@ import org.apache.thrift.TException;
 import org.apache.thrift.transport.TTransportException;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class MasterOpExecutor {
@@ -162,7 +165,7 @@ public class MasterOpExecutor {
 
     private TMasterOpRequest buildStmtForwardParams() {
         TMasterOpRequest params = new TMasterOpRequest();
-        //node ident
+        // node ident
         params.setClientNodeHost(Env.getCurrentEnv().getSelfNode().getHost());
         params.setClientNodePort(Env.getCurrentEnv().getSelfNode().getPort());
         params.setCluster(ctx.getClusterName());
@@ -202,7 +205,7 @@ public class MasterOpExecutor {
 
     private TMasterOpRequest buildSyncJournalParmas() {
         final TMasterOpRequest params = new TMasterOpRequest();
-        //node ident
+        // node ident
         params.setClientNodeHost(Env.getCurrentEnv().getSelfNode().getHost());
         params.setClientNodePort(Env.getCurrentEnv().getSelfNode().getPort());
         params.setSyncJournalOnly(true);
@@ -239,6 +242,23 @@ public class MasterOpExecutor {
         }
     }
 
+    public int getProxyStatusCode() {
+        if (result == null || !result.isSetStatusCode()) {
+            return ErrorCode.ERR_UNKNOWN_ERROR.getCode();
+        }
+        return result.getStatusCode();
+    }
+
+    public String getProxyErrMsg() {
+        if (result == null) {
+            return ErrorCode.ERR_UNKNOWN_ERROR.getErrorMsg();
+        }
+        if (!result.isSetErrMessage()) {
+            return "";
+        }
+        return result.getErrMessage();
+    }
+
     public ShowResultSet getProxyResultSet() {
         if (result == null) {
             return null;
@@ -248,6 +268,10 @@ public class MasterOpExecutor {
         } else {
             return null;
         }
+    }
+
+    public List<ByteBuffer> getQueryResultBufList() {
+        return result.isSetQueryResultBufList() ? result.getQueryResultBufList() : Collections.emptyList();
     }
 
     public void setResult(TMasterOpResult result) {

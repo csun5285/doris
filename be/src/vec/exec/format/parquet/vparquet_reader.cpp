@@ -167,7 +167,7 @@ void ParquetReader::close() {
 
 void ParquetReader::_close_internal() {
     if (!_closed) {
-        if (_profile != nullptr) {
+        if (_profile != nullptr && _file_reader != nullptr) {
             COUNTER_UPDATE(_parquet_profile.filtered_row_groups, _statistics.filtered_row_groups);
             COUNTER_UPDATE(_parquet_profile.to_read_row_groups, _statistics.read_row_groups);
             COUNTER_UPDATE(_parquet_profile.filtered_group_rows, _statistics.filtered_group_rows);

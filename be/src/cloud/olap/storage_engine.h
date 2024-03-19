@@ -26,6 +26,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -169,12 +170,9 @@ public:
     cloud::MetaMgr* meta_mgr() { return _meta_mgr.get(); }
     cloud::CloudTabletMgr* tablet_mgr() { return _tablet_mgr.get(); }
 
-    CumulativeCompactionPolicy* cumu_compaction_policy() const {
-        return _cumulative_compaction_policy.get();
-    }
-
     bool has_base_compaction(int64_t tablet_id) const;
     bool has_cumu_compaction(int64_t tablet_id) const;
+    bool has_full_compaction(int64_t tablet_id) const;
     void get_cumu_compaction(int64_t tablet_id,
                              std::vector<std::shared_ptr<CloudCumulativeCompaction>>& res);
 
@@ -234,6 +232,9 @@ public:
     std::unique_ptr<ThreadPool>& calc_tablet_delete_bitmap_task_thread_pool() {
         return _calc_tablet_delete_bitmap_task_thread_pool;
     }
+
+    static std::shared_ptr<CumulativeCompactionPolicy> get_cumulative_compaction_policy(
+            std::string_view compaction_policy);
 
 private:
     // Instance should be inited from `static open()`
@@ -421,7 +422,9 @@ private:
 
     std::shared_ptr<StreamLoadRecorder> _stream_load_recorder;
 
-    std::shared_ptr<CumulativeCompactionPolicy> _cumulative_compaction_policy;
+    using CumuPolices =
+            std::unordered_map<std::string_view, std::shared_ptr<CumulativeCompactionPolicy>>;
+    static CumuPolices _cumulative_compaction_policies;
 
     scoped_refptr<Thread> _cooldown_tasks_producer_thread;
 

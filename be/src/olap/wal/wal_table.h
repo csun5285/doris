@@ -49,7 +49,7 @@ private:
     Status _parse_wal_path(const std::string& wal, int64_t& wal_id, std::string& label);
     Status _try_abort_txn(int64_t db_id, std::string& label);
 
-    Status _replay_one_txn_with_stremaload(int64_t wal_id, const std::string& wal,
+    Status _replay_one_wal_with_streamload(int64_t wal_id, const std::string& wal,
                                            const std::string& label);
     Status _handle_stream_load(int64_t wal_id, const std::string& wal, const std::string& label);
 

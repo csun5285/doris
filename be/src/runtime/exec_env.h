@@ -60,6 +60,7 @@ class MemTracker;
 class StorageEngine;
 class ResultBufferMgr;
 class ResultQueueMgr;
+class RuntimeQueryStatiticsMgr;
 class TMasterInfo;
 class LoadChannelMgr;
 class StreamLoadExecutor;
@@ -118,6 +119,10 @@ public:
         return _pipeline_task_group_scheduler;
     }
     taskgroup::TaskGroupManager* task_group_manager() { return _task_group_manager; }
+
+    RuntimeQueryStatiticsMgr* runtime_query_statistics_mgr() {
+        return _runtime_query_statistics_mgr;
+    }
 
     // using template to simplify client cache management
     template <typename T>
@@ -305,6 +310,8 @@ private:
     std::shared_mutex _zone_cache_rw_lock;
     GroupCommitMgr* _group_commit_mgr = nullptr;
     std::shared_ptr<WalManager> _wal_manager;
+
+    RuntimeQueryStatiticsMgr* _runtime_query_statistics_mgr = nullptr;
 };
 
 template <>

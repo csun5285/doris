@@ -149,6 +149,8 @@ public:
     FileBlocksHolder get_or_set(const Key& key, size_t offset, size_t size,
                                 const CacheContext& context);
 
+    std::map<size_t, FileBlockSPtr> get_blocks_by_key(const Key& key);
+
     /// For debug.
     std::string dump_structure(const Key& key);
 
@@ -403,6 +405,7 @@ private:
 
     CachedFiles _files;
     size_t _cur_cache_size = 0;
+    size_t _cur_ttl_size = 0;
     std::multimap<uint64_t, Key> _time_to_key;
     std::unordered_map<Key, uint64_t, HashCachedFileKey> _key_to_time;
 
@@ -429,12 +432,27 @@ private:
     FileBlockCell* add_cell(const Key& key, const CacheContext& context, size_t offset, size_t size,
                             FileBlock::State state, std::lock_guard<doris::Mutex>& cache_lock);
 
-    void use_cell(const FileBlockCell& cell, FileBlocks& result, bool not_need_move,
+    void use_cell(const FileBlockCell& cell, FileBlocks* result, bool not_need_move,
                   std::lock_guard<doris::Mutex>& cache_lock);
 
     bool try_reserve_for_lru(const Key& key, QueryFileCacheContextPtr query_context,
                              const CacheContext& context, size_t offset, size_t size,
                              std::lock_guard<doris::Mutex>& cache_lock);
+
+    // other_cache_types: 除本次申请空间的类型的其他所有类型
+    // size: 需要的大小
+    // cur_time: 当前访问的绝对时间，单位s
+    // return: 淘汰成功与否
+    bool try_reserve_from_other_queue_by_hot_interval(std::vector<FileCacheType> other_cache_types,
+                                                      size_t size, int64_t cur_time,
+                                                      std::lock_guard<doris::Mutex>& cache_lock);
+
+    // other_cache_types: 除本次申请空间的类型的其他所有类型
+    // size: 需要的大小
+    // return: 淘汰成功与否
+    bool try_reserve_from_other_queue_by_size(std::vector<FileCacheType> other_cache_types,
+                                              size_t size,
+                                              std::lock_guard<doris::Mutex>& cache_lock);
 
     bool try_reserve_for_lazy_load(size_t size, std::lock_guard<doris::Mutex>& cache_lock);
 
@@ -476,6 +494,8 @@ private:
     Status initialize_unlocked(std::lock_guard<doris::Mutex>&);
 
     void recycle_deleted_blocks();
+
+    bool is_overflow(size_t removed_size, size_t need_size, size_t cur_cache_size);
 
     struct BatchLoadArgs {
         Key key;

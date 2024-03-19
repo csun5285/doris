@@ -217,6 +217,7 @@ import org.apache.doris.qe.JournalObservable;
 import org.apache.doris.qe.VariableMgr;
 import org.apache.doris.resource.Tag;
 import org.apache.doris.resource.workloadgroup.WorkloadGroupMgr;
+import org.apache.doris.resource.workloadschedpolicy.WorkloadRuntimeStatusMgr;
 import org.apache.doris.rpc.RpcException;
 import org.apache.doris.service.FrontendOptions;
 import org.apache.doris.statistics.AnalysisManager;
@@ -490,6 +491,8 @@ public class Env {
 
     private WorkloadGroupMgr workloadGroupMgr;
 
+    private WorkloadRuntimeStatusMgr workloadRuntimeStatusMgr;
+
     private QueryStats queryStats;
 
     private StatisticsCleaner statisticsCleaner;
@@ -736,6 +739,7 @@ public class Env {
         this.statisticsAutoCollector = new StatisticsAutoCollector();
         this.globalFunctionMgr = new GlobalFunctionMgr();
         this.workloadGroupMgr = new WorkloadGroupMgr();
+        this.workloadRuntimeStatusMgr = new WorkloadRuntimeStatusMgr();
         this.queryStats = new QueryStats();
         this.loadManagerAdapter = new LoadManagerAdapter();
         this.hiveTransactionMgr = new HiveTransactionMgr();
@@ -811,6 +815,10 @@ public class Env {
 
     public WorkloadGroupMgr getWorkloadGroupMgr() {
         return workloadGroupMgr;
+    }
+
+    public WorkloadRuntimeStatusMgr getWorkloadRuntimeStatusMgr() {
+        return workloadRuntimeStatusMgr;
     }
 
     // use this to get correct ClusterInfoService instance
@@ -982,6 +990,8 @@ public class Env {
         if (statisticsAutoCollector != null) {
             statisticsAutoCollector.start();
         }
+
+        workloadRuntimeStatusMgr.start();
     }
 
     // wait until FE is ready.
@@ -1532,6 +1542,9 @@ public class Env {
                 VariableMgr.setGlobalPipelineTask(newVal);
                 LOG.info("upgrade FE from 1.x to 2.0, set parallel_pipeline_task_num "
                         + "to parallel_fragment_exec_instance_num: {}", newVal);
+                // similar reason as above, need to upgrade enable_nereids_planner to true
+                VariableMgr.enableNereidsPlanner();
+                LOG.info("upgrade FE from 1.x to 2.x, set enable_nereids_planner to new default value: true");
             }
         }
 
@@ -1738,6 +1751,10 @@ public class Env {
         startNonMasterDaemonThreads();
 
         MetricRepo.init();
+
+        if (analysisManager != null) {
+            analysisManager.getStatisticsCache().preHeat();
+        }
 
         // stop mtmv scheduler
         mtmvJobManager.stop();
@@ -3058,8 +3075,10 @@ public class Env {
         getInternalCatalog().createTableAsSelect(stmt);
     }
 
-    public void addPartition(Database db, String tableName, AddPartitionClause addPartitionClause) throws DdlException {
-        getInternalCatalog().addPartition(db, tableName, addPartitionClause);
+    public void addPartition(Database db, String tableName,
+                             AddPartitionClause addPartitionClause,
+                             boolean isCreateTable, long generatedPartitionId) throws DdlException {
+        getInternalCatalog().addPartition(db, tableName, addPartitionClause, isCreateTable, generatedPartitionId);
     }
 
     public void addPartitionLike(Database db, String tableName, AddPartitionLikeClause addPartitionLikeClause)
@@ -3449,6 +3468,14 @@ public class Env {
                 sb.append(",\n\"").append(PropertyAnalyzer
                                     .PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD).append("\" = \"");
                 sb.append(olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold()).append("\"");
+            }
+
+            // time series compaction level threshold
+            if (olapTable.getCompactionPolicy() != null && olapTable.getCompactionPolicy()
+                                                            .equals(PropertyAnalyzer.TIME_SERIES_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer
+                                    .PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD).append("\" = \"");
+                sb.append(olapTable.getTimeSeriesCompactionLevelThreshold()).append("\"");
             }
 
             // disable auto compaction
@@ -3929,6 +3956,53 @@ public class Env {
                         .append(PropertyAnalyzer.PROPERTIES_ENABLE_DUPLICATE_WITHOUT_KEYS_BY_DEFAULT)
                         .append("\" = \"");
                 sb.append(olapTable.isDuplicateWithoutKey()).append("\"");
+            }
+
+            // compaction policy
+            if (olapTable.getCompactionPolicy() != null && !olapTable.getCompactionPolicy().equals("")
+                    && !olapTable.getCompactionPolicy().equals(PropertyAnalyzer.SIZE_BASED_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY).append("\" = \"");
+                sb.append(olapTable.getCompactionPolicy()).append("\"");
+            }
+
+            // time series compaction goal size
+            if (olapTable.getCompactionPolicy() != null && olapTable.getCompactionPolicy()
+                                                            .equals(PropertyAnalyzer.TIME_SERIES_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer
+                                    .PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES).append("\" = \"");
+                sb.append(olapTable.getTimeSeriesCompactionGoalSizeMbytes()).append("\"");
+            }
+
+            // time series compaction file count threshold
+            if (olapTable.getCompactionPolicy() != null && olapTable.getCompactionPolicy()
+                                                            .equals(PropertyAnalyzer.TIME_SERIES_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer
+                                    .PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD).append("\" = \"");
+                sb.append(olapTable.getTimeSeriesCompactionFileCountThreshold()).append("\"");
+            }
+
+            // time series compaction time threshold
+            if (olapTable.getCompactionPolicy() != null && olapTable.getCompactionPolicy()
+                                                            .equals(PropertyAnalyzer.TIME_SERIES_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer
+                                    .PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS).append("\" = \"");
+                sb.append(olapTable.getTimeSeriesCompactionTimeThresholdSeconds()).append("\"");
+            }
+
+            // time series compaction empty rowsets threshold
+            if (olapTable.getCompactionPolicy() != null && olapTable.getCompactionPolicy()
+                                                            .equals(PropertyAnalyzer.TIME_SERIES_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer
+                                    .PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD).append("\" = \"");
+                sb.append(olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold()).append("\"");
+            }
+
+            // time series compaction level threshold
+            if (olapTable.getCompactionPolicy() != null && olapTable.getCompactionPolicy()
+                                                            .equals(PropertyAnalyzer.TIME_SERIES_COMPACTION_POLICY)) {
+                sb.append(",\n\"").append(PropertyAnalyzer
+                                    .PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD).append("\" = \"");
+                sb.append(olapTable.getTimeSeriesCompactionLevelThreshold()).append("\"");
             }
 
             sb.append("\n)");
@@ -5335,7 +5409,8 @@ public class Env {
                 .buildTimeSeriesCompactionTimeThresholdSeconds()
                 .buildSkipWriteIndexOnLoad()
                 .buildEnableSingleReplicaCompaction()
-                .buildTimeSeriesCompactionEmptyRowsetsThreshold();
+                .buildTimeSeriesCompactionEmptyRowsetsThreshold()
+                .buildTimeSeriesCompactionLevelThreshold();
 
         // need to update partition info meta
         for (Partition partition : table.getPartitions()) {
@@ -5513,10 +5588,38 @@ public class Env {
         }
     }
 
-    public static void waitForAutoStart(final String clusterName) throws DdlException {
+    public static String getClusterNameAutoStart(final String clusterName) {
+        if (!Strings.isNullOrEmpty(clusterName)) {
+            return clusterName;
+        }
+
+        ConnectContext context = ConnectContext.get();
+        if (context == null) {
+            LOG.warn("auto start cant get context so new it");
+            context = new ConnectContext();
+        }
+        ConnectContext.CloudClusterResult cloudClusterTypeAndName = context.getCloudClusterByPolicy();
+        if (cloudClusterTypeAndName == null) {
+            LOG.warn("get cluster from ctx err");
+            return null;
+        }
+        if (cloudClusterTypeAndName.comment
+                == ConnectContext.CloudClusterResult.Comment.DEFAULT_CLUSTER_SET_BUT_NOT_EXIST) {
+            LOG.warn("get default cluster from ctx err");
+            return null;
+        }
+
+        Preconditions.checkState(!Strings.isNullOrEmpty(cloudClusterTypeAndName.clusterName),
+                "get cluster name empty");
+        LOG.info("get cluster to resume {}", cloudClusterTypeAndName);
+        return cloudClusterTypeAndName.clusterName;
+    }
+
+    public static void waitForAutoStart(String clusterName) throws DdlException {
         if (Config.isNotCloudMode()) {
             return;
         }
+        clusterName = getClusterNameAutoStart(clusterName);
         if (Strings.isNullOrEmpty(clusterName)) {
             LOG.warn("auto start in cloud mode, but clusterName empty {}", clusterName);
             return;
@@ -5564,8 +5667,8 @@ public class Env {
             ++retryTime;
             // sleep random millis [0.5, 1] s
             int randomSeconds =  500 + (int) (Math.random() * (1000 - 500));
-            LOG.info("change cluster retry times {}, wait randomMillis: {}, current status: {}",
-                    retryTime, randomSeconds, clusterStatus);
+            LOG.info("resume cluster {} retry times {}, wait randomMillis: {}, current status: {}",
+                    clusterName, retryTime, randomSeconds, clusterStatus);
             try {
                 if (retryTime > retryTimes / 2) {
                     // sleep random millis [1, 1.5] s
@@ -6156,6 +6259,7 @@ public class Env {
                     throw new MetaNotFoundException("replica does not exist on backend, beId=" + backendId);
                 }
                 if (status == ReplicaStatus.BAD || status == ReplicaStatus.OK) {
+                    replica.setUserDrop(false);
                     if (replica.setBad(status == ReplicaStatus.BAD)) {
                         if (!isReplay) {
                             SetReplicaStatusOperationLog log = new SetReplicaStatusOperationLog(backendId, tabletId,
@@ -6165,6 +6269,10 @@ public class Env {
                         LOG.info("set replica {} of tablet {} on backend {} as {}. is replay: {}", replica.getId(),
                                 tabletId, backendId, status, isReplay);
                     }
+                } else if (status == ReplicaStatus.DROP) {
+                    replica.setUserDrop(true);
+                    LOG.info("set replica {} of tablet {} on backend {} as {}.", replica.getId(),
+                            tabletId, backendId, status);
                 }
             } finally {
                 table.writeUnlock();

@@ -70,6 +70,9 @@ public class CreateResourceStmt extends DdlStmt {
     @Override
     public void analyze(Analyzer analyzer) throws UserException {
         super.analyze(analyzer);
+        if (Config.isCloudMode() && !Config.enable_create_resource) {
+            throw new AnalysisException("Unsupported operation, creating resource is not supported in cloud mode");
+        }
 
         // check auth
         if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)) {

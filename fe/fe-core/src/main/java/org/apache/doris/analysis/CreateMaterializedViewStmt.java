@@ -186,6 +186,9 @@ public class CreateMaterializedViewStmt extends DdlStmt {
         }
         SelectList selectList = selectStmt.getSelectList();
         for (SelectListItem selectListItem : selectList.getItems()) {
+            if (selectListItem.isStar()) {
+                throw new AnalysisException("The materialized view not support select star");
+            }
             checkExprValidInMv(selectListItem.getExpr());
         }
     }
@@ -200,6 +203,9 @@ public class CreateMaterializedViewStmt extends DdlStmt {
         rewriteToBitmapWithCheck();
         // TODO(ml): The mv name in from clause should pass the analyze without error.
         selectStmt.forbiddenMVRewrite();
+        if (isReplay) {
+            analyzer.setReplay();
+        }
         selectStmt.analyze(analyzer);
 
         ExprRewriter rewriter = analyzer.getExprRewriter();
@@ -207,6 +213,9 @@ public class CreateMaterializedViewStmt extends DdlStmt {
         selectStmt.rewriteExprs(rewriter);
         selectStmt.reset();
         analyzer = new Analyzer(analyzer.getEnv(), analyzer.getContext());
+        if (isReplay) {
+            analyzer.setReplay();
+        }
         selectStmt.analyze(analyzer);
 
         analyzeSelectClause(analyzer);
@@ -259,10 +268,6 @@ public class CreateMaterializedViewStmt extends DdlStmt {
          */
         for (int i = 0; i < selectList.getItems().size(); i++) {
             SelectListItem selectListItem = selectList.getItems().get(i);
-
-            if (selectListItem.isStar()) {
-                throw new AnalysisException("The materialized view not support select star");
-            }
 
             Expr selectListItemExpr = selectListItem.getExpr();
             if (!(selectListItemExpr instanceof SlotRef) && !(selectListItemExpr instanceof FunctionCallExpr)

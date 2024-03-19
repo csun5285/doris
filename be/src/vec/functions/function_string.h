@@ -26,6 +26,7 @@
 #include <array>
 #include <boost/iterator/iterator_facade.hpp>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <ostream>
 #include <tuple>
@@ -34,6 +35,7 @@
 
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
 #include "common/compiler_util.h" // IWYU pragma: keep
+#include "common/exception.h"
 #include "common/status.h"
 #include "gutil/strings/numbers.h"
 #include "gutil/strings/substitute.h"
@@ -282,7 +284,8 @@ private:
             int start_value = is_const ? start[0] : start[i];
             int len_value = is_const ? len[0] : len[i];
 
-            if (start_value > str_size || start_value < -str_size || str_size == 0) {
+            if (start_value > str_size || start_value < -str_size || str_size == 0 ||
+                len_value <= 0) {
                 StringOP::push_empty_string(i, res_chars, res_offsets);
                 continue;
             }
@@ -2353,10 +2356,15 @@ template <typename Impl>
 class FunctionMoneyFormat : public IFunction {
 public:
     static constexpr auto name = "money_format";
-    static FunctionPtr create() { return std::make_shared<FunctionMoneyFormat<Impl>>(); }
+    static FunctionPtr create() { return std::make_shared<FunctionMoneyFormat>(); }
     String get_name() const override { return name; }
 
     DataTypePtr get_return_type_impl(const DataTypes& arguments) const override {
+        if (arguments.size() != 1) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                   "Function {} requires exactly 1 argument", name);
+        }
+
         return std::make_shared<DataTypeString>();
     }
     DataTypes get_variadic_argument_types_impl() const override {
@@ -2429,9 +2437,11 @@ struct MoneyFormatDoubleImpl {
     static void execute(FunctionContext* context, ColumnString* result_column,
                         const ColumnPtr col_ptr, size_t input_rows_count) {
         const auto* data_column = assert_cast<const ColumnVector<Float64>*>(col_ptr.get());
+        // when scale is above 38, we will go here
         for (size_t i = 0; i < input_rows_count; i++) {
+            // truncate to 2 decimal places, keep same with mysql
             double value =
-                    MathFunctions::my_double_round(data_column->get_element(i), 2, false, false);
+                    MathFunctions::my_double_round(data_column->get_element(i), 2, false, true);
             StringRef str = MoneyFormat::do_money_format(context, fmt::format("{:.2f}", value));
             result_column->insert_data(str.data, str.size);
         }
@@ -2488,8 +2498,8 @@ struct MoneyFormatDecimalImpl {
         } else if (auto* decimal32_column =
                            check_and_get_column<ColumnDecimal<Decimal32>>(*col_ptr)) {
             const UInt32 scale = decimal32_column->get_scale();
-            const auto multiplier =
-                    scale > 2 ? common::exp10_i32(scale - 2) : common::exp10_i32(2 - scale);
+            // scale is up to 9, so exp10_i32 is enough
+            const auto multiplier = common::exp10_i32(std::abs(static_cast<int>(scale - 2)));
             for (size_t i = 0; i < input_rows_count; i++) {
                 Decimal32 frac_part = decimal32_column->get_fractional_part(i);
                 if (scale > 2) {
@@ -2507,8 +2517,8 @@ struct MoneyFormatDecimalImpl {
         } else if (auto* decimal64_column =
                            check_and_get_column<ColumnDecimal<Decimal64>>(*col_ptr)) {
             const UInt32 scale = decimal64_column->get_scale();
-            const auto multiplier =
-                    scale > 2 ? common::exp10_i32(scale - 2) : common::exp10_i32(2 - scale);
+            // 9 < scale <= 18
+            const auto multiplier = common::exp10_i64(std::abs(static_cast<int>(scale - 2)));
             for (size_t i = 0; i < input_rows_count; i++) {
                 Decimal64 frac_part = decimal64_column->get_fractional_part(i);
                 if (scale > 2) {
@@ -2526,8 +2536,8 @@ struct MoneyFormatDecimalImpl {
         } else if (auto* decimal128_column =
                            check_and_get_column<ColumnDecimal<Decimal128I>>(*col_ptr)) {
             const UInt32 scale = decimal128_column->get_scale();
-            const auto multiplier =
-                    scale > 2 ? common::exp10_i32(scale - 2) : common::exp10_i32(2 - scale);
+            // 18 < scale <= 38
+            const auto multiplier = common::exp10_i128(std::abs(static_cast<int>(scale - 2)));
             for (size_t i = 0; i < input_rows_count; i++) {
                 Decimal128I frac_part = decimal128_column->get_fractional_part(i);
                 if (scale > 2) {
@@ -2542,6 +2552,9 @@ struct MoneyFormatDecimalImpl {
 
                 result_column->insert_data(str.data, str.size);
             }
+        } else {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                   "Not supported input argument type {}", col_ptr->get_name());
         }
     }
 };
@@ -3026,7 +3039,7 @@ public:
 // +---------------------------------------------------------------------------------------------+
 // | char(0xe5, 0xa4, 0x9a, 0xe7, 0x9d, 0xbf, 0xe4, 0xb8, 0x9d, 68, 111, 114, 105, 115 using utf8) |
 // +---------------------------------------------------------------------------------------------+
-// | 多睿丝Doris                                                                                 |
+// | 多睿丝 Doris                                                                                 |
 // +---------------------------------------------------------------------------------------------+
 // mysql> select char(68, 111, 114, 0, 105, null, 115 using utf8);
 // +--------------------------------------------------+
@@ -3279,7 +3292,7 @@ private:
     void integer_to_char_(int line_num, const int* num, ColumnString::Chars& chars,
                           IColumn::Offsets& offsets) {
         if (0 == *num) {
-            chars.push_back(' ');
+            chars.push_back('\0');
             offsets[line_num] = offsets[line_num - 1] + 1;
             return;
         }
@@ -3293,7 +3306,7 @@ private:
         }
         offsets[line_num] = offsets[line_num - 1] + k + 1;
         for (; k >= 0; --k) {
-            chars.push_back(bytes[k] ? bytes[k] : ' ');
+            chars.push_back(bytes[k] ? bytes[k] : '\0');
         }
 #else
         int k = 0;
@@ -3304,7 +3317,7 @@ private:
         }
         offsets[line_num] = offsets[line_num - 1] + 4 - k;
         for (; k < 4; ++k) {
-            chars.push_back(bytes[k] ? bytes[k] : ' ');
+            chars.push_back(bytes[k] ? bytes[k] : '\0');
         }
 #endif
     }

@@ -131,6 +131,7 @@ import org.apache.commons.lang3.tuple.ImmutableTriple;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.thrift.TConfiguration;
 import org.apache.thrift.TException;
 import org.jetbrains.annotations.NotNull;
 
@@ -253,6 +254,8 @@ public class Coordinator implements CoordInterface {
 
     private boolean fasterFloatConvert = false;
 
+    private int maxMsgSizeOfResultReceiver = TConfiguration.DEFAULT_MAX_MESSAGE_SIZE;
+
     // Runtime filter merge instance address and ID
     public TNetworkAddress runtimeFilterMergeAddr;
     public TUniqueId runtimeFilterMergeInstanceId;
@@ -346,7 +349,7 @@ public class Coordinator implements CoordInterface {
         nextInstanceId.setLo(queryId.lo + 1);
         this.assignedRuntimeFilters = planner.getRuntimeFilters();
         this.executionProfile = new ExecutionProfile(queryId, fragments.size());
-
+        this.maxMsgSizeOfResultReceiver = context.getSessionVariable().getMaxMsgSizeOfResultReceiver();
     }
 
     // Used for broker load task/export task/update coordinator
@@ -641,7 +644,9 @@ public class Coordinator implements CoordInterface {
         if (topDataSink instanceof ResultSink || topDataSink instanceof ResultFileSink) {
             TNetworkAddress execBeAddr = topParams.instanceExecParams.get(0).host;
             receiver = new ResultReceiver(queryId, topParams.instanceExecParams.get(0).instanceId,
-                    addressToBackendID.get(execBeAddr), toBrpcHost(execBeAddr), this.timeoutDeadline);
+                    addressToBackendID.get(execBeAddr), toBrpcHost(execBeAddr), this.timeoutDeadline,
+                    this.maxMsgSizeOfResultReceiver);
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug("dispatch query job: {} to {}", DebugUtil.printId(queryId),
                         topParams.instanceExecParams.get(0).host);
@@ -1225,8 +1230,8 @@ public class Coordinator implements CoordInterface {
         Status status = new Status();
         resultBatch = receiver.getNext(status);
         if (!status.ok()) {
-            LOG.warn("get next fail, need cancel. query id: {}, msg: {}",
-                    DebugUtil.printId(queryId), status.getErrorMsg());
+            LOG.warn("Query {} coordinator get next fail, {}, need cancel.",
+                    DebugUtil.printId(queryId), status.toString());
         }
 
         updateStatus(status, null /* no instance id */);
@@ -1305,7 +1310,7 @@ public class Coordinator implements CoordInterface {
 
     private void cancelInternal(Types.PPlanFragmentCancelReason cancelReason) {
         if (null != receiver) {
-            receiver.cancel();
+            receiver.cancel(cancelReason.toString());
         }
         if (null != pointExec) {
             pointExec.cancel();
@@ -1827,9 +1832,9 @@ public class Coordinator implements CoordInterface {
                                 //the scan instance num should not larger than the tablets num
                                 expectedInstanceNum = Math.min(perNodeScanRanges.size(), parallelExecInstanceNum);
                             }
-                            // if have limit and conjunts, only need 1 instance to save cpu and
+                            // if have limit and no conjuncts, only need 1 instance to save cpu and
                             // mem resource
-                            if (node.isPresent() && node.get().haveLimitAndConjunts()) {
+                            if (node.isPresent() && node.get().shouldUseOneInstance()) {
                                 expectedInstanceNum = 1;
                             }
 
@@ -1840,9 +1845,9 @@ public class Coordinator implements CoordInterface {
                             int expectedInstanceNum = Math.min(parallelExecInstanceNum,
                                     leftMostNode.getNumInstances());
                             expectedInstanceNum = Math.max(expectedInstanceNum, 1);
-                            // if have limit and conjunts, only need 1 instance to save cpu and
+                            // if have limit and conjuncts, only need 1 instance to save cpu and
                             // mem resource
-                            if (node.isPresent() && node.get().haveLimitAndConjunts()) {
+                            if (node.isPresent() && node.get().shouldUseOneInstance()) {
                                 expectedInstanceNum = 1;
                             }
 

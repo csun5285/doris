@@ -118,6 +118,7 @@ BACKEND: 'BACKEND';
 BACKENDS: 'BACKENDS';
 BACKUP: 'BACKUP';
 BEGIN: 'BEGIN';
+BELONG: 'BELONG';
 BETWEEN: 'BETWEEN';
 BIGINT: 'BIGINT';
 BIN: 'BIN';
@@ -144,6 +145,7 @@ CATALOGS: 'CATALOGS';
 CHAIN: 'CHAIN';
 CHAR: 'CHAR' | 'CHARACTER';
 CHARSET: 'CHARSET';
+CHANGE: 'CHANGE';
 CHECK: 'CHECK';
 CLEAN: 'CLEAN';
 CLUSTER: 'CLUSTER';
@@ -164,6 +166,11 @@ CONSISTENT: 'CONSISTENT';
 CONVERT: 'CONVERT';
 COPY: 'COPY';
 COUNT: 'COUNT';
+COMPACTIONS: 'COMPACTIONS';
+COMPUTE: 'COMPUTE';
+CONCATENATE: 'CONCATENATE';
+CONSTRAINT: 'CONSTRAINT';
+COST: 'COST';
 CREATE: 'CREATE';
 CREATION: 'CREATION';
 CRON: 'CRON';
@@ -572,8 +579,8 @@ ATSIGN: '@';
 DOUBLEATSIGN: '@@';
 
 STRING_LITERAL
-    : '\'' ( ~('\''|'\\') | ('\\' .) )* '\''
-    | '"' ( ~('"'|'\\') | ('\\' .) )* '"'
+    : '\'' ('\\'. | '\'\'' | ~('\'' | '\\'))* '\''
+    | '"' ( '\\'. | '""' | ~('"'| '\\') )* '"'
     | 'R\'' (~'\'')* '\''
     | 'R"'(~'"')* '"'
     ;

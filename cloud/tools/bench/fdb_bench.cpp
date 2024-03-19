@@ -254,7 +254,6 @@ static void commit_rowset(selectdb::MetaServiceImpl* meta_service, uint64_t inst
     brpc::Controller cntl;
     selectdb::CreateRowsetRequest req;
     selectdb::CreateRowsetResponse res;
-    req.set_temporary(false);
     req.set_cloud_unique_id(cloud_unique_id(instance_id));
     req.mutable_rowset_meta()->CopyFrom(rowset);
     LOG_INFO("each rowset meta size is").tag("size", rowset.ByteSizeLong());

@@ -41,8 +41,8 @@ import org.apache.doris.nereids.rules.analysis.ProjectWithDistinctToAggregate;
 import org.apache.doris.nereids.rules.analysis.ReplaceExpressionByChildOutput;
 import org.apache.doris.nereids.rules.analysis.ResolveOrdinalInOrderByAndGroupBy;
 import org.apache.doris.nereids.rules.analysis.SubqueryToApply;
-import org.apache.doris.nereids.rules.analysis.UserAuthentication;
 import org.apache.doris.nereids.rules.rewrite.JoinCommute;
+import org.apache.doris.nereids.rules.rewrite.MergeProjects;
 
 import java.util.List;
 import java.util.Objects;
@@ -114,8 +114,7 @@ public class Analyzer extends AbstractBatchJobExecutor {
                 topDown(new AnalyzeCTE()),
                 bottomUp(
                         new BindRelation(customTableResolver),
-                        new CheckPolicy(),
-                        new UserAuthentication()
+                        new CheckPolicy()
                 )
         );
     }
@@ -127,8 +126,7 @@ public class Analyzer extends AbstractBatchJobExecutor {
             topDown(new EliminateLogicalSelectHint()),
             bottomUp(
                 new BindRelation(customTableResolver),
-                new CheckPolicy(),
-                new UserAuthentication()
+                new CheckPolicy()
             ),
             bottomUp(new BindExpression()),
             topDown(new BindSink()),
@@ -164,7 +162,8 @@ public class Analyzer extends AbstractBatchJobExecutor {
                     new CollectJoinConstraint()
             ),
             topDown(new LeadingJoin()),
-            bottomUp(new SubqueryToApply())
+            bottomUp(new SubqueryToApply()),
+            topDown(new MergeProjects())
         );
     }
 }

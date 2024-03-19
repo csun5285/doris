@@ -323,7 +323,6 @@ Status PipelineFragmentContext::prepare(const doris::TPipelineFragmentParams& re
 
     _root_pipeline = fragment_context->add_pipeline();
     _root_pipeline->set_is_root_pipeline();
-    _root_pipeline->set_collect_query_statistics_with_every_batch();
     RETURN_IF_ERROR(_build_pipelines(_root_plan, _root_pipeline));
     if (_sink) {
         RETURN_IF_ERROR(_create_sink(request.local_params[idx].sender_id,
@@ -671,6 +670,8 @@ Status PipelineFragmentContext::_build_operators_for_set_operation_node(ExecNode
             std::make_shared<SetSinkOperatorBuilder<is_intersect>>(node->id(), node);
     RETURN_IF_ERROR(build_pipeline->set_sink(sink_builder));
 
+    std::vector<PipelinePtr> all_pipelines;
+    all_pipelines.emplace_back(build_pipeline);
     for (int child_id = 1; child_id < node->children_count(); ++child_id) {
         auto probe_pipeline = add_pipeline();
         RETURN_IF_ERROR(_build_pipelines(node->child(child_id), probe_pipeline));
@@ -678,6 +679,9 @@ Status PipelineFragmentContext::_build_operators_for_set_operation_node(ExecNode
                 std::make_shared<SetProbeSinkOperatorBuilder<is_intersect>>(node->id(), child_id,
                                                                             node);
         RETURN_IF_ERROR(probe_pipeline->set_sink(probe_sink_builder));
+        //eg: These sinks must be completed one by one in order, child(1) must wait child(0) build finish
+        probe_pipeline->add_dependency(all_pipelines[child_id - 1]);
+        all_pipelines.emplace_back(probe_pipeline);
     }
 
     OperatorBuilderPtr source_builder =
@@ -803,7 +807,7 @@ Status PipelineFragmentContext::_create_sink(int sender_id, const TDataSink& thr
             _multi_cast_stream_sink_senders[i].reset(new vectorized::VDataStreamSender(
                     _runtime_state.get(), _runtime_state->obj_pool(), sender_id, row_desc,
                     thrift_sink.multi_cast_stream_sink.sinks[i],
-                    thrift_sink.multi_cast_stream_sink.destinations[i], 16 * 1024, false));
+                    thrift_sink.multi_cast_stream_sink.destinations[i], 16 * 1024));
 
             // 2. create and set the source operator of multi_cast_data_stream_source for new pipeline
             OperatorBuilderPtr source_op =
@@ -877,8 +881,7 @@ void PipelineFragmentContext::send_report(bool done) {
              _fragment_instance_id, _backend_num, _runtime_state.get(),
              std::bind(&PipelineFragmentContext::update_status, this, std::placeholders::_1),
              std::bind(&PipelineFragmentContext::cancel, this, std::placeholders::_1,
-                       std::placeholders::_2),
-             _dml_query_statistics()});
+                       std::placeholders::_2)});
 }
 
 } // namespace doris::pipeline

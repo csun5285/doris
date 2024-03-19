@@ -130,8 +130,8 @@ suite("add_node_query") {
         );
     """
 
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
 
     tables.each { table, rows ->
         // drop table

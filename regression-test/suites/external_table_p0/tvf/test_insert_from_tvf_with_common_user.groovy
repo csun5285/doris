@@ -78,6 +78,7 @@ suite("test_insert_from_tvf_with_common_user","p0,external,hive,tvf,external_doc
     order_qt_select_base """ SELECT * FROM ${export_table_name} ORDER BY id; """
     // outfile to s3
     def outfile_url = outfile_to_S3()
+    def startIndex = outfile_url.indexOf(bucket)
 
     // create table to load data
     create_table(load_table_name)
@@ -87,17 +88,20 @@ suite("test_insert_from_tvf_with_common_user","p0,external,hive,tvf,external_doc
     sql """drop user if exists ${common_user}"""
     sql """create user ${common_user} identified by '12345'"""
     sql """GRANT SELECT_PRIV,LOAD_PRIV,ALTER_PRIV,CREATE_PRIV,DROP_PRIV ON *.*.* TO '${common_user}'@'%';"""
+    def res = sql_return_maparray "show clusters;"
+    logger.info("show clusters from ${res}")
+    sql """GRANT USAGE_PRIV ON CLUSTER "${res[0].cluster}" TO "${common_user}"; """
 
     connect(user = "${common_user}", password = '12345', url = context.config.jdbcUrl) {
         sql """ use regression_test_external_table_p0_tvf """
 
         sql """ INSERT INTO ${load_table_name}
                 SELECT * FROM S3 (
-                    "uri" = "http://${s3_endpoint}${outfile_url.substring(4)}0.csv",
+                    "uri" = "http://${bucket}.${s3_endpoint}/${outfile_url.substring(startIndex + bucket.length() + 1)}0.csv",
                     "ACCESS_KEY"= "${ak}",
                     "SECRET_KEY" = "${sk}",
                     "format" = "csv",
-                    "column_separator" = "\t",
+                    "column_separator" = "\\t",
                     "region" = "${region}"
                 );
             """

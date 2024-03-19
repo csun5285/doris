@@ -236,8 +236,6 @@ DECLARE_mInt32(max_download_speed_kbps);
 DECLARE_mInt32(download_low_speed_limit_kbps);
 // download low speed time(seconds)
 DECLARE_mInt32(download_low_speed_time);
-// sleep time for one second
-DECLARE_Int32(sleep_one_second);
 
 // log dir
 DECLARE_String(sys_log_dir);
@@ -830,6 +828,9 @@ DECLARE_mInt32(segment_compression_threshold_kb);
 // The connection timeout when connecting to external table such as odbc table.
 DECLARE_mInt32(external_table_connect_timeout_sec);
 
+// Time to clean up useless JDBC connection pool cache
+DECLARE_mInt32(jdbc_connection_pool_cache_clear_time_sec);
+
 // Global bitmap cache capacity for aggregation cache, size in bytes
 DECLARE_Int64(delete_bitmap_agg_cache_capacity);
 
@@ -1129,6 +1130,7 @@ DECLARE_Bool(clear_file_cache);
 DECLARE_Bool(enable_file_cache_query_limit);
 DECLARE_mInt32(file_cache_wait_sec_after_fail); // zero for no waiting and retrying
 DECLARE_mInt64(file_cache_ttl_valid_check_interval_second);
+DECLARE_Bool(file_cache_enable_evict_from_other_queue_by_size);
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]
@@ -1195,6 +1197,8 @@ DECLARE_mBool(enable_check_segment_footer);
 
 DECLARE_mBool(enable_file_cache_as_load_buffer);
 
+DECLARE_mBool(enable_read_cache_file_directly);
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================
@@ -1239,6 +1243,7 @@ DECLARE_Int16(bitmap_serialize_version);
 DECLARE_String(group_commit_wal_path);
 DECLARE_Int32(group_commit_replay_wal_retry_num);
 DECLARE_Int32(group_commit_replay_wal_retry_interval_seconds);
+DECLARE_Int32(group_commit_replay_wal_retry_interval_max_seconds);
 DECLARE_mInt32(group_commit_relay_wal_threads);
 // This config can be set to limit thread number in group commit request fragment thread pool.
 DECLARE_mInt32(group_commit_insert_threads);
@@ -1272,6 +1277,7 @@ DECLARE_Bool(ignore_always_true_predicate_for_segment);
 
 // Dir of default timezone files
 DECLARE_String(default_tzfiles_path);
+DECLARE_Bool(use_doris_tzfile);
 
 // the max package bytes be thrift server can receive
 // avoid accepting error or too large package causing OOM,default 20000000(20M)
@@ -1295,6 +1301,23 @@ DECLARE_Int32(ignore_invalid_partition_id_rowset_num);
 DECLARE_mDouble(base_compaction_thread_num_factor);
 
 DECLARE_mDouble(cumu_compaction_thread_num_factor);
+
+DECLARE_mInt32(report_query_statistics_interval_ms);
+DECLARE_mInt32(query_statistics_reserve_timeout_ms);
+
+DECLARE_mBool(check_segment_when_build_rowset_meta);
+DECLARE_mBool(enable_s3_rate_limiter);
+DECLARE_mInt64(s3_get_bucket_tokens);
+DECLARE_mInt64(s3_get_token_per_second);
+DECLARE_mInt64(s3_get_token_limit);
+
+DECLARE_mInt64(s3_put_bucket_tokens);
+DECLARE_mInt64(s3_put_token_per_second);
+DECLARE_mInt64(s3_put_token_limit);
+
+DECLARE_mInt32(cloud_base_compaction_delete_threshold);
+
+DECLARE_mInt64(max_ttl_cache_ratio);
 
 #ifdef BE_TEST
 // test s3

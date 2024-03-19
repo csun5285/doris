@@ -26,16 +26,20 @@ import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.UserException;
 
 import com.google.common.base.Strings;
+import org.apache.commons.lang3.tuple.ImmutableTriple;
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class WarmUpClusterStmt extends StatementBase {
     private static final Logger LOG = LogManager.getLogger(WarmUpClusterStmt.class);
-    private TableName tableName;
-    private String partitionName;
-    private String dbName;
+    private List<Map<TableName, String>> tableList;
+    private List<Triple<String, String, String>> tables = new ArrayList<>();
     private String dstClusterName;
     private String srcClusterName;
     private boolean isWarmUpWithTable;
@@ -48,10 +52,9 @@ public class WarmUpClusterStmt extends StatementBase {
         this.isWarmUpWithTable = false;
     }
 
-    public WarmUpClusterStmt(String dstClusterName, TableName tableName, String partitionName, boolean isForce) {
+    public WarmUpClusterStmt(String dstClusterName, List<Map<TableName, String>> tableList, boolean isForce) {
         this.dstClusterName = dstClusterName;
-        this.tableName = tableName;
-        this.partitionName = partitionName;
+        this.tableList = tableList;
         this.isForce = isForce;
         this.isWarmUpWithTable = true;
     }
@@ -78,21 +81,30 @@ public class WarmUpClusterStmt extends StatementBase {
                                         + " is same with srcClusterName: " + srcClusterName);
         }
         if (isWarmUpWithTable) {
-            tableName.analyze(analyzer);
-            dbName = tableName.getDb();
-            if (Strings.isNullOrEmpty(dbName)) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR, dbName);
-            }
-            Database db = Env.getCurrentInternalCatalog().getDbNullable(dbName);
-            if (db == null) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR, dbName);
-            }
-            OlapTable table = (OlapTable) db.getTableNullable(tableName.getTbl());
-            if (table == null) {
-                ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_TABLE_ERROR, tableName.getTbl());
-            }
-            if (partitionName.length() != 0 && !table.containPartition(partitionName)) {
-                throw new AnalysisException("The partition " + partitionName + " doesn't exist");
+            for (Map<TableName, String> tableAndPartition : tableList) {
+                for (Map.Entry<TableName, String> entry : tableAndPartition.entrySet()) {
+                    TableName tableName = entry.getKey();
+                    String partitionName = entry.getValue();
+                    tableName.analyze(analyzer);
+                    String dbName = tableName.getDb();
+                    if (Strings.isNullOrEmpty(dbName)) {
+                        ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR, dbName);
+                    }
+                    Database db = Env.getCurrentInternalCatalog().getDbNullable(dbName);
+                    if (db == null) {
+                        ErrorReport.reportAnalysisException(ErrorCode.ERR_NO_DB_ERROR, dbName);
+                    }
+                    OlapTable table = (OlapTable) db.getTableNullable(tableName.getTbl());
+                    if (table == null) {
+                        ErrorReport.reportAnalysisException(ErrorCode.ERR_BAD_TABLE_ERROR, tableName.getTbl());
+                    }
+                    if (partitionName.length() != 0 && !table.containPartition(partitionName)) {
+                        throw new AnalysisException("The partition " + partitionName + " doesn't exist");
+                    }
+                    Triple<String, String, String> part =
+                            new ImmutableTriple<>(dbName, tableName.getTbl(), partitionName);
+                    tables.add(part);
+                }
             }
         }
     }
@@ -100,11 +112,24 @@ public class WarmUpClusterStmt extends StatementBase {
     @Override
     public String toSql() {
         StringBuilder sb = new StringBuilder();
-        sb.append("WARM UP CLUSTER ").append(dstClusterName).append(" WITH ")
-            .append(isWarmUpWithTable ? " TABLE " : " CLUSTER ")
-            .append(isWarmUpWithTable ? tableName : srcClusterName);
+        sb.append("WARM UP CLUSTER ").append(dstClusterName).append(" WITH ");
+        if (isWarmUpWithTable) {
+            int i = 0;
+            for (Map<TableName, String> tableAndPartition : tableList) {
+                for (Map.Entry<TableName, String> entry : tableAndPartition.entrySet()) {
+                    if (i++ != 0) {
+                        sb.append(" AND ");
+                    }
+                    sb.append(" Table ").append(entry.getKey().getTbl());
+                    if (entry.getValue().length() != 0) {
+                        sb.append(" Partition ").append(entry.getValue());
+                    }
+                }
+            }
+        } else {
+            sb.append(" CLUSTER ").append(srcClusterName);
+        }
         return sb.toString();
-
     }
 
     @Override
@@ -112,23 +137,8 @@ public class WarmUpClusterStmt extends StatementBase {
         return RedirectStatus.FORWARD_WITH_SYNC;
     }
 
-    // private TableName tableName;
-    // private String partitionName;
-    // private String dbName;
-    // private String dstClusterName;
-    // private String srcClusterName;
-    // private boolean isWarmUpWithTable;
-    // private boolean isForce;
-    public String getTableName() {
-        return tableName.getTbl();
-    }
-
-    public String getDbName() {
-        return dbName;
-    }
-
-    public String getPartitionName() {
-        return partitionName;
+    public List<Triple<String, String, String>> getTables() {
+        return tables;
     }
 
     public String getDstClusterName() {

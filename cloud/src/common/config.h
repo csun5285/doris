@@ -65,6 +65,7 @@ CONF_Strings(recycle_whitelist, ""); // Comma seprated list
 CONF_Strings(recycle_blacklist, ""); // Comma seprated list
 CONF_mInt32(instance_recycler_worker_pool_size, "1");
 CONF_Bool(enable_checker, "false");
+CONF_Int32(recycle_pool_parallelism, "10");
 // Currently only used for recycler test
 CONF_Bool(enable_inverted_check, "false");
 // interval for scanning instances to do checks and inspections
@@ -80,6 +81,7 @@ CONF_String(test_s3_sk, "sk");
 CONF_String(test_s3_endpoint, "endpoint");
 CONF_String(test_s3_region, "region");
 CONF_String(test_s3_bucket, "bucket");
+CONF_Int32(brpc_max_dump_multi_dimension_metric_number, "2048");
 // CONF_Int64(a, "1073741824");
 // CONF_Bool(b, "true");
 
@@ -148,7 +150,7 @@ CONF_String(kms_cmk, "");
 CONF_Bool(focus_add_kms_data_key, "false");
 
 // Whether to retry the retryable errors that returns by the underlying txn store.
-CONF_Bool(enable_txn_store_retry, "false");
+CONF_Bool(enable_txn_store_retry, "true");
 CONF_Int32(txn_store_retry_times, "20");
 
 // If enabled, some high-risk HTTP api for emergency fix can be used

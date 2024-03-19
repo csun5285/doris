@@ -75,7 +75,7 @@ visible_functions = {
     "map": [
         [['map'], 'MAP<K, V>', ['K', 'V', '...'], 'ALWAYS_NOT_NULLABLE', ['K', 'V']],
         [['element_at', '%element_extract%'], 'V', ['MAP<K, V>', 'K'], 'ALWAYS_NULLABLE', ['K', 'V']],
-        [['size', 'map_size'], 'BIGINT', ['MAP<K, V>'], '', ['K', 'V']],
+        [['size', 'map_size', 'cardinality'], 'BIGINT', ['MAP<K, V>'], '', ['K', 'V']],
         [['map_contains_key'], 'BOOLEAN', ['MAP<K, V>', 'K'], 'ALWAYS_NULLABLE', ['K', 'V']],
         [['map_contains_value'], 'BOOLEAN', ['MAP<K, V>', 'V'], 'ALWAYS_NULLABLE', ['K', 'V']],
         #[['map_contains_key_like'], 'BOOLEAN', ['MAP<K, V>', 'K'], '', ['K', 'V']],
@@ -965,6 +965,7 @@ visible_functions = {
 
         [['to_days'], 'INT', ['DATEV2'], ''],
         [['time_to_sec'], 'INT', ['TIME'], ''],
+        [['time_to_sec'], 'INT', ['TIMEV2'], ''],
         [['sec_to_time'], 'TIME', ['INT'], ''],
 
         [['year'], 'SMALLINT', ['DATETIMEV2'], ''],
@@ -1968,10 +1969,10 @@ visible_functions = {
 
     #ip functions
     "IP": [
-        [['ipv4numtostring','inet_ntoa'], 'VARCHAR', ['TINYINT'], 'ALWAYS_NULLABLE'],
-        [['ipv4numtostring','inet_ntoa'], 'VARCHAR', ['SMALLINT'], 'ALWAYS_NULLABLE'],
-        [['ipv4numtostring','inet_ntoa'], 'VARCHAR', ['INT'], 'ALWAYS_NULLABLE'],
-        [['ipv4numtostring','inet_ntoa'], 'VARCHAR', ['BIGINT'], 'ALWAYS_NULLABLE'],
+        [['ipv4_num_to_string','inet_ntoa'], 'VARCHAR', ['TINYINT'], 'ALWAYS_NULLABLE'],
+        [['ipv4_num_to_string','inet_ntoa'], 'VARCHAR', ['SMALLINT'], 'ALWAYS_NULLABLE'],
+        [['ipv4_num_to_string','inet_ntoa'], 'VARCHAR', ['INT'], 'ALWAYS_NULLABLE'],
+        [['ipv4_num_to_string','inet_ntoa'], 'VARCHAR', ['BIGINT'], 'ALWAYS_NULLABLE'],
     ],
 
     "NonNullalbe": [
@@ -2157,7 +2158,8 @@ null_result_with_one_null_param_functions = [
     'ST_GeometryFromText',
     'ST_LineFromText',
     'ST_Polygon',
-    'ST_Contains'
+    'ST_Contains',
+    'from_unixtime'
 ]
 
 invisible_functions = {

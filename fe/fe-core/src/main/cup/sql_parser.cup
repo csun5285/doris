@@ -271,6 +271,7 @@ terminal String
     KW_BACKENDS,
     KW_BACKUP,
     KW_BEGIN,
+    KW_BELONG,
     KW_BETWEEN,
     KW_BIGINT,
     KW_BIN,
@@ -941,6 +942,8 @@ nonterminal Boolean opt_tmp;
 
 nonterminal OutFileClause opt_outfile;
 nonterminal Map<String, String> opt_datasource_properties;
+nonterminal List<Map<TableName, String>> warm_up_list;
+nonterminal Map<TableName, String> warm_up_item;
 
 nonterminal Boolean opt_signed_unsigned;
 
@@ -1380,7 +1383,12 @@ alter_stmt ::=
     | KW_ALTER KW_TABLE table_name:tbl KW_MODIFY KW_COLUMN ident:columnName
       KW_SET KW_STATS LPAREN key_value_map:map RPAREN opt_partition_names:partitionNames
     {:
-        RESULT = new AlterColumnStatsStmt(tbl, columnName, map, partitionNames);
+        RESULT = new AlterColumnStatsStmt(tbl, null, columnName, map, partitionNames);
+    :}
+    | KW_ALTER KW_TABLE table_name:tbl KW_INDEX ident:idx KW_MODIFY KW_COLUMN ident:columnName
+      KW_SET KW_STATS LPAREN key_value_map:map RPAREN opt_partition_names:partitionNames
+    {:
+        RESULT = new AlterColumnStatsStmt(tbl, idx, columnName, map, partitionNames);
     :}
     | KW_ALTER KW_TABLE table_name:tbl KW_SET LPAREN key_value_map:properties RPAREN
     {:
@@ -1409,13 +1417,36 @@ warm_up_stmt ::=
     {:
         RESULT = new WarmUpClusterStmt(dstClusterName, srcClusterName, force);
     :}
-    | KW_WARM KW_UP KW_CLUSTER ident:dstClusterName KW_WITH KW_TABLE table_name:tbl opt_force:force
+    | KW_WARM KW_UP KW_CLUSTER ident:dstClusterName KW_WITH warm_up_list:list opt_force:force
     {:
-        RESULT = new WarmUpClusterStmt(dstClusterName, tbl, "", force);
+        RESULT = new WarmUpClusterStmt(dstClusterName, list, force);
     :}
-    | KW_WARM KW_UP KW_CLUSTER ident:dstClusterName KW_WITH KW_TABLE table_name:tbl KW_PARTITION ident:partitionName opt_force:force
+    ;
+
+warm_up_item ::=
+    KW_TABLE table_name:tbl
     {:
-        RESULT = new WarmUpClusterStmt(dstClusterName, tbl, partitionName, force);
+        Map<TableName, String> map = new HashMap<TableName, String>();
+        map.put(tbl, "");
+        RESULT = map;
+    :}
+    | KW_TABLE table_name:tbl KW_PARTITION ident:partitonName
+    {:
+        Map<TableName, String> map = new HashMap<TableName, String>();
+        map.put(tbl, partitonName);
+        RESULT = map;
+    :}
+    ;
+
+warm_up_list ::=
+    warm_up_item:map
+    {:
+        RESULT = Lists.newArrayList(map);
+    :}
+    | warm_up_list:list KW_AND warm_up_item:map
+    {:
+        list.add(map);
+        RESULT = list;
     :}
     ;
 
@@ -3622,7 +3653,7 @@ key_value_map ::=
 
 opt_properties ::=
     {:
-    RESULT = null;
+    RESULT = Maps.newHashMap();
     :}
     | properties:properties
     {:
@@ -3632,7 +3663,7 @@ opt_properties ::=
 
 opt_ext_properties ::=
     {:
-    RESULT = null;
+    RESULT = Maps.newHashMap();
     :}
     | KW_BROKER properties:properties
     {:
@@ -4147,6 +4178,10 @@ show_param ::=
     | KW_TABLET INTEGER_LITERAL:tabletId
     {:
         RESULT = new ShowTabletStmt(null, tabletId);
+    :}
+    | KW_TABLETS KW_BELONG integer_list:tabletIds
+    {:
+        RESULT = new ShowTabletsBelongStmt(tabletIds);
     :}
     | KW_TABLETS KW_FROM table_name:dbTblName opt_partition_names:partitionNames opt_wild_where order_by_clause:orderByClause limit_clause:limitClause
     {:
@@ -7964,6 +7999,8 @@ keyword ::=
     | KW_PERIOD:id
     {: RESULT = id; :}
     | KW_PERCENT:id
+    {: RESULT = id; :}
+    | KW_BELONG:id
     {: RESULT = id; :}
     ;
 

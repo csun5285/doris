@@ -294,10 +294,12 @@ Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
           _cumulative_point(K_INVALID_CUMULATIVE_POINT),
           _newly_created_rowset_num(0),
           _last_checkpoint_time(0),
-          _cumulative_compaction_type(cumulative_compaction_type),
           _is_tablet_path_exists(true),
           _last_missed_version(-1),
           _last_missed_time_s(0) {
+    _cumulative_compaction_policy =
+            StorageEngine::get_cumulative_compaction_policy(cumulative_compaction_type);
+
     // construct _timestamped_versioned_tracker from rs and stale rs meta
     _timestamped_version_tracker.construct_versioned_tracker(_tablet_meta->all_rs_metas(),
                                                              _tablet_meta->all_stale_rs_metas());
@@ -828,6 +830,47 @@ Status Tablet::cloud_sync_meta() {
             }
         }
     }
+
+    auto new_compaction_policy = tablet_meta->compaction_policy();
+    if (_tablet_meta->compaction_policy() != new_compaction_policy) {
+        _tablet_meta->set_compaction_policy(new_compaction_policy);
+    }
+    auto new_time_series_compaction_goal_size_mbytes =
+            tablet_meta->time_series_compaction_goal_size_mbytes();
+    if (_tablet_meta->time_series_compaction_goal_size_mbytes() !=
+        new_time_series_compaction_goal_size_mbytes) {
+        _tablet_meta->set_time_series_compaction_goal_size_mbytes(
+                new_time_series_compaction_goal_size_mbytes);
+    }
+    auto new_time_series_compaction_file_count_threshold =
+            tablet_meta->time_series_compaction_file_count_threshold();
+    if (_tablet_meta->time_series_compaction_file_count_threshold() !=
+        new_time_series_compaction_file_count_threshold) {
+        _tablet_meta->set_time_series_compaction_file_count_threshold(
+                new_time_series_compaction_file_count_threshold);
+    }
+    auto new_time_series_compaction_time_threshold_seconds =
+            tablet_meta->time_series_compaction_time_threshold_seconds();
+    if (_tablet_meta->time_series_compaction_time_threshold_seconds() !=
+        new_time_series_compaction_time_threshold_seconds) {
+        _tablet_meta->set_time_series_compaction_time_threshold_seconds(
+                new_time_series_compaction_time_threshold_seconds);
+    }
+    auto new_time_series_compaction_empty_rowsets_threshold =
+            tablet_meta->time_series_compaction_empty_rowsets_threshold();
+    if (_tablet_meta->time_series_compaction_empty_rowsets_threshold() !=
+        new_time_series_compaction_empty_rowsets_threshold) {
+        _tablet_meta->set_time_series_compaction_empty_rowsets_threshold(
+                new_time_series_compaction_empty_rowsets_threshold);
+    }
+    auto new_time_series_compaction_level_threshold =
+            tablet_meta->time_series_compaction_level_threshold();
+    if (_tablet_meta->time_series_compaction_level_threshold() !=
+        new_time_series_compaction_level_threshold) {
+        _tablet_meta->set_time_series_compaction_level_threshold(
+                new_time_series_compaction_level_threshold);
+    }
+
     return Status::OK();
 }
 
@@ -1591,7 +1634,7 @@ void Tablet::calculate_cumulative_point() {
     std::lock_guard<std::shared_mutex> wrlock(_meta_lock);
     SCOPED_SIMPLE_TRACE_IF_TIMEOUT(TRACE_TABLET_LOCK_THRESHOLD);
     int64_t ret_cumulative_point;
-    StorageEngine::instance()->cumu_compaction_policy()->calculate_cumulative_point(
+    get_cumulative_compaction_policy()->calculate_cumulative_point(
             this, _tablet_meta->all_rs_metas(), _cumulative_point, &ret_cumulative_point);
 
     if (ret_cumulative_point == K_INVALID_CUMULATIVE_POINT) {
@@ -1905,7 +1948,7 @@ void Tablet::get_compaction_status(std::string* json_result) {
         _timestamped_version_tracker.get_stale_version_path_json_doc(path_arr);
     }
     rapidjson::Value cumulative_policy_type;
-    auto policy_type_str = StorageEngine::instance()->cumu_compaction_policy()->name();
+    auto policy_type_str = _cumulative_compaction_policy->name();
     cumulative_policy_type.SetString(policy_type_str.data(), policy_type_str.length(),
                                      root.GetAllocator());
     root.AddMember("cumulative policy type", cumulative_policy_type, root.GetAllocator());
@@ -2699,8 +2742,9 @@ Status Tablet::write_cooldown_meta() {
     std::string remote_meta_path =
             remote_tablet_meta_path(tablet_id(), _cooldown_replica_id, _cooldown_term);
     io::FileWriterPtr tablet_meta_writer;
+    io::FileWriterOptions opts {.create_empty_file = false};
     // FIXME(plat1ko): What if object store permanently unavailable?
-    RETURN_IF_ERROR(fs->create_file(remote_meta_path, &tablet_meta_writer));
+    RETURN_IF_ERROR(fs->create_file(remote_meta_path, &tablet_meta_writer, &opts));
     auto val = tablet_meta_pb.SerializeAsString();
     RETURN_IF_ERROR(tablet_meta_writer->append({val.data(), val.size()}));
     return tablet_meta_writer->close();
@@ -3642,12 +3686,20 @@ Status Tablet::calc_delete_bitmap(RowsetSharedPtr rowset,
 }
 
 std::vector<RowsetSharedPtr> Tablet::get_rowset_by_ids(
-        const RowsetIdUnorderedSet* specified_rowset_ids) {
+        const RowsetIdUnorderedSet* specified_rowset_ids, bool include_stale) {
     std::vector<RowsetSharedPtr> rowsets;
     for (auto& rs : _rs_version_map) {
         if (!specified_rowset_ids ||
             specified_rowset_ids->find(rs.second->rowset_id()) != specified_rowset_ids->end()) {
             rowsets.push_back(rs.second);
+        }
+    }
+    if (include_stale && specified_rowset_ids != nullptr &&
+        rowsets.size() != specified_rowset_ids->size()) {
+        for (auto& rs : _stale_rs_version_map) {
+            if (specified_rowset_ids->find(rs.second->rowset_id()) != specified_rowset_ids->end()) {
+                rowsets.push_back(rs.second);
+            }
         }
     }
     std::sort(rowsets.begin(), rowsets.end(), [](RowsetSharedPtr& lhs, RowsetSharedPtr& rhs) {
@@ -4201,17 +4253,24 @@ void Tablet::reset_approximate_stats(int64_t num_rowsets, int64_t num_segments, 
     _approximate_data_size.store(data_size, std::memory_order_relaxed);
     int64_t cumu_num_deltas = 0;
     int64_t cumu_num_rowsets = 0;
+    int64_t cumu_data_size = 0;
     auto cp = _cumulative_point.load(std::memory_order_relaxed);
     for (auto& [v, r] : _rs_version_map) {
         if (v.second < cp) continue;
         cumu_num_deltas += r->is_segments_overlapping() ? r->num_segments() : 1;
         ++cumu_num_rowsets;
+        cumu_data_size += r->data_disk_size();
     }
     _approximate_cumu_num_rowsets.store(cumu_num_rowsets, std::memory_order_relaxed);
     _approximate_cumu_num_deltas.store(cumu_num_deltas, std::memory_order_relaxed);
+    _approximate_cumu_data_size.store(cumu_data_size, std::memory_order_relaxed);
 }
 
 int64_t Tablet::get_cloud_base_compaction_score() {
+    if (_cumulative_compaction_policy->name() == CUMULATIVE_TIME_SERIES_POLICY) {
+        return 0;
+    }
+
     auto cp = _cumulative_point.load(std::memory_order_relaxed);
     [[maybe_unused]] int64_t data_size_score = 0;
     [[maybe_unused]] int64_t num_rowsets_score = 0;
@@ -4226,6 +4285,21 @@ int64_t Tablet::get_cloud_base_compaction_score() {
         data_size_score += r->data_disk_size();
     }
     return num_rowsets_score;
+}
+
+int64_t Tablet::get_cloud_base_compaction_delete_score() {
+    auto cp = _cumulative_point.load(std::memory_order_relaxed);
+    int64_t delete_score = 0;
+    std::shared_lock meta_rlock(_meta_lock); // This lock may be bottle neck
+    for (auto& [v, r] : _rs_version_map) {
+        if (v.second >= cp) {
+            continue;
+        }
+        if (v.first == v.second && r->rowset_meta()->has_delete_predicate()) {
+            ++delete_score;
+        }
+    }
+    return delete_score;
 }
 
 int64_t Tablet::get_cloud_cumu_compaction_score() {

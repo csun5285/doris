@@ -466,7 +466,11 @@ int main(int argc, char** argv) {
 
     // init exec env
     auto exec_env = doris::ExecEnv::GetInstance();
-    doris::ExecEnv::init(exec_env, paths);
+    status = doris::ExecEnv::init(exec_env, paths);
+    if (status != Status::OK()) {
+        LOG(ERROR) << "failed to init doris exec env, res=" << status;
+        exit(-1);
+    }
     doris::TabletSchemaCache::create_global_schema_cache();
 
     // init and open storage engine

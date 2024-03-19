@@ -220,7 +220,7 @@ Status TabletsChannel::close(LoadChannel* parent, bool* finished,
     tasks.reserve(rowsets_to_commit.size());
     for (auto& rs : rowsets_to_commit) {
         tasks.push_back([&rs_meta = rs->rowset_meta()] {
-            return cloud::meta_mgr()->commit_rowset(rs_meta.get(), true);
+            return cloud::meta_mgr()->commit_rowset(rs_meta.get());
         });
     }
     _close_status = cloud::bthread_fork_and_join(tasks, 10);
@@ -674,7 +674,7 @@ Status TabletsChannel::add_batch(const PTabletWriterAddBlockRequest& request,
             << ", tablet_ids_size: " << request.tablet_ids_size();
 
     auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
-    auto write_tablet_data = [&](uint32_t tablet_id,
+    auto write_tablet_data = [&](int64_t tablet_id,
                                  std::function<Status(DeltaWriter * writer)> write_func) {
         google::protobuf::RepeatedPtrField<PTabletError>* tablet_errors =
                 response->mutable_tablet_errors();

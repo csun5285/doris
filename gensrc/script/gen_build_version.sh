@@ -31,8 +31,8 @@ set -eo pipefail
 build_version_prefix="selectdb"
 build_version_major=3
 build_version_minor=0
-build_version_patch=6
-build_version_hotfix=3
+build_version_patch=7
+build_version_hotfix=0
 build_version_rc_version=""
 
 build_version="${build_version_major}.${build_version_minor}.${build_version_patch}"
@@ -42,7 +42,7 @@ if [[ ${build_version_hotfix} -gt 0 ]]; then
 fi
 
 #doris version
-build_base_version="2.0.4"
+build_base_version="2.0.6"
 
 unset LANG
 unset LC_CTYPE
@@ -217,8 +217,8 @@ EOF
 build_version_prefix="selectdb"
 build_version_major=3
 build_version_minor=0
-build_version_patch=6
-build_version_hotfix=3
+build_version_patch=7
+build_version_hotfix=0
 build_version_rc_version=""
 
 if [ -f /etc/os-release ]; then

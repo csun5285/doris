@@ -458,6 +458,12 @@ public:
                _rowset_meta_pb.enable_segments_file_size();
     }
 
+    void set_compaction_level(int64_t compaction_level) {
+        _rowset_meta_pb.set_compaction_level(compaction_level);
+    }
+
+    int64_t compaction_level() { return _rowset_meta_pb.compaction_level(); }
+
 private:
     bool _deserialize_from_pb(const std::string& value) {
         RowsetMetaPB rowset_meta_pb;

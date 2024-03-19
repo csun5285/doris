@@ -1501,15 +1501,12 @@ Indicates how many tablets failed to load in the data directory. At the same tim
 * Description: BE Whether to enable the use of java-jni. When enabled, mutual calls between c++ and java are allowed. Currently supports hudi, java-udf, jdbc, max-compute, paimon, preload, avro
 * Default value: true
 
-#### `group_commit_wal_path`
+#### `default_tzfiles_path`
 
-* The `WAL` directory of group commit.
-* Default: A directory named `wal` is created under each directory of the `storage_root_path`. Configuration examples:
-  ```
-  group_commit_wal_path=/data1/storage/wal;/data2/storage/wal;/data3/storage/wal
-  ```
+* Description: Doris comes with its own time zone database. If the time zone file is not found in the system directory, the data in that directory is enabled.
+* Default: "${DORIS_HOME}/zoneinfo"
 
-#### `group_commit_memory_rows_for_max_filter_ratio`
+#### `use_doris_tzfile`
 
-* Description: The `max_filter_ratio` limit can only work if the total rows of `group commit` is less than this value. See [Group Commit](../../data-operate/import/import-way/group-commit-manual.md) for more details
-* Default: 10000
+* Description: Whether to use the time zone database that comes with Doris directly. Enabled to stop trying to find in  the system directory.
+* Default: false

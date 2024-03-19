@@ -32,14 +32,22 @@ WalReader::WalReader(const std::string& file_name) : _file_name(file_name), _off
 WalReader::~WalReader() {}
 
 Status WalReader::init() {
+    bool exists = false;
+    RETURN_IF_ERROR(io::global_local_filesystem()->exists(_file_name, &exists));
+    if (!exists) {
+        LOG(WARNING) << "not exist wal= " << _file_name;
+        return Status::NotFound("wal {} doesn't exist", _file_name);
+    }
     RETURN_IF_ERROR(io::global_local_filesystem()->open_file(_file_name, &file_reader));
     return Status::OK();
 }
 
 Status WalReader::finalize() {
-    auto st = file_reader->close();
-    if (!st.ok()) {
-        LOG(WARNING) << "fail to close wal " << _file_name;
+    if (file_reader != nullptr) {
+        auto st = file_reader->close();
+        if (!st.ok()) {
+            LOG(WARNING) << "fail to close wal " << _file_name << " st= " << st.to_string();
+        }
     }
     return Status::OK();
 }
@@ -71,6 +79,9 @@ Status WalReader::read_block(PBlock& block) {
 }
 
 Status WalReader::read_header(std::string& col_ids) {
+    if (file_reader->size() == 0) {
+        return Status::DataQualityError("empty file");
+    }
     size_t bytes_read = 0;
     std::string magic_str;
     magic_str.resize(k_wal_magic_length);

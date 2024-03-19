@@ -540,10 +540,10 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
     return Status::OK();
 }
 
-Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
+Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta,
                                     RowsetMetaSharedPtr* existed_rs_meta) {
     VLOG_DEBUG << "prepare rowset, tablet_id: " << rs_meta->tablet_id()
-               << ", rowset_id: " << rs_meta->rowset_id() << ", is_tmp: " << is_tmp;
+               << ", rowset_id: " << rs_meta->rowset_id();
     std::shared_ptr<selectdb::MetaService_Stub> stub;
     RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
 
@@ -551,7 +551,6 @@ Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
     rs_meta->to_rowset_pb(req.mutable_rowset_meta(), true);
-    req.set_temporary(is_tmp);
     int retry_times = 0;
     auto rng = std::default_random_engine(
             static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -595,10 +594,10 @@ Status CloudMetaMgr::prepare_rowset(const RowsetMeta* rs_meta, bool is_tmp,
     return Status::InternalError("failed to prepare rowset: {}", resp.status().msg());
 }
 
-Status CloudMetaMgr::commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
+Status CloudMetaMgr::commit_rowset(const RowsetMeta* rs_meta,
                                    RowsetMetaSharedPtr* existed_rs_meta) {
     VLOG_DEBUG << "commit rowset, tablet_id: " << rs_meta->tablet_id()
-               << ", rowset_id: " << rs_meta->rowset_id() << ", is_tmp: " << is_tmp;
+               << ", rowset_id: " << rs_meta->rowset_id();
     std::shared_ptr<selectdb::MetaService_Stub> stub;
     RETURN_IF_ERROR(MetaServiceProxy::get_client(&stub));
 
@@ -606,7 +605,6 @@ Status CloudMetaMgr::commit_rowset(const RowsetMeta* rs_meta, bool is_tmp,
     selectdb::CreateRowsetResponse resp;
     req.set_cloud_unique_id(config::cloud_unique_id);
     rs_meta->to_rowset_pb(req.mutable_rowset_meta());
-    req.set_temporary(is_tmp);
     int retry_times = 0;
     auto rng = std::default_random_engine(
             static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count()));

@@ -891,7 +891,7 @@ void VNodeChannel::try_send_block(RuntimeState* state) {
 // rpc request to truly release the load channel
 void VNodeChannel::cancel(const std::string& cancel_msg) {
     if (_is_closed) {
-        // skip the channels that have been closed.
+        // skip the channels that have been canceled or close_wait.
         return;
     }
     SCOPED_CONSUME_MEM_TRACKER(_node_channel_tracker.get());
@@ -957,7 +957,7 @@ Status VNodeChannel::close_wait(RuntimeState* state) {
     _close_time_ms = UnixMillis() - _close_time_ms;
 
     if (_cancelled || state->is_cancelled()) {
-        _cancel_with_msg(state->cancel_reason());
+        cancel(state->cancel_reason());
     }
 
     if (_add_batches_finished) {
@@ -1094,6 +1094,16 @@ Status VOlapTableSink::prepare(RuntimeState* state) {
     if (_output_tuple_desc == nullptr) {
         LOG(WARNING) << "unknown destination tuple descriptor, id=" << _tuple_desc_id;
         return Status::InternalError("unknown destination tuple descriptor");
+    }
+
+    if (_output_vexpr_ctxs.size() > 0 &&
+        _output_tuple_desc->slots().size() != _output_vexpr_ctxs.size()) {
+        LOG(WARNING) << "output tuple slot num should be equal to num of output exprs, "
+                     << "output_tuple_slot_num " << _output_tuple_desc->slots().size()
+                     << " output_expr_num " << _output_vexpr_ctxs.size();
+        return Status::InvalidArgument(
+                "output_tuple_slot_num {} should be equal to output_expr_num {}",
+                _output_tuple_desc->slots().size(), _output_vexpr_ctxs.size());
     }
 
     _output_row_desc = _pool->add(new RowDescriptor(_output_tuple_desc, false));

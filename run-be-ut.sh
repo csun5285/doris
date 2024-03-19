@@ -145,7 +145,6 @@ if [[ "_${DENABLE_CLANG_COVERAGE}" == "_ON" ]]; then
     echo "export DORIS_TOOLCHAIN=clang" >>custom_env.sh
 fi
 
-
 if [[ -z ${CMAKE_BUILD_DIR} ]]; then
     CMAKE_BUILD_DIR="${DORIS_HOME}/be/ut_build_${CMAKE_BUILD_TYPE}"
 fi

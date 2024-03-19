@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "common/config.h"
+#include "http/action/adjust_s3_rate_limit.h"
 #include "http/action/check_rpc_channel_action.h"
 #include "http/action/check_tablet_segment_action.h"
 #include "http/action/checksum_action.h"
@@ -296,6 +297,10 @@ Status HttpService::start() {
             _pool.add(new ReportAction(_env, TPrivilegeHier::GLOBAL, TPrivilegeType::ADMIN,
                                        TaskWorkerPool::TaskWorkerType::REPORT_TASK));
     _ev_http_server->register_handler(HttpMethod::GET, "/api/report/task", report_task_action);
+
+    AdjustS3RateLimitAction* adjust_a3_rate_limit_action = _pool.add(new AdjustS3RateLimitAction());
+    _ev_http_server->register_handler(HttpMethod::POST, "/api/s3_rate_limiter/adjust",
+                                      adjust_a3_rate_limit_action);
 
     _ev_http_server->start();
     return Status::OK();

@@ -105,7 +105,7 @@ Status S3FileReader::read_at_impl(size_t offset, Slice result, size_t* bytes_rea
     }
     s3_file_reader_counter << 1;
     SCOPED_BVAR_LATENCY(s3_bvar::s3_get_latency);
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(DO_S3_GET_RATE_LIMIT(client->GetObject(request)),
                                                 "s3_file_reader::get_object",
                                                 std::ref(request).get(), &result);
     if (!outcome.IsSuccess()) {

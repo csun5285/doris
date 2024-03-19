@@ -101,6 +101,11 @@ public:
                                             int64_t current_cumulative_point,
                                             int64_t* cumulative_point) = 0;
 
+    // Updates the compaction level of a tablet after a compaction operation.
+    virtual void update_compaction_level(Tablet* tablet,
+                                         const std::vector<RowsetSharedPtr>& input_rowsets,
+                                         RowsetSharedPtr output_rowset) = 0;
+
     /// Fetch cumulative policy name
     virtual std::string_view name() = 0;
 };
@@ -123,7 +128,7 @@ public:
             int64_t compaction_min_size = config::compaction_min_size_mbytes * 1024 * 1024);
 
     /// Destructor function of SizeBasedCumulativeCompactionPolicy.
-    ~SizeBasedCumulativeCompactionPolicy() {}
+    ~SizeBasedCumulativeCompactionPolicy() override = default;
 
     // CLOUD_MODE
     int64_t new_cumulative_point(Tablet* tablet, const RowsetSharedPtr& output_rowset,
@@ -159,6 +164,9 @@ public:
     /// Its main policy is calculating the accumulative compaction score after current cumulative_point in tablet.
     uint32_t calc_cumulative_compaction_score(Tablet* tablet) override;
 
+    void update_compaction_level(Tablet* tablet, const std::vector<RowsetSharedPtr>& input_rowsets,
+                                 RowsetSharedPtr output_rowset) override {}
+
     std::string_view name() override { return CUMULATIVE_SIZE_BASED_POLICY; }
 
 private:
@@ -193,7 +201,8 @@ class CumulativeCompactionPolicyFactory {
 public:
     /// Static factory function. It can product different policy according to the `policy` parameter and use tablet ptr
     /// to construct the policy. Now it can product size based and num based policies.
-    static std::shared_ptr<CumulativeCompactionPolicy> create_cumulative_compaction_policy();
+    static std::shared_ptr<CumulativeCompactionPolicy> create_cumulative_compaction_policy(
+            const std::string_view& compaction_policy);
 };
 
 } // namespace doris

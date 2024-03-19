@@ -232,8 +232,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         RETURN_IF_ERROR(new_tablet->create_rowset_writer(context, &rowset_writer));
 
         RowsetMetaSharedPtr existed_rs_meta;
-        auto st = meta_mgr()->prepare_rowset(rowset_writer->rowset_meta().get(), true,
-                                             &existed_rs_meta);
+        auto st = meta_mgr()->prepare_rowset(rowset_writer->rowset_meta().get(), &existed_rs_meta);
         if (!st.ok()) {
             if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "Rowset " << rs_reader->version() << " has already existed in tablet "
@@ -263,7 +262,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
                                          st.to_string());
         }
 
-        st = meta_mgr()->commit_rowset(rowset_writer->rowset_meta().get(), true, &existed_rs_meta);
+        st = meta_mgr()->commit_rowset(rowset_writer->rowset_meta().get(), &existed_rs_meta);
         if (!st.ok()) {
             if (st.is<ALREADY_EXIST>()) {
                 LOG(INFO) << "Rowset " << rs_reader->version() << " has already existed in tablet "

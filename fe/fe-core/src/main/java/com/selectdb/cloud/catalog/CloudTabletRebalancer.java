@@ -62,7 +62,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 public class CloudTabletRebalancer extends MasterDaemon {
     private static final Logger LOG = LogManager.getLogger(CloudTabletRebalancer.class);
 
-    private volatile ConcurrentHashMap<Long, List<Tablet>> beToTabletsGlobal;
+    private volatile ConcurrentHashMap<Long, List<Tablet>> beToTabletsGlobal =
+            new ConcurrentHashMap<Long, List<Tablet>>();
 
     private Map<Long, List<Tablet>> futureBeToTabletsGlobal;
 
@@ -131,11 +132,12 @@ public class CloudTabletRebalancer extends MasterDaemon {
 
     public Set<Long> getSnapshotTabletsByBeId(Long beId) {
         Set<Long> snapshotTablets = new HashSet<Long>();
-        if (beToTabletsGlobal.containsKey(beId)) {
-            beToTabletsGlobal.get(beId).forEach(tablet -> {
-                snapshotTablets.add(tablet.getId());
-            });
+        if (beToTabletsGlobal == null || !beToTabletsGlobal.containsKey(beId)) {
+            LOG.warn("beToTabletsGlobal null or not contain beId {}", beId);
+            return snapshotTablets;
         }
+
+        beToTabletsGlobal.get(beId).forEach(tablet -> snapshotTablets.add(tablet.getId()));
         return snapshotTablets;
     }
 

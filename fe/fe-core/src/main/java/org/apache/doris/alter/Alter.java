@@ -485,7 +485,7 @@ public class Alter {
                     DynamicPartitionUtil.checkAlterAllowed(
                             (OlapTable) db.getTableOrMetaException(tableName, TableType.OLAP));
                 }
-                Env.getCurrentEnv().addPartition(db, tableName, (AddPartitionClause) alterClause);
+                Env.getCurrentEnv().addPartition(db, tableName, (AddPartitionClause) alterClause, false, 0);
             } else if (alterClause instanceof AddPartitionLikeClause) {
                 if (!((AddPartitionLikeClause) alterClause).getIsTempPartition()) {
                     DynamicPartitionUtil.checkAlterAllowed(
@@ -525,7 +525,18 @@ public class Alter {
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_PERSISTENT)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_INTERVAL_MS)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_GROUP_COMMIT_DATA_BYTES)
-                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS));
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_FILE_CACHE_TTL_SECONDS)
+                            || properties.containsKey(PropertyAnalyzer.PROPERTIES_COMPACTION_POLICY)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_GOAL_SIZE_MBYTES)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_FILE_COUNT_THRESHOLD)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD));
                     ((SchemaChangeHandler) schemaChangeHandler).updateCloudTableProperties(db, tableName, properties);
                 } else {
                     // currently, only in memory and storage policy property could reach here
@@ -547,7 +558,9 @@ public class Alter {
                                 .containsKey(PropertyAnalyzer.PROPERTIES_ENABLE_SINGLE_REPLICA_COMPACTION)
                             || properties.containsKey(PropertyAnalyzer.PROPERTIES_SKIP_WRITE_INDEX_ON_LOAD)
                             || properties.containsKey(
-                                PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD));
+                                PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD)
+                            || properties
+                                .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD));
                     ((SchemaChangeHandler) schemaChangeHandler).updateTableProperties(db, tableName, properties);
                 }
             } else {

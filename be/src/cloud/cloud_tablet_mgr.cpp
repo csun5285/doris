@@ -174,7 +174,8 @@ Status CloudTabletMgr::get_tablet(int64_t tablet_id, TabletSharedPtr* tablet, bo
                 return nullptr;
             }
 
-            auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir());
+            auto tablet = std::make_shared<Tablet>(std::move(tablet_meta), cloud::cloud_data_dir(),
+                                                   tablet_meta->compaction_policy());
             auto value = std::make_unique<Value>(Value {
                     .tablet = tablet,
                     .tablet_map = *_tablet_map,
@@ -330,6 +331,10 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
     auto now = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
     auto skip = [now, compaction_type](Tablet* t) {
         if (compaction_type == CompactionType::BASE_COMPACTION) {
+            // too many delete, may result in performance penelty or too many versions for load
+            if (t->get_cloud_base_compaction_delete_score() > config::cloud_base_compaction_delete_threshold) {
+                return false;
+            }
             return now - t->last_base_compaction_success_time() < config::base_compaction_interval_seconds_since_last_operation * 1000;
         }
         // If tablet has too many rowsets but not be compacted for a long time, compaction should be performed
@@ -352,6 +357,8 @@ Status CloudTabletMgr::get_topn_tablets_to_compact(int n, CompactionType compact
         if (t == nullptr) continue;
 
         int64_t s = score(t.get());
+        if (s <= 0) continue;
+
         if (s > *max_score) {
             max_score_tablet_id = t->tablet_id();
             *max_score = s;

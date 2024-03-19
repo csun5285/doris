@@ -45,7 +45,7 @@ Status _download_part(std::shared_ptr<Aws::S3::S3Client> client, std::string key
     request.SetRange(fmt::format("bytes={}-{}", offset, offset + size - 1));
     request.SetResponseStreamFactory(AwsWriteableStreamFactory((void*)s.get_data(), size));
     SCOPED_BVAR_LATENCY(s3_bvar::s3_get_latency);
-    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(client->GetObjectCallable(request).get(),
+    auto outcome = SYNC_POINT_HOOK_RETURN_VALUE(DO_S3_GET_RATE_LIMIT(client->GetObject(request)),
                                                 "io::_download_part", std::cref(request).get(), &s);
 
     TEST_SYNC_POINT_CALLBACK("io::_download_part::error", &outcome);

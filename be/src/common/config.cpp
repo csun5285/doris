@@ -193,8 +193,6 @@ DEFINE_mInt32(max_download_speed_kbps, "50000");
 DEFINE_mInt32(download_low_speed_limit_kbps, "50");
 // download low speed time(seconds)
 DEFINE_mInt32(download_low_speed_time, "300");
-// sleep time for one second
-DEFINE_Int32(sleep_one_second, "1");
 
 // log dir
 DEFINE_String(sys_log_dir, "${DORIS_HOME}/log");
@@ -803,6 +801,9 @@ DEFINE_mInt32(segment_compression_threshold_kb, "256");
 // The connection timeout when connecting to external table such as odbc table.
 DEFINE_mInt32(external_table_connect_timeout_sec, "30");
 
+// Time to clean up useless JDBC connection pool cache
+DEFINE_mInt32(jdbc_connection_pool_cache_clear_time_sec, "28800");
+
 // Global bitmap cache capacity for aggregation cache, size in bytes
 DEFINE_Int64(delete_bitmap_agg_cache_capacity, "419430400");
 
@@ -937,6 +938,7 @@ DEFINE_mInt64(file_cache_max_size_per_disk, "0"); // zero for no limit
 DEFINE_mInt32(file_cache_enter_disk_resource_limit_mode_percent, "90");
 DEFINE_mInt32(file_cache_exit_disk_resource_limit_mode_percent, "80");
 DEFINE_mInt64(file_cache_ttl_valid_check_interval_second, "0"); // zero for not checking
+DEFINE_mBool(file_cache_enable_evict_from_other_queue_by_size, "false");
 
 DEFINE_Int32(s3_transfer_buffer_size_mb, "500");
 DEFINE_Int32(s3_transfer_executor_pool_size, "2");
@@ -1191,6 +1193,8 @@ DEFINE_mBool(enable_check_segment_footer, "true");
 
 DEFINE_mBool(enable_file_cache_as_load_buffer, "false");
 
+DEFINE_mBool(enable_read_cache_file_directly, "false");
+
 //==============================================================================
 // end selectdb cloud conf
 //==============================================================================
@@ -1228,6 +1232,7 @@ DEFINE_Int16(bitmap_serialize_version, "1");
 DEFINE_String(group_commit_wal_path, "");
 DEFINE_Int32(group_commit_replay_wal_retry_num, "10");
 DEFINE_Int32(group_commit_replay_wal_retry_interval_seconds, "5");
+DEFINE_Int32(group_commit_replay_wal_retry_interval_max_seconds, "1800");
 DEFINE_Int32(group_commit_relay_wal_threads, "10");
 // This config can be set to limit thread number in group commit request fragment thread pool.
 DEFINE_Int32(group_commit_insert_threads, "10");
@@ -1254,6 +1259,7 @@ DEFINE_Bool(enable_check_max_min_key, "false");
 
 // Dir of default timezone files
 DEFINE_String(default_tzfiles_path, "${DORIS_HOME}/zoneinfo");
+DEFINE_Bool(use_doris_tzfile, "false");
 
 // the max package bytes be thrift server can receive
 // avoid accepting error or too large package causing OOM,default 20000000(20M)
@@ -1277,6 +1283,24 @@ DEFINE_Int32(ignore_invalid_partition_id_rowset_num, "0");
 DEFINE_mDouble(base_compaction_thread_num_factor, "0.25");
 
 DEFINE_mDouble(cumu_compaction_thread_num_factor, "0.5");
+
+DEFINE_mInt32(report_query_statistics_interval_ms, "3000");
+// 30s
+DEFINE_mInt32(query_statistics_reserve_timeout_ms, "30000");
+
+DEFINE_mBool(check_segment_when_build_rowset_meta, "false");
+DEFINE_mBool(enable_s3_rate_limiter, "false");
+DEFINE_mInt64(s3_get_bucket_tokens, "1000000000000000000");
+DEFINE_mInt64(s3_get_token_per_second, "1000000000000000000");
+DEFINE_mInt64(s3_get_token_limit, "0");
+
+DEFINE_mInt64(s3_put_bucket_tokens, "1000000000000000000");
+DEFINE_mInt64(s3_put_token_per_second, "1000000000000000000");
+DEFINE_mInt64(s3_put_token_limit, "0");
+
+DEFINE_mInt32(cloud_base_compaction_delete_threshold, "200");
+
+DEFINE_mInt64(max_ttl_cache_ratio, "90");
 
 // clang-format off
 #ifdef BE_TEST

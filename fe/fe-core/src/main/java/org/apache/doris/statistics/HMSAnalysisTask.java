@@ -190,9 +190,11 @@ public class HMSAnalysisTask extends BaseAnalysisTask {
                 }
             }
         }
-        // Estimate the row count. This value is inaccurate if the table stats is empty.
-        TableStatsMeta tableStatsStatus = Env.getCurrentEnv().getAnalysisManager().findTableStatsStatus(table.getId());
-        long count = tableStatsStatus == null ? table.estimatedRowCount() : tableStatsStatus.rowCount;
+        // Estimate the row count. This value is inaccurate.
+        long count = table.getRowCount();
+        if (count == 0) {
+            count = table.fetchRowCount();
+        }
         dataSize = dataSize * count / partitionNames.size();
         numNulls = numNulls * count / partitionNames.size();
         int ndv = ndvPartValues.size();
@@ -276,6 +278,7 @@ public class HMSAnalysisTask extends BaseAnalysisTask {
         commonParams.put("sampleHints", getSampleHint());
         commonParams.put("limit", "");
         commonParams.put("scaleFactor", "1");
+        commonParams.put("index", "");
         if (col != null) {
             commonParams.put("type", col.getType().toString());
         }

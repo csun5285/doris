@@ -687,6 +687,11 @@ bool StorageEngine::has_cumu_compaction(int64_t tablet_id) const {
     return _submitted_cumu_compactions.count(tablet_id);
 }
 
+bool StorageEngine::has_full_compaction(int64_t tablet_id) const {
+    std::lock_guard lock(_compaction_mtx);
+    return _submitted_full_compactions.count(tablet_id);
+}
+
 void StorageEngine::get_cumu_compaction(
         int64_t tablet_id, std::vector<std::shared_ptr<CloudCumulativeCompaction>>& res) {
     std::lock_guard lock(_compaction_mtx);

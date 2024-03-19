@@ -23,7 +23,6 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.Table;
-import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.catalog.TabletInvertedIndex;
 import org.apache.doris.catalog.TabletMeta;
 import org.apache.doris.common.AnalysisException;
@@ -37,6 +36,7 @@ import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.QuotaExceedException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
+import org.apache.doris.common.util.InternalDatabaseUtil;
 import org.apache.doris.common.util.MetaLockUtils;
 import org.apache.doris.load.loadv2.LoadJobFinalOperation;
 import org.apache.doris.load.routineload.RLTaskTxnCommitAttachment;
@@ -44,7 +44,9 @@ import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.persist.BatchRemoveTransactionsOperation;
 import org.apache.doris.persist.BatchRemoveTransactionsOperationV2;
 import org.apache.doris.persist.EditLog;
+import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.rpc.RpcException;
+import org.apache.doris.service.FrontendServiceImpl;
 import org.apache.doris.task.AgentBatchTask;
 import org.apache.doris.task.AgentTaskExecutor;
 import org.apache.doris.task.AgentTaskQueue;
@@ -65,7 +67,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.selectdb.cloud.catalog.CloudPartition;
 import com.selectdb.cloud.proto.SelectdbCloud.AbortTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.AbortTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.BeginTxnRequest;
@@ -84,7 +85,6 @@ import com.selectdb.cloud.proto.SelectdbCloud.GetTxnRequest;
 import com.selectdb.cloud.proto.SelectdbCloud.GetTxnResponse;
 import com.selectdb.cloud.proto.SelectdbCloud.LoadJobSourceTypePB;
 import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
-import com.selectdb.cloud.proto.SelectdbCloud.TableStatsPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TxnInfoPB;
 import com.selectdb.cloud.proto.SelectdbCloud.UniqueIdPB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
@@ -151,6 +151,9 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         if (Config.disable_load_job) {
             throw new AnalysisException("disable_load_job is set to true, all load jobs are prevented");
         }
+
+        Database db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
+        InternalDatabaseUtil.checkDatabase(db.getFullName(), ConnectContext.get());
 
         switch (sourceType) {
             case BACKEND_STREAMING:
@@ -357,53 +360,7 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
             MetricRepo.HISTO_TXN_EXEC_LATENCY.update(txnState.getCommitTime() - txnState.getPrepareTime());
         }
 
-        // update rowCountfor AnalysisManager
-        for (TableStatsPB tableStats : commitTxnResponse.getTableStatsList()) {
-            LOG.info("Update RowCount for AnalysisManager. transactionId:{}, table_id:{}, updated_row_count:{}",
-                     txnState.getTransactionId(), tableStats.getTableId(), tableStats.getUpdatedRowCount());
-            Env.getCurrentEnv().getAnalysisManager().updateUpdatedRows(tableStats.getTableId(),
-                                                                       tableStats.getUpdatedRowCount());
-        }
-        // notify partition first load
-        int totalPartitionNum = commitTxnResponse.getPartitionIdsList().size();
-        // a map to record <tableId, [partitionIds]>
-        Map<Long, List<Long>> tablePartitionMap = Maps.newHashMap();
-        for (int idx = 0; idx < totalPartitionNum; ++idx) {
-            long version = commitTxnResponse.getVersions(idx);
-            if (version == 2) {
-                long tableId = commitTxnResponse.getTableIds(idx);
-                tablePartitionMap.computeIfAbsent(tableId, k -> Lists.newArrayList());
-                tablePartitionMap.get(tableId).add(commitTxnResponse.getPartitionIds(idx));
-                // 1. inform AnalysisManager
-                Env.getCurrentEnv().getAnalysisManager().setNewPartitionLoaded(tableId);
-                // 2. update CloudPartition
-                Env env = Env.getCurrentEnv();
-                OlapTable olapTable = (OlapTable) env.getInternalCatalog().getDb(dbId)
-                        .flatMap(db -> db.getTable(tableId)).filter(t -> t.getType() == TableType.OLAP)
-                        .orElse(null);
-                if (olapTable == null) {
-                    continue;
-                }
-                CloudPartition partition = (CloudPartition) olapTable.getPartition(
-                        commitTxnResponse.getPartitionIds(idx));
-                if (partition == null) {
-                    continue;
-                }
-                partition.setCachedVisibleVersion(2);
-            }
-        }
-        // tablePartitionMap to string
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<Long, List<Long>> entry : tablePartitionMap.entrySet()) {
-            sb.append(entry.getKey()).append(":[");
-            for (Long partitionId : entry.getValue()) {
-                sb.append(partitionId).append(",");
-            }
-            sb.append("];");
-        }
-        if (sb.length() > 0) {
-            LOG.info("notify partition first load. {}", sb);
-        }
+        FrontendServiceImpl.commitTxnResp(commitTxnResponse);
     }
 
     private List<OlapTable> getMowTableList(List<Table> tableList) {

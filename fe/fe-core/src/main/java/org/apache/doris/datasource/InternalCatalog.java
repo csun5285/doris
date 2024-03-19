@@ -1453,7 +1453,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             } finally {
                 table.readUnlock();
             }
-            addPartition(db, tableName, clause);
+            addPartition(db, tableName, clause, false, 0);
 
         } catch (UserException e) {
             throw new DdlException("Failed to ADD PARTITION " + addPartitionLikeClause.getPartitionName()
@@ -1461,7 +1461,26 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void addPartition(Database db, String tableName, AddPartitionClause addPartitionClause) throws DdlException {
+    public static long checkAndGetBufferSize(long indexNum, long bucketNum,
+                                             long replicaNum, Database db, String tableName) throws DdlException {
+        long totalReplicaNum = indexNum * bucketNum * replicaNum;
+        if (totalReplicaNum >= db.getReplicaQuotaLeftWithLock()) {
+            throw new DdlException("Database " + db.getFullName() + " table " + tableName + " add partition increasing "
+                + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
+        }
+        return 1 + totalReplicaNum + indexNum * bucketNum;
+    }
+
+    public void addPartition(Database db, String tableName,
+                             AddPartitionClause addPartitionClause,
+                             boolean isCreateTable, long generatedPartitionId) throws DdlException {
+        // isCreateTable == true, create dynamic partition use, so partitionId must have been generated.
+        // isCreateTable == false, other case, partitionId generate in below, must be set 0
+        if (!FeConstants.runningUnitTest
+                && (isCreateTable && generatedPartitionId == 0) || (!isCreateTable && generatedPartitionId != 0)) {
+            throw new DdlException("not impossible");
+        }
+
         SinglePartitionDesc singlePartitionDesc = addPartitionClause.getSingeRangePartitionDesc();
         DistributionDesc distributionDesc = addPartitionClause.getDistributionDesc();
         boolean isTempPartition = addPartitionClause.isTempPartition();
@@ -1565,6 +1584,10 @@ public class InternalCatalog implements CatalogIf<Database> {
                 properties.put(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD,
                                                 olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold().toString());
             }
+            if (!properties.containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD)) {
+                properties.put(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD,
+                                                olapTable.getTimeSeriesCompactionLevelThreshold().toString());
+            }
             if (!properties.containsKey(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY)) {
                 properties.put(PropertyAnalyzer.PROPERTIES_STORAGE_POLICY, olapTable.getStoragePolicy());
             }
@@ -1631,23 +1654,18 @@ public class InternalCatalog implements CatalogIf<Database> {
         DataProperty dataProperty = singlePartitionDesc.getPartitionDataProperty();
         Preconditions.checkNotNull(dataProperty);
         // check replica quota if this operation done
-        long indexNum = indexIdToMeta.size();
-        long bucketNum = distributionInfo.getBucketNum();
-        long replicaNum = singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum();
-        long totalReplicaNum = indexNum * bucketNum * replicaNum;
-        if (totalReplicaNum >= db.getReplicaQuotaLeftWithLock()) {
-            throw new DdlException("Database " + db.getFullName() + " table " + tableName + " add partition increasing "
-                + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
-        }
-        Set<Long> tabletIdSet = new HashSet<>();
-        long bufferSize = 1 + totalReplicaNum + indexNum * bucketNum;
+        long bufferSize = checkAndGetBufferSize(indexIdToMeta.size(), distributionInfo.getBucketNum(),
+                singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum(), db, tableName);
         IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
+
+        Set<Long> tabletIdSet = new HashSet<>();
         String storagePolicy = olapTable.getStoragePolicy();
         if (!Strings.isNullOrEmpty(dataProperty.getStoragePolicy())) {
             storagePolicy = dataProperty.getStoragePolicy();
         }
         try {
-            long partitionId = idGeneratorBuffer.getNextId();
+            long partitionId = !FeConstants.runningUnitTest && isCreateTable
+                    ? generatedPartitionId : idGeneratorBuffer.getNextId();
             Partition partition;
             if (Config.isNotCloudMode()) {
                 partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
@@ -1663,13 +1681,16 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getTimeSeriesCompactionFileCountThreshold(),
                     olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                     olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                    olapTable.getTimeSeriesCompactionLevelThreshold(),
                     olapTable.storeRowColumn(), olapTable.isDynamicSchema(),
                     binlogConfig, dataProperty.isStorageMediumSpecified());
             } else {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
-                List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
+                List<Long> indexIds = new ArrayList<>(indexIdToMeta.keySet());
+                if (!isCreateTable) {
+                    prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
+                }
                 partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -1678,8 +1699,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                     singlePartitionDesc.getTabletType(), olapTable.getCompressionType(),
                     olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                     olapTable.getStoragePolicy(), singlePartitionDesc.isPersistent(), olapTable.isDynamicSchema(),
-                    olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn());
-                commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
+                    olapTable.getName(), olapTable.getTTLSeconds(), olapTable.storeRowColumn(),
+                    olapTable.getCompactionPolicy(), olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                    olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                    olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                    olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                    olapTable.getTimeSeriesCompactionLevelThreshold());
             }
 
             // check again
@@ -1775,6 +1800,14 @@ public class InternalCatalog implements CatalogIf<Database> {
                         isTempPartition, partitionInfo.getIsPersistent(partitionId),
                         partitionInfo.getIsMutable(partitionId));
                 }
+
+                List<Long> partitionIds = new ArrayList<Long>();
+                partitionIds.add(partitionId);
+                List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
+                if (!isCreateTable) {
+                    commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
+                }
+
                 Env.getCurrentEnv().getEditLog().logAddPartition(info);
 
                 LOG.info("succeed in creating partition[{}], temp: {}", partitionId, isTempPartition);
@@ -1933,7 +1966,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             boolean enableSingleReplicaCompaction, boolean skipWriteIndexOnLoad,
             String compactionPolicy, Long timeSeriesCompactionGoalSizeMbytes,
             Long timeSeriesCompactionFileCountThreshold, Long timeSeriesCompactionTimeThresholdSeconds,
-            Long timeSeriesCompactionEmptyRowsetsThreshold,
+            Long timeSeriesCompactionEmptyRowsetsThreshold, Long timeSeriesCompactionLevelThreshold,
             boolean storeRowColumn, boolean isDynamicSchema, BinlogConfig binlogConfig,
             boolean isStorageMediumSpecified) throws DdlException {
         // create base index first.
@@ -2005,7 +2038,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                             disableAutoCompaction, enableSingleReplicaCompaction, skipWriteIndexOnLoad,
                             compactionPolicy, timeSeriesCompactionGoalSizeMbytes,
                             timeSeriesCompactionFileCountThreshold, timeSeriesCompactionTimeThresholdSeconds,
-                            timeSeriesCompactionEmptyRowsetsThreshold,
+                            timeSeriesCompactionEmptyRowsetsThreshold, timeSeriesCompactionLevelThreshold,
                             storeRowColumn, isDynamicSchema, binlogConfig);
 
                     task.setStorageFormat(storageFormat);
@@ -2203,7 +2236,9 @@ public class InternalCatalog implements CatalogIf<Database> {
                 || properties
                         .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_TIME_THRESHOLD_SECONDS)
                 || properties
-                        .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD))) {
+                        .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_EMPTY_ROWSETS_THRESHOLD)
+                || properties
+                        .containsKey(PropertyAnalyzer.PROPERTIES_TIME_SERIES_COMPACTION_LEVEL_THRESHOLD))) {
             throw new DdlException("only time series compaction policy support for time series config");
         }
 
@@ -2250,6 +2285,17 @@ public class InternalCatalog implements CatalogIf<Database> {
             throw new DdlException(e.getMessage());
         }
         olapTable.setTimeSeriesCompactionEmptyRowsetsThreshold(timeSeriesCompactionEmptyRowsetsThreshold);
+
+        // set time series compaction level threshold
+        long timeSeriesCompactionLevelThreshold
+                                     = PropertyAnalyzer.TIME_SERIES_COMPACTION_LEVEL_THRESHOLD_DEFAULT_VALUE;
+        try {
+            timeSeriesCompactionLevelThreshold = PropertyAnalyzer
+                                    .analyzeTimeSeriesCompactionLevelThreshold(properties);
+        } catch (AnalysisException e) {
+            throw new DdlException(e.getMessage());
+        }
+        olapTable.setTimeSeriesCompactionLevelThreshold(timeSeriesCompactionLevelThreshold);
 
         // get storage format
         TStorageFormat storageFormat = TStorageFormat.V2; // default is segment v2
@@ -2526,7 +2572,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 if (!col.getType().isFixedPointType() && !col.getType().isDateType()) {
                     throw new DdlException("Sequence type only support integer types and date types");
                 }
-                olapTable.setSequenceMapCol(sequenceMapCol);
+                olapTable.setSequenceMapCol(col.getName());
                 olapTable.setSequenceInfo(col.getType());
             }
         } catch (Exception e) {
@@ -2618,6 +2664,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getTimeSeriesCompactionFileCountThreshold(),
                         olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                         olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                        olapTable.getTimeSeriesCompactionLevelThreshold(),
                         storeRowColumn, isDynamicSchema, binlogConfigForTask,
                         partitionInfo.getDataProperty(partitionId).isStorageMediumSpecified());
                 } else {
@@ -2630,7 +2677,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getCopiedIndexes(), isInMemory, storageFormat, tabletType, compressionType,
                         olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(), storagePolicy,
                         isPersistent, isDynamicSchema, olapTable.getName(), olapTable.getTTLSeconds(),
-                        olapTable.storeRowColumn());
+                        olapTable.storeRowColumn(), olapTable.getCompactionPolicy(),
+                        olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                        olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                        olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                        olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                        olapTable.getTimeSeriesCompactionLevelThreshold());
                     commitCloudMaterializedIndex(olapTable.getId(), olapTable.getIndexIdList());
                 }
                 olapTable.addPartition(partition);
@@ -2706,7 +2758,13 @@ public class InternalCatalog implements CatalogIf<Database> {
                                 partitionInfo.getTabletType(entry.getValue()), compressionType,
                                 olapTable.getDataSortInfo(), olapTable.getEnableUniqueKeyMergeOnWrite(),
                                 storagePolicy, isPersistent, isDynamicSchema,  olapTable.getName(),
-                                olapTable.getTTLSeconds(), olapTable.storeRowColumn());
+                                olapTable.getTTLSeconds(), olapTable.storeRowColumn(),
+                                olapTable.getCompactionPolicy(),
+                                olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                                olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                                olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                                olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                                olapTable.getTimeSeriesCompactionLevelThreshold());
                         olapTable.addPartition(partition);
                         continue;
                     }
@@ -2724,6 +2782,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                             olapTable.getTimeSeriesCompactionFileCountThreshold(),
                             olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                             olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                            olapTable.getTimeSeriesCompactionLevelThreshold(),
                             storeRowColumn, isDynamicSchema, binlogConfigForTask,
                             dataProperty.isStorageMediumSpecified());
 
@@ -3168,7 +3227,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                             copiedTbl.getCompressionType(), copiedTbl.getDataSortInfo(),
                             copiedTbl.getEnableUniqueKeyMergeOnWrite(), olapTable.getStoragePolicy(),
                             copiedTbl.isPersistent(), olapTable.isDynamicSchema(), olapTable.getName(),
-                            olapTable.getTTLSeconds(), olapTable.storeRowColumn());
+                            olapTable.getTTLSeconds(), olapTable.storeRowColumn(), olapTable.getCompactionPolicy(),
+                            olapTable.getTimeSeriesCompactionGoalSizeMbytes(),
+                            olapTable.getTimeSeriesCompactionFileCountThreshold(),
+                            olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
+                            olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                            olapTable.getTimeSeriesCompactionLevelThreshold());
                     newPartitions.add(newPartition);
                     continue;
                 }
@@ -3195,6 +3259,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                         olapTable.getTimeSeriesCompactionFileCountThreshold(),
                         olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                         olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
+                        olapTable.getTimeSeriesCompactionLevelThreshold(),
                         olapTable.storeRowColumn(), olapTable.isDynamicSchema(), binlogConfig,
                         copiedTbl.getPartitionInfo().getDataProperty(oldPartitionId).isStorageMediumSpecified());
                 newPartitions.add(newPartition);
@@ -3582,7 +3647,13 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                                       boolean isDynamicSchema, String tableName,
                                                                       long ttlSeconds,
                                                                       boolean enableUniqueKeyMergeOnWrite,
-                                                                      boolean storeRowColumn, int schemaVersion)
+                                                                      boolean storeRowColumn, int schemaVersion,
+                                                                      String compactionPolicy,
+                                                                      Long timeSeriesCompactionGoalSizeMbytes,
+                                                                      Long timeSeriesCompactionFileCountThreshold,
+                                                                      Long timeSeriesCompactionTimeThresholdSeconds,
+                                                                      Long timeSeriesCompactionEmptyRowsetsThreshold,
+                                                                      Long timeSeriesCompactionLevelThreshold)
             throws DdlException {
         OlapFile.TabletMetaPB.Builder builder = OlapFile.TabletMetaPB.newBuilder();
         builder.setTableId(tableId);
@@ -3612,6 +3683,13 @@ public class InternalCatalog implements CatalogIf<Database> {
 
         builder.setReplicaId(tablet.getReplicas().get(0).getId());
         builder.setEnableUniqueKeyMergeOnWrite(enableUniqueKeyMergeOnWrite);
+
+        builder.setCompactionPolicy(compactionPolicy);
+        builder.setTimeSeriesCompactionGoalSizeMbytes(timeSeriesCompactionGoalSizeMbytes);
+        builder.setTimeSeriesCompactionFileCountThreshold(timeSeriesCompactionFileCountThreshold);
+        builder.setTimeSeriesCompactionTimeThresholdSeconds(timeSeriesCompactionTimeThresholdSeconds);
+        builder.setTimeSeriesCompactionEmptyRowsetsThreshold(timeSeriesCompactionEmptyRowsetsThreshold);
+        builder.setTimeSeriesCompactionLevelThreshold(timeSeriesCompactionLevelThreshold);
 
         OlapFile.TabletSchemaPB.Builder schemaBuilder = OlapFile.TabletSchemaPB.newBuilder();
         schemaBuilder.setSchemaVersion(schemaVersion);
@@ -3712,7 +3790,12 @@ public class InternalCatalog implements CatalogIf<Database> {
                                                       DataSortInfo dataSortInfo, boolean enableUniqueKeyMergeOnWrite,
                                                       String storagePolicy, boolean isPersistent,
                                                       boolean isDynamicSchema, String tableName, long ttlSeconds,
-                                                      boolean storeRowColumn)
+                                                      boolean storeRowColumn, String compactionPolicy,
+                                                      Long timeSeriesCompactionGoalSizeMbytes,
+                                                      Long timeSeriesCompactionFileCountThreshold,
+                                                      Long timeSeriesCompactionTimeThresholdSeconds,
+                                                      Long timeSeriesCompactionEmptyRowsetsThreshold,
+                                                      Long timeSeriesCompactionLevelThreshold)
             throws DdlException {
         // create base index first.
         Preconditions.checkArgument(baseIndexId != -1);
@@ -3766,7 +3849,10 @@ public class InternalCatalog implements CatalogIf<Database> {
                         partitionId, tablet, tabletType, schemaHash, keysType, shortKeyColumnCount,
                         bfColumns, bfFpp, indexes, columns, dataSortInfo, compressionType,
                         storagePolicy, isInMemory, isPersistent, false, isDynamicSchema, tableName, ttlSeconds,
-                        enableUniqueKeyMergeOnWrite, storeRowColumn, indexMeta.getSchemaVersion());
+                        enableUniqueKeyMergeOnWrite, storeRowColumn, indexMeta.getSchemaVersion(), compactionPolicy,
+                        timeSeriesCompactionGoalSizeMbytes, timeSeriesCompactionFileCountThreshold,
+                        timeSeriesCompactionTimeThresholdSeconds, timeSeriesCompactionEmptyRowsetsThreshold,
+                        timeSeriesCompactionLevelThreshold);
                 requestBuilder.addTabletMetas(builder);
             }
 
@@ -3816,7 +3902,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    private void sleepSeveralMs() {
+    private static void sleepSeveralMs() {
         // sleep random millis [20, 200] ms, avoid txn conflict
         int randomMillis = 20 + (int) (Math.random() * (200 - 20));
         LOG.debug("randomMillis:{}", randomMillis);
@@ -3927,7 +4013,7 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     // if `expiration` = 0, recycler will delete uncommitted partitions in `retention_seconds`
-    public void prepareCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds,
+    public static void prepareCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds,
                                       long expiration) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
@@ -3964,7 +4050,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void commitCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds) throws DdlException {
+    public static void commitCloudPartition(long tableId,
+                                            List<Long> partitionIds, List<Long> indexIds) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);

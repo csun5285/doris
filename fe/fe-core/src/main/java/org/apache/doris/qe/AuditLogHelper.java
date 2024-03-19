@@ -61,7 +61,6 @@ public class AuditLogHelper {
                 .setTraceId(spanContext.isValid() ? spanContext.getTraceId() : "")
                 .setWorkloadGroup(ctx.getWorkloadGroupName())
                 .setFuzzyVariables(!printFuzzyVariables ? "" : ctx.getSessionVariable().printFuzzyVariables());
-
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
             MetricRepo.USER_COUNTER_QUERY_ALL.getOrAdd(ctx.getQualifiedUser()).increase(1L);
@@ -81,7 +80,9 @@ public class AuditLogHelper {
                     ctx.getAuditEventBuilder().setSqlDigest(sqlDigest);
                 }
             }
-            ctx.getAuditEventBuilder().setIsQuery(true);
+            ctx.getAuditEventBuilder().setIsQuery(true)
+                .setScanBytesFromLocalStorage(statistics == null ? 0 : statistics.getScanBytesFromLocalStorage())
+                .setScanBytesFromRemoteStorage(statistics == null ? 0 : statistics.getScanBytesFromRemoteStorage());
             if (ctx.getQueryDetail() != null) {
                 ctx.getQueryDetail().setEventTime(endTime);
                 ctx.getQueryDetail().setEndTime(endTime);
@@ -113,8 +114,13 @@ public class AuditLogHelper {
         if (!Env.getCurrentEnv().isMaster()) {
             if (ctx.executor.isForwardToMaster()) {
                 ctx.getAuditEventBuilder().setState(ctx.executor.getProxyStatus());
+                int proxyStatusCode = ctx.executor.getProxyStatusCode();
+                if (proxyStatusCode != 0) {
+                    ctx.getAuditEventBuilder().setErrorCode(proxyStatusCode);
+                    ctx.getAuditEventBuilder().setErrorMessage(ctx.executor.getProxyErrMsg());
+                }
             }
         }
-        Env.getCurrentAuditEventProcessor().handleAuditEvent(ctx.getAuditEventBuilder().build());
+        Env.getCurrentEnv().getWorkloadRuntimeStatusMgr().submitFinishQueryToAudit(ctx.getAuditEventBuilder().build());
     }
 }

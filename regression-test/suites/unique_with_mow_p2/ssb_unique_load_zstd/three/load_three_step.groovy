@@ -37,8 +37,8 @@ suite("load_three_step") {
         |"exec_mem_limit" = "8589934592",
         |"load_parallelism" = "3")""".stripMargin()
 
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
 
     tables.each { tableName, rows ->
         // create table

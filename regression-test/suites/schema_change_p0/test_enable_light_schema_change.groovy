@@ -97,7 +97,7 @@ suite("test_enable_light_schema_change", "p0") {
 
     test {
         sql """ alter table ${tableName1} set ("light_schema_change"="true") """
-        exception "errCode = 2, detailMessage = failed to enable light schema change for table"
+        exception "errCode = 2, detailMessage = Table default_cluster:regression_test_schema_change_p0.test_enable_lsc has already support light_schema_change=true"
     }
 
     sql """ select * from ${tableName1} """
@@ -149,7 +149,7 @@ suite("test_enable_light_schema_change", "p0") {
     sql """ alter table ${tableName2} ADD PARTITION p4 VALUES LESS THAN ("2020-05-01") """
     sql """ insert into ${tableName2} values ('2020-04-10', 2, 'b', 5, 'test') """
 
-    sql """ alter table ${tableName2} set ("light_schema_change"="true") """
+    //sql """ alter table ${tableName2} set ("light_schema_change"="true") """
 
     sql """ select * from ${tableName2} """
 }

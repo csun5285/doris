@@ -239,7 +239,7 @@ public class EsRestClient {
         String url = currentNode + path;
         try {
             UrlSecurityChecker.startSSRFChecking(url);
-            Request request = builder.get().url(url).build();
+            Request request = builder.get().url(currentNode + path).build();
             if (LOG.isInfoEnabled()) {
                 LOG.info("es rest client request URL: {}", currentNode + "/" + path);
             }
@@ -258,7 +258,8 @@ public class EsRestClient {
      * @return response
      */
     private String execute(String path) throws DorisEsException {
-        int retrySize = nodes.length;
+        // try 3 times for every node
+        int retrySize = nodes.length * 3;
         DorisEsException scratchExceptionForThrow = null;
         OkHttpClient httpClient;
         if (httpSslEnable) {

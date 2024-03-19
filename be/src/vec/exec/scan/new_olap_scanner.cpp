@@ -593,6 +593,12 @@ void NewOlapScanner::_update_counters_before_close() {
     if (config::enable_file_cache) {
         io::FileCacheProfileReporter cache_profile(olap_parent->_segment_profile.get());
         cache_profile.update(&stats.file_cache_stats);
+        if (_query_statistics) {
+            _query_statistics->add_scan_bytes_from_local_storage(
+                    stats.file_cache_stats.bytes_read_from_local);
+            _query_statistics->add_scan_bytes_from_remote_storage(
+                    stats.file_cache_stats.bytes_read_from_remote);
+        }
     }
 
     COUNTER_UPDATE(olap_parent->_output_index_result_column_timer,

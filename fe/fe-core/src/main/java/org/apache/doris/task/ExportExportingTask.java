@@ -125,36 +125,38 @@ public class ExportExportingTask extends MasterTask {
                 if (job.getState() != JobState.EXPORTING) {
                     return new ExportResult(true, null, null);
                 }
-                try {
-                    Database db = Env.getCurrentEnv().getInternalCatalog().getDbOrAnalysisException(
-                            job.getTableName().getDb());
-                    OlapTable table = db.getOlapTableOrAnalysisException(job.getTableName().getTbl());
-                    table.readLock();
-                    Map<String, Long> partitionToVersion = job.getPartitionToVersion();
+                if (!job.isPartitionConsistency()) {
                     try {
-                        SelectStmt selectStmt = selectStmtList.get(idx);
-                        List<Long> tabletIds = selectStmt.getTableRefs().get(0).getSampleTabletIds();
-                        for (Long tabletId : tabletIds) {
-                            TabletMeta tabletMeta = Env.getCurrentEnv().getTabletInvertedIndex().getTabletMeta(
-                                    tabletId);
-                            Partition partition = table.getPartition(tabletMeta.getPartitionId());
-                            long nowVersion = partition.getVisibleVersion();
-                            long oldVersion = partitionToVersion.get(partition.getName());
-                            if (nowVersion != oldVersion) {
-                                LOG.warn("Tablet {} has changed version, old version = {}, now version = {}",
-                                        tabletId, oldVersion, nowVersion);
-                                return new ExportResult(true, new ExportFailMsg(
-                                        ExportFailMsg.CancelType.RUN_FAIL,
-                                        "Tablet {" + tabletId + "} has changed"), null);
+                        Database db = Env.getCurrentEnv().getInternalCatalog().getDbOrAnalysisException(
+                                job.getTableName().getDb());
+                        OlapTable table = db.getOlapTableOrAnalysisException(job.getTableName().getTbl());
+                        table.readLock();
+                        Map<String, Long> partitionToVersion = job.getPartitionToVersion();
+                        try {
+                            SelectStmt selectStmt = selectStmtList.get(idx);
+                            List<Long> tabletIds = selectStmt.getTableRefs().get(0).getSampleTabletIds();
+                            for (Long tabletId : tabletIds) {
+                                TabletMeta tabletMeta = Env.getCurrentEnv().getTabletInvertedIndex().getTabletMeta(
+                                        tabletId);
+                                Partition partition = table.getPartition(tabletMeta.getPartitionId());
+                                long nowVersion = partition.getVisibleVersion();
+                                long oldVersion = partitionToVersion.get(partition.getName());
+                                if (nowVersion != oldVersion) {
+                                    LOG.warn("Tablet {} has changed version, old version = {}, now version = {}",
+                                            tabletId, oldVersion, nowVersion);
+                                    return new ExportResult(true, new ExportFailMsg(
+                                            ExportFailMsg.CancelType.RUN_FAIL,
+                                            "Tablet {" + tabletId + "} has changed"), null);
+                                }
                             }
+                        } finally {
+                            table.readUnlock();
                         }
-                    } finally {
-                        table.readUnlock();
+                    } catch (AnalysisException e) {
+                        LOG.warn("analyze export job select stmt {} failed", idx, e);
+                        return new ExportResult(true,
+                                new ExportFailMsg(ExportFailMsg.CancelType.RUN_FAIL, e.getMessage()), null);
                     }
-                } catch (AnalysisException e) {
-                    LOG.warn("analyze export job select stmt {} failed", idx, e);
-                    return new ExportResult(true,
-                            new ExportFailMsg(ExportFailMsg.CancelType.RUN_FAIL, e.getMessage()), null);
                 }
                 try (AutoCloseConnectContext r = buildConnectContext()) {
                     StmtExecutor stmtExecutor = new StmtExecutor(r.connectContext, selectStmtList.get(idx));

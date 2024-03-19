@@ -404,6 +404,13 @@ struct TQueryStatistics {
     3: optional i64 returned_rows
     4: optional i64 cpu_ms
     5: optional i64 max_peak_memory_bytes
+    6: optional i64 scan_bytes_from_local_storage
+    7: optional i64 scan_bytes_from_remote_storage
+}
+
+struct TReportWorkloadRuntimeStatusParams {
+    1: optional i64 backend_id
+    2: optional map<string, TQueryStatistics> query_statistics_map
 }
 
 // The results of an INSERT query, sent to the coordinator as part of
@@ -467,6 +474,8 @@ struct TReportExecStatusParams {
   23: optional list<TDetailedReportParams> detailed_report
 
   24: optional TQueryStatistics query_statistics
+
+  25: optional TReportWorkloadRuntimeStatusParams report_workload_runtime_status
 }
 
 struct TFeResult {
@@ -531,6 +540,9 @@ struct TMasterOpResult {
     3: optional TShowResultSet resultSet;
     4: optional Types.TUniqueId queryId;
     5: optional string status;
+    6: optional i32 statusCode;
+    7: optional string errMessage;
+    8: optional list<binary> queryResultBufList;
 }
 
 struct TUpdateExportTaskStatusRequest {
@@ -1283,6 +1295,14 @@ struct TReportCommitTxnResultRequest {
     4: optional binary payload
 }
 
+struct TShowProcessListRequest {
+    1: optional bool show_full_sql
+}
+
+struct TShowProcessListResult {
+    1: optional list<list<string>> process_list
+}
+
 service FrontendService {
     TGetDbsResult getDbNames(1: TGetDbsParams params)
     TGetTablesResult getTableNames(1: TGetTablesParams params)
@@ -1360,4 +1380,6 @@ service FrontendService {
     Status.TStatus invalidateStatsCache(1: TInvalidateFollowerStatsCacheRequest request)
 
     Status.TStatus reportCommitTxnResult(1: TReportCommitTxnResultRequest request)
+
+    TShowProcessListResult showProcessList(1: TShowProcessListRequest request)
 }

@@ -140,25 +140,13 @@ public class Config extends ConfigBase {
                     + "if the specified driver file path is not an absolute path, Doris will find jars from this path"})
     public static String jdbc_drivers_dir = System.getenv("DORIS_HOME") + "/jdbc_drivers";
 
-    @ConfField(description = {"JDBC Catalog FE 连接池的最小连接数",
-            "The minimum number of JDBC Catalog FE connection pool"})
-    public static int jdbc_min_pool_size = 1;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的最大连接数",
-            "The maximum number of JDBC Catalog FE connection pool"})
-    public static int jdbc_max_pool_size = 100;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的最大空闲连接时间",
-            "The maximum idle time of JDBC Catalog FE connection pool"})
-    public static int jdbc_max_idle_time = 300000;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的最大等待时间",
-            "The maximum wait time of JDBC Catalog FE connection pool"})
-    public static int jdbc_max_wait_time = 5000;
-
-    @ConfField(description = {"JDBC Catalog FE 连接池的 KeepAlive 策略",
-            "The keep alive strategy of JDBC Catalog FE connection pool"})
-    public static boolean jdbc_keep_alive = false;
+    @ConfField(description = {"JDBC 驱动的安全路径。在创建 JDBC Catalog 时，允许使用的文件或者网络路径，可配置多个，使用分号分隔"
+            + "默认为 * 全部允许，如果设置为空责全部不允许",
+            "The safe path of the JDBC driver. When creating a JDBC Catalog,"
+                    + "you can configure multiple files or network paths that are allowed to be used,"
+                    + "separated by semicolons"
+                    + "The default is * to allow all, if set to empty, all are not allowed"})
+    public static String jdbc_driver_secure_path = "*";
 
     @ConfField(mutable = true, masterOnly = true, description = {"broker load 时，单个节点上 load 执行计划的默认并行度",
             "The default parallelism of the load execution plan on a single node when the broker load is submitted"})
@@ -1079,6 +1067,11 @@ public class Config extends ConfigBase {
     @ConfField(masterOnly = true, mutable = true)
     public static int balance_slot_num_per_path = 1;
 
+    // when execute admin set replica status = 'drop', the replica will marked as user drop.
+    // will try to drop this replica within time not exceeds manual_drop_replica_valid_second
+    @ConfField(masterOnly = true, mutable = true)
+    public static long manual_drop_replica_valid_second = 24 * 3600L;
+
     // This threshold is to avoid piling up too many report task in FE, which may cause OOM exception.
     // In some large Doris cluster, eg: 100 Backends with ten million replicas, a tablet report may cost
     // several seconds after some modification of metadata(drop partition, etc..).
@@ -1828,6 +1821,10 @@ public class Config extends ConfigBase {
         "Max cache number of remote file system."})
     public static long max_remote_file_system_cache_num = 100;
 
+    @ConfField(mutable = false, masterOnly = false, description = {"外表行数缓存最大数量",
+        "Max cache number of external table row count"})
+    public static long max_external_table_row_count_cache_num = 100000;
+
     /**
      * Max cache loader thread-pool size.
      * Max thread pool size for loading external meta cache
@@ -2123,6 +2120,11 @@ public class Config extends ConfigBase {
             "是否启用binlog特性",
             "Whether to enable binlog feature"})
     public static boolean enable_feature_binlog = false;
+
+    @ConfField(mutable = false, masterOnly = false, expType = ExperimentalType.EXPERIMENTAL, description = {
+        "设置 binlog 消息最字节长度",
+        "Set the maximum byte length of binlog message"})
+    public static int max_binlog_messsage_size = 1024 * 1024 * 1024;
 
     @ConfField(mutable = true, masterOnly = true, description = {
             "是否禁止使用 WITH REOSOURCE 语句创建 Catalog。",
@@ -2603,6 +2605,16 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static int publish_topic_info_interval_ms = 30000; // 30s
 
+    @ConfField(mutable = true)
+    public static int workload_runtime_status_thread_interval_ms = 2000;
+
+    // NOTE: it should bigger than be config report_query_statistics_interval_ms
+    @ConfField(mutable = true)
+    public static int query_audit_log_timeout_ms = 5000;
+
+    @ConfField(mutable = true)
+    public static int be_report_query_statistics_timeout_ms = 60000;
+
     @ConfField(masterOnly = true, description = {
         "设置 root 用户初始化2阶段 SHA-1 加密密码，默认为''，即不设置 root 密码。"
             + "后续 root 用户的 `set password` 操作会将 root 初始化密码覆盖。"
@@ -2644,4 +2656,10 @@ public class Config extends ConfigBase {
                     + "and the deleted labels can be reused."
     })
     public static int label_num_threshold = 2000;
+
+    @ConfField(mutable = true, masterOnly = false, description = {
+            "控制是否允许创建resource",
+            "Control whether to allow the creation of resource."
+    })
+    public static boolean enable_create_resource = false;
 }

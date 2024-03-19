@@ -22,6 +22,15 @@ class TxnKv;
 class InstanceRecycler;
 class ObjStoreAccessor;
 class Checker;
+struct RecyclerThreadPoolGroup;
+class SimpleThreadPool;
+struct RecyclerThreadPoolGroup {
+    RecyclerThreadPoolGroup();
+    ~RecyclerThreadPoolGroup() = default;
+    std::unique_ptr<SimpleThreadPool> s3_producer_pool;
+    std::unique_ptr<SimpleThreadPool> recycle_tablet_pool;
+    std::unique_ptr<SimpleThreadPool> group_recycle_function_pool;
+};
 
 class Recycler {
 public:
@@ -65,11 +74,13 @@ private:
 
     WhiteBlackList instance_filter_;
     std::unique_ptr<Checker> checker_;
+    std::unique_ptr<RecyclerThreadPoolGroup> _thread_pool_group;
 };
 
 class InstanceRecycler {
 public:
-    explicit InstanceRecycler(std::shared_ptr<TxnKv> txn_kv, const InstanceInfoPB& instance);
+    explicit InstanceRecycler(std::shared_ptr<TxnKv> txn_kv, const InstanceInfoPB& instance,
+                              const RecyclerThreadPoolGroup& thread_pool_group);
     ~InstanceRecycler();
 
     int init();
@@ -190,6 +201,7 @@ private:
     std::mutex recycle_tasks_mutex;
     // <task_name, start_time>>
     std::map<std::string, int64_t> running_recycle_tasks;
+    const RecyclerThreadPoolGroup& _thread_pool_group;
 };
 
 } // namespace selectdb

@@ -102,7 +102,7 @@ public class SystemInfoService {
 
     private volatile ImmutableMap<Long, DiskInfo> pathHashToDishInfoRef = ImmutableMap.of();
 
-    private InstanceInfoPB.Status instanceStatus;
+    private InstanceInfoPB.Status instanceStatus = InstanceInfoPB.Status.NORMAL;
 
     public static class HostInfo implements Comparable<HostInfo> {
         public String host;
@@ -260,7 +260,8 @@ public class SystemInfoService {
     }
 
     public List<String> getCloudClusterNames() {
-        return new ArrayList<>(clusterNameToId.keySet());
+        return new ArrayList<>(clusterNameToId.keySet()).stream().filter(c -> !Strings.isNullOrEmpty(c))
+            .sorted(Comparator.naturalOrder()).collect(Collectors.toList());
     }
 
     // use cluster $clusterName

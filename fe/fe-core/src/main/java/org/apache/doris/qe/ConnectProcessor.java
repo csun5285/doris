@@ -330,7 +330,6 @@ public class ConnectProcessor {
                             ? ctx.cloudCluster : "UNKNOWN")
                 .setWorkloadGroup(ctx.getWorkloadGroupName())
                 .setFuzzyVariables(!printFuzzyVariables ? "" : ctx.getSessionVariable().printFuzzyVariables());
-
         if (ctx.getState().isQuery()) {
             MetricRepo.COUNTER_QUERY_ALL.increase(1L);
             MetricRepo.USER_COUNTER_QUERY_ALL.getOrAdd(ctx.getQualifiedUser()).increase(1L);
@@ -388,7 +387,9 @@ public class ConnectProcessor {
                     ctx.getAuditEventBuilder().setSqlDigest(sqlDigest);
                 }
             }
-            ctx.getAuditEventBuilder().setIsQuery(true);
+            ctx.getAuditEventBuilder().setIsQuery(true)
+                .setScanBytesFromLocalStorage(statistics == null ? 0 : statistics.getScanBytesFromLocalStorage())
+                .setScanBytesFromRemoteStorage(statistics == null ? 0 : statistics.getScanBytesFromRemoteStorage());
             if (ctx.getQueryDetail() != null) {
                 ctx.getQueryDetail().setEventTime(endTime);
                 ctx.getQueryDetail().setEndTime(endTime);
@@ -438,7 +439,7 @@ public class ConnectProcessor {
                 ctx.getAuditEventBuilder().setState(ctx.executor.getProxyStatus());
             }
         }
-        Env.getCurrentAuditEventProcessor().handleAuditEvent(ctx.getAuditEventBuilder().build());
+        AuditLogHelper.logAuditLog(ctx, origStmt, parsedStmt, null, true);
     }
 
     // Process COM_QUERY statement,
@@ -473,8 +474,10 @@ public class ConnectProcessor {
         String originStmt = new String(bytes, 1, ending, StandardCharsets.UTF_8);
 
         if (Config.isCloudMode()) {
+            InstanceInfoPB.Status s = Env.getCurrentSystemInfo().getInstanceStatus();
             if (!ctx.getCurrentUserIdentity().isRootUser()
-                    && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+                    && s == InstanceInfoPB.Status.OVERDUE) {
+                LOG.warn("this warehouse is overdue root:{}, status:{}", ctx.getCurrentUserIdentity().isRootUser(), s);
                 Exception exception = new Exception("warehouse is overdue!");
                 handleQueryException(exception, originStmt, null, null);
                 return;
@@ -547,7 +550,8 @@ public class ConnectProcessor {
                         finalizeCommand();
                     }
                 }
-                auditAfterExec(auditStmt, executor.getParsedStmt(), executor.getQueryStatisticsForAuditLog(), true);
+                auditAfterExec(auditStmt, executor.getParsedStmt(), executor.getQueryStatisticsForAuditLog(),
+                        true);
                 // execute failed, skip remaining stmts
                 if (ctx.getState().getStateType() == MysqlStateType.ERR) {
                     break;
@@ -741,7 +745,11 @@ public class ConnectProcessor {
                 && ctx.getState().getStateType() != QueryState.MysqlStateType.ERR) {
             ShowResultSet resultSet = executor.getShowResultSet();
             if (resultSet == null) {
-                packet = executor.getOutputPacket();
+                if (executor.sendProxyQueryResult()) {
+                    packet = getResultPacket();
+                } else {
+                    packet = executor.getOutputPacket();
+                }
             } else {
                 executor.sendResultSet(resultSet);
                 packet = getResultPacket();
@@ -913,8 +921,18 @@ public class ConnectProcessor {
         result.setMaxJournalId(Env.getCurrentEnv().getMaxJournalId());
         result.setPacket(getResultPacket());
         result.setStatus(ctx.getState().toString());
-        if (executor != null && executor.getProxyResultSet() != null) {
-            result.setResultSet(executor.getProxyResultSet().tothrift());
+        if (ctx.getState().getStateType() == MysqlStateType.OK) {
+            result.setStatusCode(0);
+        } else {
+            result.setStatusCode(ctx.getState().getErrorCode().getCode());
+            result.setErrMessage(ctx.getState().getErrorMessage());
+        }
+        if (executor != null) {
+            if (executor.getProxyShowResultSet() != null) {
+                result.setResultSet(executor.getProxyShowResultSet().tothrift());
+            } else if (!executor.getProxyQueryResultBufList().isEmpty()) {
+                result.setQueryResultBufList(executor.getProxyQueryResultBufList());
+            }
         }
         return result;
     }

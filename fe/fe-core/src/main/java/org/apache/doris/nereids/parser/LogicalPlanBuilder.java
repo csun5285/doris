@@ -19,6 +19,7 @@ package org.apache.doris.nereids.parser;
 
 import org.apache.doris.analysis.ArithmeticExpr.Operator;
 import org.apache.doris.analysis.UserIdentity;
+import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.DorisParser;
@@ -182,6 +183,8 @@ import org.apache.doris.nereids.trees.expressions.WindowFrame;
 import org.apache.doris.nereids.trees.expressions.functions.Function;
 import org.apache.doris.nereids.trees.expressions.functions.agg.Count;
 import org.apache.doris.nereids.trees.expressions.functions.agg.GroupConcat;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.Char;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.ConvertTo;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysAdd;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysDiff;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysSub;
@@ -217,6 +220,8 @@ import org.apache.doris.nereids.trees.expressions.literal.LargeIntLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import org.apache.doris.nereids.trees.expressions.literal.NullLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.SmallIntLiteral;
+import org.apache.doris.nereids.trees.expressions.literal.StringLikeLiteral;
+import org.apache.doris.nereids.trees.expressions.literal.StringLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.TinyIntLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.VarcharLiteral;
 import org.apache.doris.nereids.trees.plans.JoinHint;
@@ -255,6 +260,7 @@ import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.VarcharType;
 import org.apache.doris.nereids.types.coercion.CharacterType;
 import org.apache.doris.nereids.util.ExpressionUtils;
+import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.policy.FilterType;
 import org.apache.doris.policy.PolicyTypeEnum;
 import org.apache.doris.qe.ConnectContext;
@@ -635,6 +641,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             }
         }
 
+        Optional<String> indexName = Optional.empty();
+        if (ctx.materializedViewName() != null) {
+            indexName = Optional.ofNullable(ctx.materializedViewName().indexName.getText());
+        }
+
         List<Long> tabletIdLists = new ArrayList<>();
         if (ctx.tabletList() != null) {
             ctx.tabletList().tabletIdList.stream().forEach(tabletToken -> {
@@ -653,7 +664,7 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
         LogicalPlan checkedRelation = withCheckPolicy(
                 new UnboundRelation(StatementScopeIdGenerator.newRelationId(),
                         tableId, partitionNames, isTempPart, tabletIdLists, relationHints,
-                        Optional.ofNullable(tableSample)));
+                        Optional.ofNullable(tableSample), indexName));
         LogicalPlan plan = withTableAlias(checkedRelation, ctx.tableAlias());
         for (LateralViewContext lateralViewContext : ctx.lateralView()) {
             plan = withGenerate(plan, lateralViewContext);
@@ -1156,6 +1167,39 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     }
 
     @Override
+    public Expression visitCharFunction(DorisParser.CharFunctionContext ctx) {
+        String charSet = ctx.charSet == null ? "utf8" : ctx.charSet.getText();
+        List<Expression> arguments = ImmutableList.<Expression>builder()
+                .add(new StringLiteral(charSet))
+                .addAll(visit(ctx.arguments, Expression.class))
+                .build();
+        return new Char(arguments);
+    }
+
+    @Override
+    public Expression visitConvertCharSet(DorisParser.ConvertCharSetContext ctx) {
+        return new ConvertTo(getExpression(ctx.argument), new StringLiteral(ctx.charSet.getText()));
+    }
+
+    @Override
+    public Expression visitConvertType(DorisParser.ConvertTypeContext ctx) {
+        List<String> types = typedVisit(ctx.dataType());
+        DataType dataType = DataType.convertPrimitiveFromStrings(types, true);
+        Expression cast = ParserUtils.withOrigin(ctx, () ->
+                new Cast(getExpression(ctx.argument), dataType));
+        if (dataType.isStringLikeType() && ((CharacterType) dataType).getLen() >= 0) {
+            List<Expression> args = ImmutableList.of(
+                    cast,
+                    new TinyIntLiteral((byte) 1),
+                    Literal.of(((CharacterType) dataType).getLen())
+            );
+            return new UnboundFunction("substr", args);
+        } else {
+            return cast;
+        }
+    }
+
+    @Override
     public Expression visitFunctionCall(DorisParser.FunctionCallContext ctx) {
         return ParserUtils.withOrigin(ctx, () -> {
             String functionName = ctx.functionIdentifier().functionNameIdentifier().getText();
@@ -1375,7 +1419,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
         if (!SqlModeHelper.hasNoBackSlashEscapes()) {
             s = escapeBackSlash(s);
         }
-        return new VarcharLiteral(s);
+        int strLength = Utils.containChinese(s) ? s.length() * StringLikeLiteral.CHINESE_CHAR_BYTE_LENGTH : s.length();
+        if (strLength > ScalarType.MAX_VARCHAR_LENGTH) {
+            return new StringLiteral(s);
+        }
+        return new VarcharLiteral(s, strLength);
     }
 
     private String escapeBackSlash(String str) {

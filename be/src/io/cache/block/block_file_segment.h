@@ -49,6 +49,7 @@ using FileBlocks = std::list<FileBlockSPtr>;
 class FileBlock {
     friend class BlockFileCache;
     friend struct FileBlocksHolder;
+    friend class CachedRemoteFileReader;
 
 public:
     using LocalWriterPtr = std::unique_ptr<FileWriter>;
@@ -187,6 +188,7 @@ private:
     FileCacheType _cache_type;
     int64_t _expiration_time {0};
 };
+extern std::ostream& operator<<(std::ostream& os, const FileBlock::State& value);
 
 struct FileBlocksHolder {
     explicit FileBlocksHolder(FileBlocks&& file_segments_)

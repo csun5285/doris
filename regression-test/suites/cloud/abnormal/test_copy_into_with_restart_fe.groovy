@@ -45,8 +45,8 @@ suite("test_copy_into_with_restart_fe") {
         );
     """
 
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
     def result = sql """
         copy into ${tableName} from @${externalStageName}('tpch/sf100/customer.tbl')
         properties (

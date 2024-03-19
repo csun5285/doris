@@ -37,6 +37,7 @@ struct FileWriterOptions {
     bool is_cold_data = false;
     bool sync_file_data = true;        // Whether flush data into storage system
     int64_t file_cache_expiration = 0; // Absolute time
+    bool create_empty_file = 0;
 };
 
 class FileWriter {
@@ -45,6 +46,9 @@ public:
     virtual ~FileWriter() = default;
 
     DISALLOW_COPY_AND_ASSIGN(FileWriter);
+
+    // Open the file for writing.
+    virtual Status open() { return Status::OK(); }
 
     // Normal close. Wait for all data to persist before returning.
     [[nodiscard]] virtual Status close() = 0;
@@ -69,6 +73,7 @@ protected:
     FileSystemSPtr _fs;
     bool _closed = false;
     bool _opened = false;
+    bool _create_empty_file = true;
 };
 
 } // namespace io

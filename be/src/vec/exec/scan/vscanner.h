@@ -34,6 +34,7 @@
 namespace doris {
 class RuntimeProfile;
 class TupleDescriptor;
+class QueryStatistics;
 
 namespace vectorized {
 class VExprContext;
@@ -116,24 +117,9 @@ public:
     int64_t get_scanner_wait_worker_timer() { return _scanner_wait_worker_timer; }
 
     void update_scan_cpu_timer() {
-        if (bthread_self() == 0) {
-            _scan_cpu_timer += _cpu_watch.elapsed_time();
-            return;
-        }
-
-        // If in bthread, use the cputime in TaskMeta. BTHREAD_SCANNER
-        bthread::TaskMeta* const m = bthread::TaskGroup::address_meta(bthread_self());
-        if (m == nullptr) {
-            return;
-        }
-        const uint32_t given_ver = bthread::get_version(bthread_self());
-        {
-            std::lock_guard l(m->version_lock);
-            if (given_ver != *m->version_butex) {
-                return;
-            }
-            _scan_cpu_timer += m->stat.cputime_ns;
-        }
+        int64_t cpu_time = _cpu_watch.elapsed_time();
+        _scan_cpu_timer += cpu_time;
+        _query_statistics->add_cpu_nanos(cpu_time);
     }
 
     RuntimeState* runtime_state() { return _state; }
@@ -170,6 +156,10 @@ public:
         return true;
     }
 
+    void set_query_statistics(QueryStatistics* query_statistics) {
+        _query_statistics = query_statistics;
+    }
+
 protected:
     void _discard_conjuncts() {
         for (auto& conjunct : _conjuncts) {
@@ -180,6 +170,7 @@ protected:
 
     RuntimeState* _state;
     VScanNode* _parent;
+    QueryStatistics* _query_statistics = nullptr;
     // Set if scan node has sort limit info
     int64_t _limit = -1;
 

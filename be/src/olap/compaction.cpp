@@ -22,6 +22,7 @@
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <list>
 #include <map>
@@ -101,6 +102,7 @@ void Compaction::init_profile(const std::string& label) {
 
 Status Compaction::execute_compact() {
     Status st = execute_compact_impl();
+    _tablet->compaction_count.fetch_add(1, std::memory_order_relaxed);
     if (!st.ok()) {
         garbage_collection();
     }
@@ -337,8 +339,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     RETURN_IF_ERROR(construct_input_rowset_readers());
     RETURN_IF_ERROR(construct_output_rowset_writer(ctx, vertical_compaction));
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(
-            cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta().get(), true));
+    RETURN_IF_ERROR(cloud::meta_mgr()->prepare_rowset(_output_rs_writer->rowset_meta().get()));
 #endif
     if (compaction_type() == ReaderType::READER_COLD_DATA_COMPACTION) {
         Tablet::add_pending_remote_rowset(_output_rs_writer->rowset_id().to_string());
@@ -379,8 +380,12 @@ Status Compaction::do_compaction_impl(int64_t permits) {
     RETURN_NOT_OK_STATUS_WITH_WARN(_output_rs_writer->build(_output_rowset),
                                    fmt::format("rowset writer build failed. output_version: {}",
                                                _output_version.to_string()));
+
 #ifdef CLOUD_MODE
-    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get(), true));
+    _tablet->get_cumulative_compaction_policy()->update_compaction_level(
+            _tablet.get(), _input_rowsets, _output_rowset);
+
+    RETURN_IF_ERROR(cloud::meta_mgr()->commit_rowset(_output_rowset->rowset_meta().get()));
 #endif
 
     // Now we support delete in cumu compaction, to make all data in rowsets whose version
@@ -417,6 +422,8 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         OlapStopWatch inverted_watch;
 
         // check rowid_conversion correctness
+        // currently, only check the unique key table with merge on write enabled
+        // TODO: check the correctness of rowid_conversion for other cases, such as DUP_KEYS and MOR
         Version version = _tablet->max_version();
         DeleteBitmap output_rowset_delete_bitmap(_tablet->tablet_id());
         std::set<RowLocation> missed_rows;
@@ -586,7 +593,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         }
     }
 
-    auto cumu_policy = _tablet->cumulative_compaction_policy();
+    auto cumu_policy = _tablet->get_cumulative_compaction_policy();
     DCHECK(cumu_policy);
     LOG(INFO) << "succeed to do " << compaction_name() << " is_vertical=" << vertical_compaction
               << ". tablet=" << _tablet->full_name() << ", output_version=" << _output_version
@@ -621,8 +628,10 @@ Status Compaction::construct_output_rowset_writer(RowsetWriterContext& ctx, bool
     ctx.tablet_schema = _cur_tablet_schema;
     ctx.newest_write_timestamp = _newest_write_timestamp;
     ctx.write_type = DataWriteType::TYPE_COMPACTION;
+    // only do index compaction for dup_keys and unique_keys with mow enabled
     if (config::inverted_index_compaction_enable &&
-        ((_tablet->keys_type() == KeysType::UNIQUE_KEYS ||
+        (((_tablet->keys_type() == KeysType::UNIQUE_KEYS &&
+           _tablet->enable_unique_key_merge_on_write()) ||
           _tablet->keys_type() == KeysType::DUP_KEYS))) {
         for (const auto& index : _cur_tablet_schema->indexes()) {
             if (index.index_type() == IndexType::INVERTED) {

@@ -148,7 +148,7 @@ public class AnalysisManager implements Writable {
         if (!StatisticsUtil.statsTblAvailable() && !FeConstants.runningUnitTest) {
             throw new DdlException("Stats table not available, please make sure your cluster status is normal");
         }
-        if (Config.force_sample_analyze) {
+        if (ConnectContext.get().getSessionVariable().forceSampleAnalyze) {
             analyzeStmt.checkAndSetSample();
         }
         if (analyzeStmt instanceof AnalyzeDBStmt) {
@@ -289,7 +289,7 @@ public class AnalysisManager implements Writable {
             if (!proxy) {
                 ConnectContext.get().getExecutor().sendResultSet(commonResultSet);
             } else {
-                ConnectContext.get().getExecutor().setProxyResultSet(commonResultSet);
+                ConnectContext.get().getExecutor().setProxyShowResultSet(commonResultSet);
             }
         } catch (Throwable t) {
             LOG.warn("Failed to send job id to user", t);
@@ -425,10 +425,16 @@ public class AnalysisManager implements Writable {
     public void createTaskForEachColumns(AnalysisInfo jobInfo, Map<Long, BaseAnalysisTask> analysisTasks,
             boolean isSync) throws DdlException {
         Map<String, Set<String>> columnToPartitions = jobInfo.colToPartitions;
+        TableIf table = jobInfo.getTable();
         for (Entry<String, Set<String>> entry : columnToPartitions.entrySet()) {
-            long indexId = -1;
-            long taskId = Env.getCurrentEnv().getNextId();
             String colName = entry.getKey();
+            List<Long> indexIds = Lists.newArrayList();
+            // Get index id this column belongs to for OlapTable. Set it to -1 for baseIndex id.
+            if (table instanceof OlapTable) {
+                indexIds = ((OlapTable) table).getMvColumnIndexIds(colName);
+            } else {
+                indexIds.add(-1L);
+            }
             AnalysisInfoBuilder colTaskInfoBuilder = new AnalysisInfoBuilder(jobInfo);
             if (jobInfo.analysisType != AnalysisType.HISTOGRAM) {
                 colTaskInfoBuilder.setAnalysisType(AnalysisType.FUNDAMENTALS);
@@ -436,14 +442,17 @@ public class AnalysisManager implements Writable {
                 colToParts.put(colName, entry.getValue());
                 colTaskInfoBuilder.setColToPartitions(colToParts);
             }
-            AnalysisInfo analysisInfo = colTaskInfoBuilder.setColName(colName).setIndexId(indexId)
-                    .setTaskId(taskId).setLastExecTimeInMs(System.currentTimeMillis()).build();
-            analysisTasks.put(taskId, createTask(analysisInfo));
-            jobInfo.addTaskId(taskId);
-            if (isSync) {
-                continue;
+            for (long indexId : indexIds) {
+                long taskId = Env.getCurrentEnv().getNextId();
+                AnalysisInfo analysisInfo = colTaskInfoBuilder.setColName(colName).setIndexId(indexId)
+                        .setTaskId(taskId).setLastExecTimeInMs(System.currentTimeMillis()).build();
+                analysisTasks.put(taskId, createTask(analysisInfo));
+                jobInfo.addTaskId(taskId);
+                if (isSync) {
+                    continue;
+                }
+                replayCreateAnalysisTask(analysisInfo);
             }
-            replayCreateAnalysisTask(analysisInfo);
         }
     }
 
@@ -547,8 +556,7 @@ public class AnalysisManager implements Writable {
 
     @VisibleForTesting
     public void updateTableStats(AnalysisInfo jobInfo) {
-        TableIf tbl = StatisticsUtil.findTable(jobInfo.catalogId,
-                jobInfo.dbId, jobInfo.tblId);
+        TableIf tbl = StatisticsUtil.findTable(jobInfo.catalogId, jobInfo.dbId, jobInfo.tblId);
         // External Table only update table stats when all tasks finished.
         // Because it needs to get the row count from the result of row count task.
         if (tbl instanceof ExternalTable && !jobInfo.state.equals(AnalysisState.FINISHED)) {
@@ -556,7 +564,7 @@ public class AnalysisManager implements Writable {
         }
         TableStatsMeta tableStats = findTableStatsStatus(tbl.getId());
         if (tableStats == null) {
-            updateTableStatsStatus(new TableStatsMeta(jobInfo.emptyJob ? 0 : tbl.estimatedRowCount(), jobInfo, tbl));
+            updateTableStatsStatus(new TableStatsMeta(jobInfo.emptyJob ? 0 : tbl.getRowCount(), jobInfo, tbl));
         } else {
             tableStats.update(jobInfo, tbl);
             logCreateTableStats(tableStats);
@@ -590,14 +598,16 @@ public class AnalysisManager implements Writable {
             tbl = StatisticsUtil.findTable(tblName.getCtl(), tblName.getDb(), tblName.getTbl());
         }
         long tblId = tbl == null ? -1 : tbl.getId();
-        return analysisInfos.stream()
+        synchronized (analysisInfos) {
+            return analysisInfos.stream()
                 .filter(a -> stmt.getJobId() == 0 || a.jobId == stmt.getJobId())
                 .filter(a -> state == null || a.state.equals(AnalysisState.valueOf(state)))
                 .filter(a -> tblName == null || a.tblId == tblId)
                 .filter(a -> stmt.isAuto() && a.jobType.equals(JobType.SYSTEM)
-                             || !stmt.isAuto() && a.jobType.equals(JobType.MANUAL))
+                    || !stmt.isAuto() && a.jobType.equals(JobType.MANUAL))
                 .sorted(Comparator.comparingLong(a -> a.jobId))
                 .collect(Collectors.toList());
+        }
     }
 
     public String getJobProgress(long jobId) {
@@ -658,14 +668,16 @@ public class AnalysisManager implements Writable {
         }
 
         Set<String> cols = dropStatsStmt.getColumnNames();
+        long catalogId = dropStatsStmt.getCatalogIdId();
+        long dbId = dropStatsStmt.getDbId();
         long tblId = dropStatsStmt.getTblId();
         TableStatsMeta tableStats = findTableStatsStatus(dropStatsStmt.getTblId());
         if (tableStats == null) {
             return;
         }
-        invalidateLocalStats(tblId, cols, tableStats);
+        invalidateLocalStats(catalogId, dbId, tblId, cols, tableStats);
         // Drop stats ddl is master only operation.
-        invalidateRemoteStats(tblId, cols);
+        invalidateRemoteStats(catalogId, dbId, tblId, cols, dropStatsStmt.isAllColumns());
         StatisticsRepository.dropStatistics(tblId, cols);
     }
 
@@ -674,30 +686,47 @@ public class AnalysisManager implements Writable {
         if (tableStats == null) {
             return;
         }
-        Set<String> cols = table.getBaseSchema().stream().map(Column::getName).collect(Collectors.toSet());
-        invalidateLocalStats(table.getId(), cols, tableStats);
+        long catalogId = table.getDatabase().getCatalog().getId();
+        long dbId = table.getDatabase().getId();
+        long tableId = table.getId();
+        Set<String> cols = table.getSchemaAllIndexes(false).stream().map(Column::getName).collect(Collectors.toSet());
+        invalidateLocalStats(catalogId, dbId, tableId, cols, tableStats);
         // Drop stats ddl is master only operation.
-        invalidateRemoteStats(table.getId(), cols);
+        invalidateRemoteStats(catalogId, dbId, tableId, cols, true);
         StatisticsRepository.dropStatistics(table.getId(), cols);
     }
 
-    public void invalidateLocalStats(long tableId, Set<String> columns, TableStatsMeta tableStats) {
+    public void invalidateLocalStats(long catalogId, long dbId, long tableId,
+                                     Set<String> columns, TableStatsMeta tableStats) {
         if (tableStats == null) {
             return;
         }
+        TableIf table = StatisticsUtil.findTable(catalogId, dbId, tableId);
         StatisticsCache statisticsCache = Env.getCurrentEnv().getStatisticsCache();
-        if (columns != null) {
-            for (String column : columns) {
+        if (columns == null) {
+            columns = table.getSchemaAllIndexes(false)
+                .stream().map(Column::getName).collect(Collectors.toSet());
+        }
+
+        for (String column : columns) {
+            List<Long> indexIds = Lists.newArrayList();
+            if (table instanceof OlapTable) {
+                indexIds = ((OlapTable) table).getMvColumnIndexIds(column);
+            } else {
+                indexIds.add(-1L);
+            }
+            for (long indexId : indexIds) {
                 tableStats.removeColumn(column);
-                statisticsCache.invalidate(tableId, -1, column);
+                statisticsCache.invalidate(tableId, indexId, column);
             }
         }
         tableStats.updatedTime = 0;
         tableStats.userInjected = false;
     }
 
-    public void invalidateRemoteStats(long tableId, Set<String> columns) {
-        InvalidateStatsTarget target = new InvalidateStatsTarget(tableId, columns);
+    public void invalidateRemoteStats(long catalogId, long dbId, long tableId,
+                                      Set<String> columns, boolean isAllColumns) {
+        InvalidateStatsTarget target = new InvalidateStatsTarget(catalogId, dbId, tableId, columns, isAllColumns);
         TInvalidateFollowerStatsCacheRequest request = new TInvalidateFollowerStatsCacheRequest();
         request.key = GsonUtils.GSON.toJson(target);
         StatisticsCache statisticsCache = Env.getCurrentEnv().getStatisticsCache();
@@ -776,31 +805,39 @@ public class AnalysisManager implements Writable {
     }
 
     public void replayCreateAnalysisJob(AnalysisInfo jobInfo) {
-        while (analysisJobInfoMap.size() >= Config.analyze_record_limit) {
-            analysisJobInfoMap.remove(analysisJobInfoMap.pollFirstEntry().getKey());
+        synchronized (analysisJobInfoMap) {
+            while (analysisJobInfoMap.size() >= Config.analyze_record_limit) {
+                analysisJobInfoMap.remove(analysisJobInfoMap.pollFirstEntry().getKey());
+            }
+            if (jobInfo.message != null && jobInfo.message.length() >= StatisticConstants.MSG_LEN_UPPER_BOUND) {
+                jobInfo.message = jobInfo.message.substring(0, StatisticConstants.MSG_LEN_UPPER_BOUND);
+            }
+            this.analysisJobInfoMap.put(jobInfo.jobId, jobInfo);
         }
-        if (jobInfo.message != null && jobInfo.message.length() >= StatisticConstants.MSG_LEN_UPPER_BOUND) {
-            jobInfo.message = jobInfo.message.substring(0, StatisticConstants.MSG_LEN_UPPER_BOUND);
-        }
-        this.analysisJobInfoMap.put(jobInfo.jobId, jobInfo);
     }
 
     public void replayCreateAnalysisTask(AnalysisInfo taskInfo) {
-        while (analysisTaskInfoMap.size() >= Config.analyze_record_limit) {
-            analysisTaskInfoMap.remove(analysisTaskInfoMap.pollFirstEntry().getKey());
+        synchronized (analysisTaskInfoMap) {
+            while (analysisTaskInfoMap.size() >= Config.analyze_record_limit) {
+                analysisTaskInfoMap.remove(analysisTaskInfoMap.pollFirstEntry().getKey());
+            }
+            if (taskInfo.message != null && taskInfo.message.length() >= StatisticConstants.MSG_LEN_UPPER_BOUND) {
+                taskInfo.message = taskInfo.message.substring(0, StatisticConstants.MSG_LEN_UPPER_BOUND);
+            }
+            this.analysisTaskInfoMap.put(taskInfo.taskId, taskInfo);
         }
-        if (taskInfo.message != null && taskInfo.message.length() >= StatisticConstants.MSG_LEN_UPPER_BOUND) {
-            taskInfo.message = taskInfo.message.substring(0, StatisticConstants.MSG_LEN_UPPER_BOUND);
-        }
-        this.analysisTaskInfoMap.put(taskInfo.taskId, taskInfo);
     }
 
     public void replayDeleteAnalysisJob(AnalyzeDeletionLog log) {
-        this.analysisJobInfoMap.remove(log.id);
+        synchronized (analysisJobInfoMap) {
+            this.analysisJobInfoMap.remove(log.id);
+        }
     }
 
     public void replayDeleteAnalysisTask(AnalyzeDeletionLog log) {
-        this.analysisTaskInfoMap.remove(log.id);
+        synchronized (analysisTaskInfoMap) {
+            this.analysisTaskInfoMap.remove(log.id);
+        }
     }
 
     private static class SyncTaskCollection {
@@ -872,8 +909,10 @@ public class AnalysisManager implements Writable {
     }
 
     public void removeAll(List<AnalysisInfo> analysisInfos) {
-        for (AnalysisInfo analysisInfo : analysisInfos) {
-            analysisTaskInfoMap.remove(analysisInfo.taskId);
+        synchronized (analysisTaskInfoMap) {
+            for (AnalysisInfo analysisInfo : analysisInfos) {
+                analysisTaskInfoMap.remove(analysisInfo.taskId);
+            }
         }
     }
 
@@ -1070,6 +1109,10 @@ public class AnalysisManager implements Writable {
 
     public AnalysisJob findJob(long id) {
         return idToAnalysisJob.get(id);
+    }
+
+    public AnalysisInfo findJobInfo(long id) {
+        return analysisJobInfoMap.get(id);
     }
 
     public void constructJob(AnalysisInfo jobInfo, Collection<? extends BaseAnalysisTask> tasks) {

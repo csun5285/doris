@@ -106,7 +106,11 @@ public class BaseController {
     protected void addSession(HttpServletRequest request, HttpServletResponse response, SessionValue value) {
         String key = UUID.randomUUID().toString();
         Cookie cookie = new Cookie(PALO_SESSION_ID, key);
-        cookie.setSecure(false);
+        if (Config.enable_https) {
+            cookie.setSecure(true);
+        } else {
+            cookie.setSecure(false);
+        }
         cookie.setMaxAge(PALO_SESSION_EXPIRED_TIME);
         cookie.setPath("/");
         cookie.setHttpOnly(true);
@@ -179,6 +183,12 @@ public class BaseController {
             if (cookie.getName() != null && cookie.getName().equals(cookieName)) {
                 cookie.setMaxAge(age);
                 cookie.setPath("/");
+                cookie.setHttpOnly(true);
+                if (Config.enable_https) {
+                    cookie.setSecure(true);
+                } else {
+                    cookie.setSecure(false);
+                }
                 response.addCookie(cookie);
             }
         }
@@ -200,8 +210,10 @@ public class BaseController {
     }
 
     protected void checkInstanceOverdue(UserIdentity currentUsr) {
+        InstanceInfoPB.Status s = Env.getCurrentSystemInfo().getInstanceStatus();
         if (!currentUsr.isRootUser()
-                && Env.getCurrentSystemInfo().getInstanceStatus() == InstanceInfoPB.Status.OVERDUE) {
+                && s == InstanceInfoPB.Status.OVERDUE) {
+            LOG.warn("this warehouse is overdue root:{}, status:{}", currentUsr.isRootUser(), s);
             throw new UnauthorizedException("The warehouse is overdue!");
         }
     }

@@ -33,6 +33,7 @@ import org.xnio.StreamConnection;
 import org.xnio.channels.AcceptingChannel;
 
 import java.io.IOException;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * listener for accept mysql connections.
@@ -60,59 +61,67 @@ public class AcceptListener implements ChannelListener<AcceptingChannel<StreamCo
             context.setEnv(Env.getCurrentEnv());
             connectScheduler.submit(context);
 
-            channel.getWorker().execute(() -> {
-                try {
-                    // Set thread local info
-                    context.setThreadLocalInfo();
-                    context.setConnectScheduler(connectScheduler);
-                    // authenticate check failed.
-                    if (!MysqlProto.negotiate(context)) {
-                        throw new AfterConnectedException("mysql negotiate failed");
-                    }
-                    if (connectScheduler.registerConnection(context)) {
-                        MysqlProto.sendResponsePacket(context);
-                        connection.setCloseListener(streamConnection -> connectScheduler.unregisterConnection(context));
-                    } else {
-                        context.getState().setError(ErrorCode.ERR_TOO_MANY_USER_CONNECTIONS,
-                                "Reach limit of connections");
-                        MysqlProto.sendResponsePacket(context);
-                        throw new AfterConnectedException("Reach limit of connections");
-                    }
-                    if (Config.isCloudMode()) {
-                        String defaultCloudCluster = Env.getCurrentEnv().getAuth()
-                                .getDefaultCloudCluster(context.getQualifiedUser());
-                        if (!Strings.isNullOrEmpty(defaultCloudCluster)
-                                && Strings.isNullOrEmpty(context.getCloudCluster())) {
-                            context.setCloudCluster(defaultCloudCluster);
+            try {
+                channel.getWorker().execute(() -> {
+                    try {
+                        // Set thread local info
+                        context.setThreadLocalInfo();
+                        context.setConnectScheduler(connectScheduler);
+                        // authenticate check failed.
+                        if (!MysqlProto.negotiate(context)) {
+                            throw new AfterConnectedException("mysql negotiate failed");
                         }
+                        if (connectScheduler.registerConnection(context)) {
+                            MysqlProto.sendResponsePacket(context);
+                            connection.setCloseListener(
+                                    streamConnection -> connectScheduler.unregisterConnection(context));
+                        } else {
+                            context.getState().setError(ErrorCode.ERR_TOO_MANY_USER_CONNECTIONS,
+                                    "Reach limit of connections");
+                            MysqlProto.sendResponsePacket(context);
+                            throw new AfterConnectedException("Reach limit of connections");
+                        }
+                        if (Config.isCloudMode()) {
+                            String defaultCloudCluster = Env.getCurrentEnv().getAuth()
+                                    .getDefaultCloudCluster(context.getQualifiedUser());
+                            if (!Strings.isNullOrEmpty(defaultCloudCluster)
+                                    && Strings.isNullOrEmpty(context.getCloudCluster())) {
+                                context.setCloudCluster(defaultCloudCluster);
+                            }
+                        }
+                        context.setStartTime();
+                        context.setUserQueryTimeout(
+                                context.getEnv().getAuth().getQueryTimeout(context.getQualifiedUser()));
+                        context.setUserInsertTimeout(
+                                context.getEnv().getAuth().getInsertTimeout(context.getQualifiedUser()));
+                        ConnectProcessor processor = new ConnectProcessor(context);
+                        context.startAcceptQuery(processor);
+                    } catch (AfterConnectedException e) {
+                        // do not need to print log for this kind of exception.
+                        // just clean up the context;
+                        context.cleanup();
+                    } catch (Throwable e) {
+                        // should be unexpected exception, so print warn log
+                        if (context.getCurrentUserIdentity() != null) {
+                            LOG.warn("connect processor exception because ", e);
+                        } else if (e instanceof Error) {
+                            LOG.error("connect processor exception because ", e);
+                        } else {
+                            // for unauthrorized access such lvs probe request,
+                            // may cause exception, just log it in debug level
+                            LOG.debug("connect processor exception because ", e);
+                        }
+                        context.cleanup();
+                    } finally {
+                        ConnectContext.remove();
                     }
-                    context.setStartTime();
-                    context.setUserQueryTimeout(
-                            context.getEnv().getAuth().getQueryTimeout(context.getQualifiedUser()));
-                    context.setUserInsertTimeout(
-                            context.getEnv().getAuth().getInsertTimeout(context.getQualifiedUser()));
-                    ConnectProcessor processor = new ConnectProcessor(context);
-                    context.startAcceptQuery(processor);
-                } catch (AfterConnectedException e) {
-                    // do not need to print log for this kind of exception.
-                    // just clean up the context;
-                    context.cleanup();
-                } catch (Throwable e) {
-                    // should be unexpected exception, so print warn log
-                    if (context.getCurrentUserIdentity() != null) {
-                        LOG.warn("connect processor exception because ", e);
-                    } else if (e instanceof Error) {
-                        LOG.error("connect processor exception because ", e);
-                    } else {
-                        // for unauthrorized access such lvs probe request,
-                        // may cause exception, just log it in debug level
-                        LOG.debug("connect processor exception because ", e);
-                    }
-                    context.cleanup();
-                } finally {
-                    ConnectContext.remove();
-                }
-            });
+                });
+            } catch (RejectedExecutionException e) {
+                context.getState().setError(ErrorCode.ERR_TOO_MANY_USER_CONNECTIONS,
+                        "Too many connections");
+                MysqlProto.sendResponsePacket(context);
+                context.cleanup();
+            }
         } catch (IOException e) {
             LOG.warn("Connection accept failed.", e);
         }

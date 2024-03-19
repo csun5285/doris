@@ -453,18 +453,23 @@ Status SegmentIterator::_get_row_ranges_by_column_conditions() {
     }
 
     if (config::enable_index_apply_preds_except_leafnode_of_andnode) {
+        size_t input_rows = _row_bitmap.cardinality();
         RETURN_IF_ERROR(_apply_index_except_leafnode_of_andnode());
         if (_can_filter_by_preds_except_leafnode_of_andnode()) {
             for (auto it = _remaining_conjunct_roots.begin();
                  it != _remaining_conjunct_roots.end();) {
                 _pred_except_leafnode_of_andnode_evaluate_result.clear();
                 auto res = _execute_predicates_except_leafnode_of_andnode(*it);
+                VLOG_DEBUG << "_execute_predicates_except_leafnode_of_andnode expr: "
+                           << (*it)->debug_string() << " res: " << res;
                 if (res.ok() && _pred_except_leafnode_of_andnode_evaluate_result.size() == 1) {
                     _row_bitmap &= _pred_except_leafnode_of_andnode_evaluate_result[0];
                     // Delete expr after it obtains the final result.
                     {
                         std::erase_if(_common_expr_ctxs_push_down,
                                       [&it](const auto& iter) { return iter->root() == *it; });
+                        VLOG_DEBUG << "_remaining_conjunct_roots erase expr: "
+                                   << (*it)->debug_string();
                         it = _remaining_conjunct_roots.erase(it);
                     }
                 } else {
@@ -472,6 +477,7 @@ Status SegmentIterator::_get_row_ranges_by_column_conditions() {
                 }
             }
         }
+        _opts.stats->rows_inverted_index_filtered += (input_rows - _row_bitmap.cardinality());
     }
 
     RETURN_IF_ERROR(_apply_bitmap_index());
@@ -720,21 +726,24 @@ Status SegmentIterator::_execute_compound_fn(const std::string& function_name) {
     auto size = _pred_except_leafnode_of_andnode_evaluate_result.size();
     if (function_name == "and") {
         if (size < 2) {
-            return Status::InternalError("execute and logic compute error.");
+            return Status::InvalidArgument("_execute_compound_fn {} arg num {} < 2", function_name,
+                                           size);
         }
         _pred_except_leafnode_of_andnode_evaluate_result.at(size - 2) &=
                 _pred_except_leafnode_of_andnode_evaluate_result.at(size - 1);
         _pred_except_leafnode_of_andnode_evaluate_result.pop_back();
     } else if (function_name == "or") {
         if (size < 2) {
-            return Status::InternalError("execute or logic compute error.");
+            return Status::InvalidArgument("_execute_compound_fn {} arg num {} < 2", function_name,
+                                           size);
         }
         _pred_except_leafnode_of_andnode_evaluate_result.at(size - 2) |=
                 _pred_except_leafnode_of_andnode_evaluate_result.at(size - 1);
         _pred_except_leafnode_of_andnode_evaluate_result.pop_back();
     } else if (function_name == "not") {
         if (size < 1) {
-            return Status::InternalError("execute not logic compute error.");
+            return Status::InvalidArgument("_execute_compound_fn {} arg num {} < 1", function_name,
+                                           size);
         }
         roaring::Roaring tmp = _row_bitmap;
         tmp -= _pred_except_leafnode_of_andnode_evaluate_result.at(size - 1);
@@ -750,7 +759,7 @@ bool SegmentIterator::_can_filter_by_preds_except_leafnode_of_andnode() {
     }
     for (auto pred : _col_preds_except_leafnode_of_andnode) {
         if (_not_apply_index_pred.count(pred->column_id()) ||
-            (!_check_apply_by_bitmap_index(pred) && !_check_apply_by_inverted_index(pred, true))) {
+            (!_check_apply_by_inverted_index(pred, true))) {
             return false;
         }
         // all predicates are evaluated by index, then true, else false
@@ -758,14 +767,6 @@ bool SegmentIterator::_can_filter_by_preds_except_leafnode_of_andnode() {
         if (_rowid_result_for_index.count(pred_result_sign) == 0) {
             return false;
         }
-    }
-    return true;
-}
-
-bool SegmentIterator::_check_apply_by_bitmap_index(ColumnPredicate* pred) {
-    if (_bitmap_index_iterators[pred->column_id()] == nullptr) {
-        // no bitmap index for this column
-        return false;
     }
     return true;
 }
@@ -809,13 +810,6 @@ bool SegmentIterator::_check_apply_by_inverted_index(ColumnPredicate* pred, bool
     return true;
 }
 
-Status SegmentIterator::_apply_bitmap_index_except_leafnode_of_andnode(
-        ColumnPredicate* pred, roaring::Roaring* output_result) {
-    RETURN_IF_ERROR(pred->evaluate(_bitmap_index_iterators[pred->column_id()].get(),
-                                   _segment->num_rows(), output_result));
-    return Status::OK();
-}
-
 Status SegmentIterator::_apply_inverted_index_except_leafnode_of_andnode(
         ColumnPredicate* pred, roaring::Roaring* output_result) {
     RETURN_IF_ERROR(pred->evaluate(*_schema, _inverted_index_iterators[pred->column_id()].get(),
@@ -834,13 +828,10 @@ Status SegmentIterator::_apply_index_except_leafnode_of_andnode() {
             continue;
         }
 
-        bool can_apply_by_bitmap_index = _check_apply_by_bitmap_index(pred);
         bool can_apply_by_inverted_index = _check_apply_by_inverted_index(pred, true);
         roaring::Roaring bitmap = _row_bitmap;
         Status res = Status::OK();
-        if (can_apply_by_bitmap_index) {
-            res = _apply_bitmap_index_except_leafnode_of_andnode(pred, &bitmap);
-        } else if (can_apply_by_inverted_index) {
+        if (can_apply_by_inverted_index) {
             res = _apply_inverted_index_except_leafnode_of_andnode(pred, &bitmap);
         } else {
             continue;
@@ -1053,8 +1044,8 @@ Status SegmentIterator::_apply_inverted_index_on_block_column_predicate(
 }
 
 bool SegmentIterator::_need_read_data(ColumnId cid) {
-    // for safety reason, only support DUP_KEYS
-    if (_opts.tablet_schema->keys_type() != KeysType::DUP_KEYS) {
+    // if there is delete predicate, we always need to read data
+    if (_opts.delete_condition_predicates->num_of_column_predicate() > 0) {
         return true;
     }
     if (_output_columns.count(-1)) {
@@ -1335,10 +1326,8 @@ Status SegmentIterator::_lookup_ordinal_from_pk_index(const RowCursor& key, bool
     DCHECK(pk_index_reader != nullptr);
 
     std::string index_key;
-    // when is_include is false, we shoudle append KEY_NORMAL_MARKER to the
-    // encode key. Otherwise, we will get an incorrect upper bound.
     encode_key_with_padding<RowCursor, true, true>(
-            &index_key, key, _segment->_tablet_schema->num_key_columns(), is_include, true);
+            &index_key, key, _segment->_tablet_schema->num_key_columns(), is_include);
     if (index_key < _segment->min_key()) {
         *rowid = 0;
         return Status::OK();
@@ -1987,7 +1976,30 @@ Status SegmentIterator::_read_columns_by_rowids(std::vector<ColumnId>& read_colu
 }
 
 Status SegmentIterator::next_batch(vectorized::Block* block) {
-    auto status = [&]() { RETURN_IF_CATCH_EXCEPTION({ return _next_batch_internal(block); }); }();
+    auto status = [&]() {
+        RETURN_IF_CATCH_EXCEPTION({
+            RETURN_IF_ERROR(_next_batch_internal(block));
+
+            // reverse block row order if read_orderby_key_reverse is true for key topn
+            // it should be processed for all success _next_batch_internal
+            if (_opts.read_orderby_key_reverse) {
+                size_t num_rows = block->rows();
+                if (num_rows == 0) {
+                    return Status::OK();
+                }
+                size_t num_columns = block->columns();
+                vectorized::IColumn::Permutation permutation;
+                for (size_t i = 0; i < num_rows; ++i) permutation.emplace_back(num_rows - 1 - i);
+
+                for (size_t i = 0; i < num_columns; ++i)
+                    block->get_by_position(i).column =
+                            block->get_by_position(i).column->permute(permutation, num_rows);
+            }
+
+            return Status::OK();
+        });
+    }();
+
     // if rows read by batch is 0, will return end of file, we should not remove segment cache in this situation.
     if (!status.ok() && !status.is<END_OF_FILE>()) {
         _segment->remove_from_segment_cache();
@@ -2215,18 +2227,6 @@ Status SegmentIterator::_next_batch_internal(vectorized::Block* block) {
 
     // shrink char_type suffix zero data
     block->shrink_char_type_column_suffix_zero(_char_type_idx);
-
-    // reverse block row order
-    if (_opts.read_orderby_key_reverse) {
-        size_t num_rows = block->rows();
-        size_t num_columns = block->columns();
-        vectorized::IColumn::Permutation permutation;
-        for (size_t i = 0; i < num_rows; ++i) permutation.emplace_back(num_rows - 1 - i);
-
-        for (size_t i = 0; i < num_columns; ++i)
-            block->get_by_position(i).column =
-                    block->get_by_position(i).column->permute(permutation, num_rows);
-    }
 
     return Status::OK();
 }

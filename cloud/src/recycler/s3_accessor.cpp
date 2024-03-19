@@ -12,17 +12,31 @@
 #include <aws/s3/model/LifecycleRule.h>
 #include <aws/s3/model/ListObjectsV2Request.h>
 #include <aws/s3/model/PutObjectRequest.h>
+#include <bvar/bvar.h>
+#include <bvar/multi_dimension.h>
 
 #include <algorithm>
 #include <execution>
 #include <utility>
 
 #include "common/bvars.h"
+#include "common/config.h"
 #include "common/logging.h"
+#include "common/simple_thread_pool.h"
 #include "common/stopwatch.h"
 #include "common/sync_point.h"
+#include "recycler/util.h"
 
 namespace selectdb {
+bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_list_objects("recycler_list_objects",
+                                                                    {"bucket", "instance"});
+
+bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_delete_objects("recycler_delete_objects",
+                                                                      {"bucket", "instance"});
+
+bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_delete_object("recycler_delete_object",
+                                                                     {"bucket", "instance"});
+
 #ifndef UNIT_TEST
 #define HELP_MACRO(ret, req, point_name)
 #else
@@ -67,6 +81,8 @@ std::string S3Accessor::get_relative_path(const std::string& key) const {
     return key.find(conf_.prefix + "/") != 0 ? "" : key.substr(conf_.prefix.length() + 1);
 }
 
+static std::unique_ptr<SimpleThreadPool> worker_pool;
+
 int S3Accessor::init() {
     static S3Environment s3_env;
     Aws::Auth::AWSCredentials aws_cred(conf_.ak, conf_.sk);
@@ -79,18 +95,23 @@ int S3Accessor::init() {
             std::move(aws_cred), std::move(aws_config),
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             true /* useVirtualAddressing */);
+    static std::once_flag log_annotated_tags_key_once;
+    std::call_once(log_annotated_tags_key_once, [&]() {
+        LOG_INFO("start s3 accessor parallel worker pool");
+        worker_pool = std::make_unique<SimpleThreadPool>(config::recycle_pool_parallelism);
+        worker_pool->start();
+    });
     return 0;
 }
 
 int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
                                          const std::string& instance_id) {
-    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     Aws::S3::Model::ListObjectsV2Request request;
     auto prefix = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithPrefix(prefix);
+    SyncExecutor<int> concurrent_delete_executor(worker_pool.get(), "delete_by_prefix",
+                                                 [](const int& ret) { return ret != 0; });
 
-    Aws::S3::Model::DeleteObjectsRequest delete_request;
-    delete_request.SetBucket(conf_.bucket);
     bool is_trucated = false;
     do {
         StopWatch sw;
@@ -110,7 +131,11 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
             return -1;
         }
 
-        g_bvar_recycler_list_objects.put(bvar_tag, sw.elapsed_us() / 1000);
+        bvar::LatencyRecorder* list_objects_recorder =
+                g_recycler_list_objects.get_stats({conf_.bucket, instance_id});
+        if (list_objects_recorder != nullptr) {
+            *list_objects_recorder << sw.elapsed_us() / 1000;
+        }
 
         const auto& result = outcome.GetResult();
         VLOG_DEBUG << "get " << result.GetContents().size() << " objects";
@@ -124,49 +149,66 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
                     .tag("key", obj.GetKey());
         }
         if (!objects.empty()) {
-            Aws::S3::Model::Delete del;
-            del.WithObjects(std::move(objects)).SetQuiet(true);
-            delete_request.SetDelete(std::move(del));
-            sw.reset();
-            auto delete_outcome =
-                    SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
-                                                 "s3_client::delete_objects", delete_request);
-            if (!delete_outcome.IsSuccess()) {
-                LOG_WARNING("failed to delete objects")
-                        .tag("endpoint", conf_.endpoint)
-                        .tag("bucket", conf_.bucket)
-                        .tag("prefix", prefix)
-                        .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
-                        .tag("error", outcome.GetError().GetMessage());
-                if (delete_outcome.GetError().GetResponseCode() ==
-                    Aws::Http::HttpResponseCode::FORBIDDEN) {
-                    return 1;
+            auto delete_task = [this, objs = std::move(objects), &prefix, &instance_id]() mutable {
+                Aws::S3::Model::DeleteObjectsRequest delete_request;
+                delete_request.SetBucket(conf_.bucket);
+                Aws::S3::Model::Delete del;
+                del.WithObjects(std::move(objs)).SetQuiet(true);
+                delete_request.SetDelete(std::move(del));
+                StopWatch delete_sw;
+                delete_sw.start();
+                auto delete_outcome =
+                        SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
+                                                     "s3_client::delete_objects", delete_request);
+                if (!delete_outcome.IsSuccess()) {
+                    LOG_WARNING("failed to delete objects")
+                            .tag("endpoint", conf_.endpoint)
+                            .tag("bucket", conf_.bucket)
+                            .tag("prefix", prefix)
+                            .tag("responseCode",
+                                 static_cast<int>(delete_outcome.GetError().GetResponseCode()))
+                            .tag("error", delete_outcome.GetError().GetMessage());
+                    if (delete_outcome.GetError().GetResponseCode() ==
+                        Aws::Http::HttpResponseCode::FORBIDDEN) {
+                        return 1;
+                    }
+                    return -2;
                 }
-                return -2;
-            }
-
-            g_bvar_recycler_delete_objects.put(bvar_tag, sw.elapsed_us() / 1000);
-
-            if (!delete_outcome.GetResult().GetErrors().empty()) {
-                const auto& e = delete_outcome.GetResult().GetErrors().front();
-                LOG_WARNING("failed to delete object")
-                        .tag("endpoint", conf_.endpoint)
-                        .tag("bucket", conf_.bucket)
-                        .tag("key", e.GetKey())
-                        .tag("responseCode", static_cast<int>(outcome.GetError().GetResponseCode()))
-                        .tag("error", e.GetMessage());
-                return -3;
-            }
+                bvar::LatencyRecorder* delete_objects_recorder =
+                        g_recycler_delete_objects.get_stats({conf_.bucket, instance_id});
+                if (delete_objects_recorder != nullptr) {
+                    *delete_objects_recorder << delete_sw.elapsed_us() / 1000;
+                }
+                if (!delete_outcome.GetResult().GetErrors().empty()) {
+                    const auto& e = delete_outcome.GetResult().GetErrors().front();
+                    LOG_WARNING("failed to delete object")
+                            .tag("endpoint", conf_.endpoint)
+                            .tag("bucket", conf_.bucket)
+                            .tag("key", e.GetKey())
+                            .tag("responseCode",
+                                 static_cast<int>(delete_outcome.GetError().GetResponseCode()))
+                            .tag("error", e.GetMessage());
+                    return -3;
+                }
+                return 0;
+            };
+            concurrent_delete_executor.add(std::move(delete_task));
         }
         is_trucated = result.GetIsTruncated();
         request.SetContinuationToken(result.GetNextContinuationToken());
     } while (is_trucated);
-    return 0;
+    bool finished = true;
+    std::vector<int> rets = concurrent_delete_executor.when_all(&finished);
+    for (int ret : rets) {
+        if (ret != 0) {
+            return ret;
+        }
+    }
+    return finished ? 0 : -1;
 }
 
 int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths,
                                const std::string& instance_id) {
-    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     if (relative_paths.empty()) {
         return 0;
     }
@@ -174,9 +216,12 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths,
     constexpr size_t max_delete_batch = 1000;
     auto path_iter = relative_paths.begin();
 
-    Aws::S3::Model::DeleteObjectsRequest delete_request;
-    delete_request.SetBucket(conf_.bucket);
+    SyncExecutor<int> concurrent_delete_executor(worker_pool.get(), "delete_objects",
+                                                 [](const int& ret) { return ret != 0; });
+
     do {
+        Aws::S3::Model::DeleteObjectsRequest delete_request;
+        delete_request.SetBucket(conf_.bucket);
         Aws::S3::Model::Delete del;
         Aws::Vector<Aws::S3::Model::ObjectIdentifier> objects;
         auto path_begin = path_iter;
@@ -195,41 +240,54 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths,
         }
         del.WithObjects(std::move(objects)).SetQuiet(true);
         delete_request.SetDelete(std::move(del));
-
-        StopWatch sw;
-        sw.start();
-        auto delete_outcome =
-                SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(delete_request),
-                                             "s3_client::delete_objects", delete_request);
-        if (!delete_outcome.IsSuccess()) {
-            LOG_WARNING("failed to delete objects")
-                    .tag("endpoint", conf_.endpoint)
-                    .tag("bucket", conf_.bucket)
-                    .tag("key[0]", delete_request.GetDelete().GetObjects().front().GetKey())
-                    .tag("responseCode",
-                         static_cast<int>(delete_outcome.GetError().GetResponseCode()))
-                    .tag("error", delete_outcome.GetError().GetMessage());
-            return -1;
-        }
-        if (!delete_outcome.GetResult().GetErrors().empty()) {
-            const auto& e = delete_outcome.GetResult().GetErrors().front();
-            LOG_WARNING("failed to delete object")
-                    .tag("endpoint", conf_.endpoint)
-                    .tag("bucket", conf_.bucket)
-                    .tag("key", e.GetKey())
-                    .tag("responseCode",
-                         static_cast<int>(delete_outcome.GetError().GetResponseCode()))
-                    .tag("error", e.GetMessage());
-            return -2;
-        }
-        g_bvar_recycler_delete_objects.put(bvar_tag, sw.elapsed_us() / 1000);
+        auto delete_task = [this, req = std::move(delete_request), &instance_id]() {
+            StopWatch sw;
+            sw.start();
+            auto delete_outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(req),
+                                                               "s3_client::delete_objects", req);
+            if (!delete_outcome.IsSuccess()) {
+                LOG_WARNING("failed to delete objects")
+                        .tag("endpoint", conf_.endpoint)
+                        .tag("bucket", conf_.bucket)
+                        .tag("key[0]", req.GetDelete().GetObjects().front().GetKey())
+                        .tag("responseCode",
+                             static_cast<int>(delete_outcome.GetError().GetResponseCode()))
+                        .tag("error", delete_outcome.GetError().GetMessage());
+                return -1;
+            }
+            if (!delete_outcome.GetResult().GetErrors().empty()) {
+                const auto& e = delete_outcome.GetResult().GetErrors().front();
+                LOG_WARNING("failed to delete object")
+                        .tag("endpoint", conf_.endpoint)
+                        .tag("bucket", conf_.bucket)
+                        .tag("key", e.GetKey())
+                        .tag("responseCode",
+                             static_cast<int>(delete_outcome.GetError().GetResponseCode()))
+                        .tag("error", e.GetMessage());
+                return -2;
+            }
+            bvar::LatencyRecorder* delete_objects_recorder =
+                    g_recycler_delete_objects.get_stats({conf_.bucket, instance_id});
+            if (delete_objects_recorder != nullptr) {
+                *delete_objects_recorder << sw.elapsed_us() / 1000;
+            }
+            return 0;
+        };
+        concurrent_delete_executor.add(std::move(delete_task));
     } while (path_iter != relative_paths.end());
 
-    return 0;
+    bool finished = true;
+    std::vector<int> rets = concurrent_delete_executor.when_all(&finished);
+    for (int ret : rets) {
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return finished ? 0 : -1;
 }
 
 int S3Accessor::delete_object(const std::string& relative_path, const std::string& instance_id) {
-    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     Aws::S3::Model::DeleteObjectRequest request;
     auto key = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithKey(key);
@@ -247,7 +305,11 @@ int S3Accessor::delete_object(const std::string& relative_path, const std::strin
                 .tag("exception", outcome.GetError().GetExceptionName());
         return -1;
     }
-    g_bvar_recycler_delete_object.put(bvar_tag, sw.elapsed_us() / 1000);
+    bvar::LatencyRecorder* delete_object_recorder =
+            g_recycler_delete_object.get_stats({conf_.bucket, instance_id});
+    if (delete_object_recorder != nullptr) {
+        *delete_object_recorder << sw.elapsed_us() / 1000;
+    }
     return 0;
 }
 
@@ -326,7 +388,6 @@ int S3Accessor::exist(const std::string& relative_path) {
 
 int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t expired_time,
                                        const std::string& instance_id) {
-    const std::string bvar_tag = instance_id + "_" + conf_.bucket;
     Aws::S3::Model::ListObjectsV2Request request;
     auto prefix = get_key(relative_path);
     request.WithBucket(conf_.bucket).WithPrefix(prefix);
@@ -347,7 +408,13 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
                     .tag("error", outcome.GetError().GetMessage());
             return -1;
         }
-        g_bvar_recycler_list_objects.put(bvar_tag, sw.elapsed_us() / 1000);
+
+        bvar::LatencyRecorder* recorder =
+                g_recycler_list_objects.get_stats({conf_.bucket, instance_id});
+        if (recorder != nullptr) {
+            *recorder << sw.elapsed_us() / 1000;
+        }
+
         const auto& result = outcome.GetResult();
         std::vector<std::string> expired_keys;
         for (const auto& obj : result.GetContents()) {

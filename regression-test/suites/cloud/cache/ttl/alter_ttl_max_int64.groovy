@@ -40,8 +40,8 @@ suite("test_ttl_max_int64") {
         |PROPERTIES(
         |"exec_mem_limit" = "8589934592",
         |"load_parallelism" = "3")""".stripMargin()
-    // set fe configuration
-    sql "ADMIN SET FRONTEND CONFIG ('max_bytes_per_broker_scanner' = '161061273600')"
+    
+    
     sql new File("""${context.file.parent}/../ddl/customer_ttl_delete.sql""").text
     def load_customer_once =  { String table ->
         def uniqueID = Math.abs(UUID.randomUUID().hashCode()).toString()
