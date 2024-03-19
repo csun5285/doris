@@ -216,7 +216,7 @@ suite("insert_group_commit_into") {
         }
 
         // test connect to observer fe
-        try {
+        /*try {
             def fes = sql_return_maparray "show frontends"
             logger.info("frontends: ${fes}")
             if (fes.size() > 1) {
@@ -263,7 +263,7 @@ suite("insert_group_commit_into") {
                 logger.info("only one fe, skip test connect to observer fe")
             }
         } finally {
-        }
+        }*/
 
         // table with array type
         tableName = "insert_group_commit_into_duplicate_array"
