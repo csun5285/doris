@@ -24,7 +24,7 @@ import org.apache.hadoop.util.Progressable
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
 
-suite("load") {
+suite("load", "external,external_docker,external_docker_hive,hive") {
     def externalStageName = "regression_test_tpch"
     def prefix = "tpch/sf1"
     def s3BucketName = getS3BucketName()
@@ -37,6 +37,13 @@ suite("load") {
 
     Configuration configuration = new Configuration();
     configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+    /*
+    if use group not work, change this way
+    String nameNodeHost = context.config.otherConfigs.get("extHiveHmsHost");
+    String hdfsPort = context.config.otherConfigs.get("extHdfsPort");
+    String fs = "hdfs://${nameNodeHost}:${hdfsPort}";
+    FileSystem hdfs = FileSystem.get(new URI(fs), configuration);
+    */
     FileSystem hdfs = FileSystem.get(new URI(getHdfsFs()), configuration);
 
     for (String table in tables) {
