@@ -145,7 +145,8 @@ suite("test_external_stage") {
             `lo_supplycost` bigint(20) NOT NULL COMMENT "",
             `lo_tax` bigint(20) NOT NULL COMMENT "",
             `lo_commitdate` bigint(20) NOT NULL COMMENT "",
-            `lo_shipmode` varchar(11) NOT NULL COMMENT ""
+            `lo_shipmode` varchar(11) NOT NULL COMMENT "",
+            `tmp` varchar(11) NULL COMMENT ""
             )
             PARTITION BY RANGE(`lo_orderdate`)
             (PARTITION p1992 VALUES [("-2147483648"), ("19930101")),
