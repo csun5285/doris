@@ -37,7 +37,8 @@ suite("test_routine_load_with_restart_fe") {
     pool = Executors.newFixedThreadPool(1)
     pool.execute{
          def props = new Properties()
-         props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, context.config.kafkaBrokerList)
+         String kafka_broker_list = context.config.externalEnvIp + ":" + context.config.kafka_port
+         props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka_broker_list)
          props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
          'org.apache.kafka.common.serialization.StringSerializer')
          props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
@@ -97,7 +98,7 @@ suite("test_routine_load_with_restart_fe") {
         "max_batch_rows"="200000",
         "max_batch_size"="104857600")
         FROM KAFKA(
-        "kafka_broker_list"="${context.config.kafkaBrokerList}",
+        "kafka_broker_list"="${kafka_broker_list}",
         "kafka_topic"="${topic}",
         "property.group.id"="gid6",
         "property.clinet.id"="cid6",

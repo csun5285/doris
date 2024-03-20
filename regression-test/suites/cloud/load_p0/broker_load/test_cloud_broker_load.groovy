@@ -24,7 +24,7 @@ import org.apache.hadoop.util.Progressable
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
 
-suite("test_cloud_broker_load", "p0") {
+suite("test_cloud_broker_load", "external,external_docker,external_docker_hive,hive") {
     Configuration configuration = new Configuration();
     configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
     FileSystem hdfs = FileSystem.get(new URI(getHdfsFs()), configuration);
