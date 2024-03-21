@@ -2662,4 +2662,11 @@ public class Config extends ConfigBase {
             "Control whether to allow the creation of resource."
     })
     public static boolean enable_create_resource = false;
+
+    @ConfField(description = {
+            "在这个列表中的用户的操作，不会被记录到审计日志中。多个用户之间用逗号分隔。",
+            "The operations of the users in this list will not be recorded in the audit log. "
+                    + "Multiple users are separated by commas."
+    })
+    public static String skip_audit_user_list = "";
 }
