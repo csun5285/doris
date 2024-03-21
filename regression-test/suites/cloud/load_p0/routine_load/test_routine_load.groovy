@@ -30,11 +30,11 @@ import java.util.concurrent.Executors
 suite("test_routine_load", "external,external_docker") {
     def topic = "test-topic"
 
+    String kafka_broker_list = context.config.externalEnvIp + ":" + context.config.kafka_port
     ExecutorService pool;
     pool = Executors.newFixedThreadPool(1)
     pool.execute{
          def props = new Properties()
-         String kafka_broker_list = context.config.externalEnvIp + ":" + context.config.kafka_port
          props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka_broker_list)
          props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
          'org.apache.kafka.common.serialization.StringSerializer')

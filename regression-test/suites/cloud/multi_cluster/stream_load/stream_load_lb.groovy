@@ -18,6 +18,7 @@
 import groovy.json.JsonOutput
 
 suite("stream_load_lb") {
+    try {
     List<String> ipList = new ArrayList<>()
     List<String> hbPortList = new ArrayList<>()
     List<String> httpPortList = new ArrayList<>()
@@ -71,7 +72,7 @@ suite("stream_load_lb") {
     sql "SET PROPERTY 'default_cloud_cluster' = ''"
     sql """ use @stream_load_cluster_name0 """
 
-    def tableName3 = "test_all"
+    def tableName3 = "test_all_lb"
 
 
     sql """
@@ -218,6 +219,8 @@ suite("stream_load_lb") {
     } finally {
         sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'false')"
     }
+    } finally {
     sql """ drop table if exists ${tableName3} """
+    }
 }
 

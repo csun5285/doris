@@ -78,6 +78,7 @@ public class ShowDataStmt extends ShowStmt {
             ShowResultSetMetaData.builder()
                     .addColumn(new Column("DBName", ScalarType.createVarchar(20)))
                     .addColumn(new Column("DataSize", ScalarType.createVarchar(20)))
+                    .addColumn(new Column("RecycleSize", ScalarType.createVarchar(20)))
                     .build();
 
     private static final ShowResultSetMetaData SHOW_INDEX_DATA_META_DATA =
@@ -123,28 +124,47 @@ public class ShowDataStmt extends ShowStmt {
         if (properties != null) {
             String value = properties.get(WAREHOUSE);
             if (value != null && value.equals("true")) {
-                String[] dbList = null;
+                List<String> dbList = null;
                 String dbNames = properties.get(DB_LIST);
                 if (dbNames != null) {
-                    dbList = dbNames.split(",");
+                    dbList = Arrays.asList(dbNames.split(","));
                 }
                 Map<String, Long> dbToDataSize = Env.getCurrentInternalCatalog().getUsedDataQuota();
+                Map<Long, Pair<Long, Long>> dbToRecycleSize = Env.getCurrentRecycleBin().getDbToRecycleSize();
                 Long total = 0L;
+                Long totalRecycleSize = 0L;
                 if (dbList == null) {
                     for (Map.Entry<String, Long> pair : dbToDataSize.entrySet()) {
-                        List<String> result = Arrays.asList(pair.getKey(), String.valueOf(pair.getValue()));
+                        Database db = Env.getCurrentInternalCatalog().getDbNullable(pair.getKey());
+                        if (db == null) {
+                            continue;
+                        }
+                        Long recycleSize = dbToRecycleSize.getOrDefault(db.getId(), Pair.of(0L, 0L)).first;
+                        List<String> result = Arrays.asList(db.getName(),
+                                String.valueOf(pair.getValue()), String.valueOf(recycleSize));
                         totalRows.add(result);
                         total += pair.getValue();
+                        totalRecycleSize += recycleSize;
                     }
                 } else {
-                    for (String dbName : dbList) {
-                        Long dataSize = dbToDataSize.getOrDefault(dbName, 0L);
-                        List<String> result = Arrays.asList(dbName, String.valueOf(dataSize));
+                    for (String databaseName : Env.getCurrentInternalCatalog().getDbNames()) {
+                        Database db = Env.getCurrentInternalCatalog().getDbNullable(databaseName);
+                        if (db == null) {
+                            continue;
+                        }
+                        if (!dbList.contains(db.getName())) {
+                            continue;
+                        }
+                        Long recycleSize = dbToRecycleSize.getOrDefault(db.getId(), Pair.of(0L, 0L)).first;
+                        Long dataSize = dbToDataSize.getOrDefault(databaseName, 0L);
+                        List<String> result =
+                                Arrays.asList(db.getName(), String.valueOf(dataSize), String.valueOf(recycleSize));
                         totalRows.add(result);
                         total += dataSize;
+                        totalRecycleSize += recycleSize;
                     }
                 }
-                List<String> result = Arrays.asList("total", String.valueOf(total));
+                List<String> result = Arrays.asList("total", String.valueOf(total), String.valueOf(totalRecycleSize));
                 totalRows.add(result);
                 return;
             }

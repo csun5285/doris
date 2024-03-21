@@ -1131,6 +1131,8 @@ DECLARE_Bool(enable_file_cache_query_limit);
 DECLARE_mInt32(file_cache_wait_sec_after_fail); // zero for no waiting and retrying
 DECLARE_mInt64(file_cache_ttl_valid_check_interval_second);
 DECLARE_Bool(file_cache_enable_evict_from_other_queue_by_size);
+// use for regression test
+DECLARE_mBool(file_cache_convert_all_write_data_into_index);
 
 // write as cache
 // format: [{"path":"/mnt/disk3/selectdb_cloud/tmp","max_cache_bytes":21474836480,"max_upload_bytes":10737418240}]

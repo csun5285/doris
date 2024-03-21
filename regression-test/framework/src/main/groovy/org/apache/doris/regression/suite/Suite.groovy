@@ -960,22 +960,31 @@ class Suite implements GroovyInterceptable {
         }
     }
 
-    def checkProfile = { addrSet, fragNum ->
+    def checkProfile = { addrSet ->
         List<List<Object>> profileRes = sql " show query profile '/' "
         for (row : profileRes) {
-            //println row
+            // println row
         }
 
-        for (int i = 0; i < fragNum; ++i) {
+        int i = 0
+        while (true) {
             String exec_sql = "show query profile '/" + profileRes[0][0] + "/" + i.toString() + "'"
-            List<List<Object>> result = sql exec_sql
-            for (row : result) {
-                println row
-            }
+            try {
+                List<List<Object>> result = sql exec_sql
+                for (row : result) {
+                    println row
+                }
 
-            println result[0][1]
-            println addrSet
-            assertTrue(addrSet.contains(result[0][1]));
+                println result[0][1]
+                println addrSet
+                assertTrue(addrSet.contains(result[0][1]));
+            } catch (Exception ex) {
+                if (ex.getMessage().contains("Failed to get instance list for fragment")) {
+                    break
+                }
+                throw ex
+            }
+            i++
         }
     }
 

@@ -297,8 +297,15 @@ Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
           _is_tablet_path_exists(true),
           _last_missed_version(-1),
           _last_missed_time_s(0) {
-    _cumulative_compaction_policy =
-            StorageEngine::get_cumulative_compaction_policy(cumulative_compaction_type);
+    auto storage_engine = StorageEngine::instance();
+    if (storage_engine) {
+        _cumulative_compaction_policy =
+                storage_engine->get_cumulative_compaction_policy(cumulative_compaction_type);
+    } else {
+        _cumulative_compaction_policy =
+                CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                        cumulative_compaction_type);
+    }
 
     // construct _timestamped_versioned_tracker from rs and stale rs meta
     _timestamped_version_tracker.construct_versioned_tracker(_tablet_meta->all_rs_metas(),

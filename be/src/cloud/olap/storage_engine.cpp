@@ -110,14 +110,6 @@ DEFINE_GAUGE_METRIC_PROTOTYPE_2ARG(unused_rowsets_count, MetricUnit::ROWSETS);
 
 StorageEngine* StorageEngine::_s_instance = nullptr;
 
-StorageEngine::CumuPolices StorageEngine::_cumulative_compaction_policies = {
-        {CUMULATIVE_SIZE_BASED_POLICY,
-         CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
-                 CUMULATIVE_SIZE_BASED_POLICY)},
-        {CUMULATIVE_TIME_SERIES_POLICY,
-         CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
-                 CUMULATIVE_TIME_SERIES_POLICY)}};
-
 static Status _validate_options(const EngineOptions& options) {
     if (options.store_paths.empty()) {
         return Status::InternalError("store paths is empty");
@@ -153,6 +145,14 @@ StorageEngine::StorageEngine(const EngineOptions& options)
           _default_rowset_type(BETA_ROWSET),
           _heartbeat_flags(nullptr) {
     _s_instance = this;
+
+    _cumulative_compaction_policies[CUMULATIVE_SIZE_BASED_POLICY] =
+            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                    CUMULATIVE_SIZE_BASED_POLICY);
+    _cumulative_compaction_policies[CUMULATIVE_TIME_SERIES_POLICY] =
+            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                    CUMULATIVE_TIME_SERIES_POLICY);
+
     REGISTER_HOOK_METRIC(unused_rowsets_count, [this]() {
         // std::lock_guard<std::mutex> lock(_gc_mutex);
         return _unused_rowsets.size();

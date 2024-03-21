@@ -1075,6 +1075,7 @@ DEFINE_mInt64(row_column_page_size, "4096");
 DEFINE_mInt64(s3_write_buffer_size, "5242880");
 DEFINE_mInt32(s3_task_check_interval, "60");
 DEFINE_mBool(enable_file_cache_block_prefetch, "false");
+DEFINE_mBool(file_cache_convert_all_write_data_into_index, "false");
 
 // disable shrink memory by default
 DEFINE_mBool(enable_shrink_memory, "false");

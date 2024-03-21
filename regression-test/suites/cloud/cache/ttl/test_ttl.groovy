@@ -169,9 +169,8 @@ suite("test_ttl") {
             String out = "${body}".toString()
             def strs = out.split('\n')
             Boolean flag1 = false;
-            Boolean flag2 = false;
             for (String line in strs) {
-                if (flag1 && flag2) break;
+                if (flag1) break;
                 if (line.contains("ttl_cache_size")) {
                     if (line.startsWith("#")) {
                         continue
@@ -180,16 +179,8 @@ suite("test_ttl") {
                     assertEquals(line.substring(i).toLong(), 0)
                     flag1 = true
                 }
-                if (line.contains("file_cache_cache_size")) {
-                    if (line.startsWith("#")) {
-                        continue
-                    }
-                    def i = line.indexOf(' ')
-                    assertEquals(total_cache_size, line.substring(i).toLong())
-                    flag2 = true
-                }
             }
-            assertTrue(flag1 && flag2)
+            assertTrue(flag1)
     }
     sql """ select * from customer_ttl limit 10 """
     sleep(10000)

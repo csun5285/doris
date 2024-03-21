@@ -283,6 +283,10 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
                                         t == 0 ? FileCacheType::NORMAL : FileCacheType::TTL;
                                 ctx.expiration_time = t;
                                 ctx.is_cold_data = cold;
+                                ctx.cache_type =
+                                        config::file_cache_convert_all_write_data_into_index
+                                                ? FileCacheType::INDEX
+                                                : ctx.cache_type;
                                 auto holder = cache->get_or_set(k, offset,
                                                                 config::s3_write_buffer_size, ctx);
                                 return std::make_unique<FileBlocksHolder>(std::move(holder));

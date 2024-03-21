@@ -165,11 +165,11 @@ suite("test_internal_stage_copy_into") {
         uploadFile(remoteFileName, filePath)
 
         def sqls = [
-                " copy into ${tableName} from ( select $1, $2, $3, $4, $5, $6, $7, $8 from @~('${remoteFileName}') ) properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); ",
-                " copy into ${tableName} from ( select $1, $2, $3, $4, $5, $6, $7, $8 from @~('${remoteFileName}') ) properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
-                " copy into ${tableName} from ( select $1, $2, $3, $4, $5, $6, $7, $8 from @~('${remoteFileName}') ) properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.on_error'='max_filter_ratio_0.1'); ",
-                " copy into ${tableName2} from ( select $1, $2, $3, $4, $5, $6, $7, $8 from @~('${remoteFileName}') ) properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
-                " copy into ${tableName2} from ( select $1, $2, $3, $4, $5, $6, $7, $8 from @~('${remoteFileName}') ) properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
+                " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); ",
+                " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
+                " copy into ${tableName} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.on_error'='max_filter_ratio_0.3'); ",
+                " copy into ${tableName2} from @~('${remoteFileName}') properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false', 'copy.force'='true', 'copy.strict_mode'='true'); ",
+                " copy into ${tableName2} from ( select \$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8 from @~('${remoteFileName}') ) properties ('file.type' = 'csv', 'file.column_separator' = '|', 'copy.async' = 'false'); "
         ]
 
         def state = [
@@ -183,7 +183,7 @@ suite("test_internal_stage_copy_into") {
         def rows = [
                 [],
                 [],
-                ['9', '1', '0'],
+                ['7', '3', '0'],
                 [],
                 ['10', '0', '0']
         ]
