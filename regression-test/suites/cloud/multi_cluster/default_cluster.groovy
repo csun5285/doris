@@ -77,7 +77,7 @@ suite("default_cluster") {
 
 
     sql """
-        CREATE TABLE test_table (
+        CREATE TABLE if not exists test_table (
             class INT,
             id INT,
             score INT SUM
@@ -124,6 +124,7 @@ suite("default_cluster") {
     }
 
     sql "SET PROPERTY 'default_cloud_cluster' = 'regression_cluster_name2'"
+    context.reconnectFe()
     result  = sql "show clusters"
     for (row : result) {
         println row

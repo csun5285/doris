@@ -18,6 +18,10 @@
 import groovy.json.JsonOutput
 
 suite("stream_load") {
+    // case1 specific cluster
+    def tableName3 = "test_all"
+    def tableName4 = "test_all_default_cluster"
+    try {
     List<String> ipList = new ArrayList<>()
     List<String> hbPortList = new ArrayList<>()
     List<String> httpPortList = new ArrayList<>()
@@ -69,8 +73,7 @@ suite("stream_load") {
     sql "SET PROPERTY 'default_cloud_cluster' = ''"
     sql """ use @stream_load_cluster_name0 """
 
-    // case1 specific cluster
-    def tableName3 = "test_all"
+
     
 
     sql """
@@ -237,11 +240,10 @@ suite("stream_load") {
 
     // case3 default cluster
     sql "SET PROPERTY 'default_cloud_cluster' = 'stream_load_cluster_name0'"
-    tableName3 = "test_all_default_cluster"
-    sql """ drop table if exists ${tableName3} """
+    sql """ drop table if exists ${tableName4} """
 
     sql """
-    CREATE TABLE IF NOT EXISTS ${tableName3} (
+    CREATE TABLE IF NOT EXISTS ${tableName4} (
       `k1` int(11) NULL,
       `k2` tinyint(4) NULL,
       `k3` smallint(6) NULL,
@@ -274,7 +276,7 @@ suite("stream_load") {
 
     txnId = -1;
     streamLoad {
-        table "${tableName3}"
+        table "${tableName4}"
 
         set 'column_separator', ','
 
@@ -294,8 +296,8 @@ suite("stream_load") {
         }
     }
     sql "sync"
-    order_qt_all11 "SELECT count(*) FROM ${tableName3}" // 20
-    order_qt_all12 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
+    order_qt_all11 "SELECT count(*) FROM ${tableName4}" // 20
+    order_qt_all12 "SELECT count(*) FROM ${tableName4} where k1 <= 10"  // 11
 
     after_cluster0_load_rows = get_be_metric(ipList[0], httpPortList[0], "load_rows");
     log.info("after_cluster0_load_rows : ${after_cluster0_load_rows}".toString())
@@ -312,6 +314,9 @@ suite("stream_load") {
 
     assertTrue(before_cluster1_load_rows == after_cluster1_load_rows)
     assertTrue(before_cluster1_flush == after_cluster1_flush)
+    } finally {
     sql """ drop table if exists ${tableName3} """
+    sql """ drop table if exists ${tableName4} """
+    }
 }
 

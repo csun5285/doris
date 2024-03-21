@@ -244,7 +244,7 @@ suite("sync_load") {
     """
 
     def set = [ipList[0] + ":" +bePortList[0]] as Set
-    checkProfile.call(set, 2);
+    checkProfile.call(set)
 
     // q02
     sql """
@@ -290,7 +290,7 @@ suite("sync_load") {
           p_partkey
         LIMIT 100
     """
-    checkProfile.call(set, 9);
+    checkProfile.call(set)
 
     // q03
     sql """
@@ -318,7 +318,7 @@ suite("sync_load") {
           o_orderdate
         LIMIT 10
     """
-    checkProfile.call(set, 4);
+    checkProfile.call(set)
 
     // q04
     sql """
@@ -341,7 +341,7 @@ suite("sync_load") {
         ORDER BY
         o_orderpriority
     """
-    checkProfile.call(set, 3);
+    checkProfile.call(set)
 
     // q05
     sql """
@@ -370,7 +370,7 @@ suite("sync_load") {
         ORDER BY
         revenue DESC
     """
-    checkProfile.call(set, 7);
+    checkProfile.call(set)
 
     // q06
     sql """
@@ -383,7 +383,7 @@ suite("sync_load") {
         AND l_discount BETWEEN 0.06 - 0.01 AND .06 + 0.01
         AND l_quantity < 24
     """
-    checkProfile.call(set, 1);
+    checkProfile.call(set)
 
     // q07
     sql """
@@ -426,7 +426,7 @@ suite("sync_load") {
           cust_nation,
           l_year
     """
-    checkProfile.call(set, 7);
+    checkProfile.call(set)
 
     sql "use @regression_cluster_name1"
     set = [ipList[1] + ":" +bePortList[1]] as Set
@@ -471,7 +471,7 @@ suite("sync_load") {
         ORDER BY
           o_year
     """
-    checkProfile.call(set, 9);
+    checkProfile.call(set)
 
     // q09
     sql """
@@ -507,7 +507,7 @@ suite("sync_load") {
           nation,
           o_year DESC
     """
-    checkProfile.call(set, 7);
+    checkProfile.call(set)
 
     // q10
     sql """
@@ -544,7 +544,7 @@ suite("sync_load") {
           revenue DESC
         LIMIT 20
     """
-    checkProfile.call(set, 5);
+    checkProfile.call(set)
 
     // q11
     sql """
@@ -576,7 +576,7 @@ suite("sync_load") {
         ORDER BY
           value DESC
     """
-    checkProfile.call(set, 7);
+    checkProfile.call(set)
 
     // q12
     sql """
@@ -609,7 +609,7 @@ suite("sync_load") {
         ORDER BY
           l_shipmode
     """
-    checkProfile.call(set, 3);
+    checkProfile.call(set)
 
     // q13
     sql """
@@ -634,7 +634,7 @@ suite("sync_load") {
           custdist DESC,
           c_count DESC
     """
-    checkProfile.call(set, 3);
+    checkProfile.call(set)
 
     // q14
     sql """
@@ -651,7 +651,7 @@ suite("sync_load") {
           AND l_shipdate >= DATE '1995-09-01'
           AND l_shipdate < DATE '1995-09-01' + INTERVAL '1' MONTH
     """
-    checkProfile.call(set, 2);
+    checkProfile.call(set)
 
     // q15
     sql """
@@ -674,7 +674,7 @@ suite("sync_load") {
         ORDER BY
           s_suppkey;
     """
-    checkProfile.call(set, 4);
+    checkProfile.call(set)
 
     // q16
     sql """
@@ -708,7 +708,7 @@ suite("sync_load") {
           p_type,
           p_size
     """
-    checkProfile.call(set, 4);
+    checkProfile.call(set)
 
     // q17
     sql """
@@ -728,7 +728,7 @@ suite("sync_load") {
               l_partkey = p_partkey
           )
     """
-    checkProfile.call(set, 3);
+    checkProfile.call(set)
 
     // q18
     sql """
@@ -766,7 +766,7 @@ suite("sync_load") {
           o_orderdate
         LIMIT 100
     """
-    checkProfile.call(set, 5);
+    checkProfile.call(set)
 
     // q19
     sql """
@@ -805,7 +805,7 @@ suite("sync_load") {
             AND l_shipinstruct = 'DELIVER IN PERSON'
           )
     """
-    checkProfile.call(set, 2);
+    checkProfile.call(set)
 
     // q20
     sql """
@@ -842,5 +842,5 @@ suite("sync_load") {
         AND n_name = 'CANADA'
         ORDER BY s_name
     """
-    checkProfile.call(set, 6);
+    checkProfile.call(set)
 }

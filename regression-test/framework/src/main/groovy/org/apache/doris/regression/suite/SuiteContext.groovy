@@ -29,6 +29,12 @@ import java.sql.DriverManager
 import java.util.concurrent.ExecutorService
 import java.util.function.Function
 
+class ConnectionInfo {
+    Connection conn
+    String username
+    String password
+}
+
 @Slf4j
 @CompileStatic
 class SuiteContext implements Closeable {
@@ -36,7 +42,7 @@ class SuiteContext implements Closeable {
     public final String suiteName
     public final String group
     public final String dbName
-    public final ThreadLocal<Connection> threadLocalConn = new ThreadLocal<>()
+    public final ThreadLocal<ConnectionInfo> threadLocalConn = new ThreadLocal<>()
     public final ThreadLocal<Connection> threadHiveDockerConn = new ThreadLocal<>()
     public final ThreadLocal<Connection> threadHiveRemoteConn = new ThreadLocal<>()
     private final ThreadLocal<Syncer> syncer = new ThreadLocal<>()
@@ -121,12 +127,15 @@ class SuiteContext implements Closeable {
     }
 
     Connection getConnection() {
-        def threadConn = threadLocalConn.get()
-        if (threadConn == null) {
-            threadConn = config.getConnectionByDbName(dbName)
-            threadLocalConn.set(threadConn)
+        def threadConnInfo = threadLocalConn.get()
+        if (threadConnInfo == null) {
+            threadConnInfo = new ConnectionInfo()
+            threadConnInfo.conn = config.getConnectionByDbName(dbName)
+            threadConnInfo.username = config.jdbcUser
+            threadConnInfo.password = config.jdbcPassword
+            threadLocalConn.set(threadConnInfo)
         }
-        return threadConn
+        return threadConnInfo.conn
     }
 
     Connection getHiveDockerConnection(){
@@ -213,7 +222,11 @@ class SuiteContext implements Closeable {
         try {
             log.info("Create new connection for user '${user}'")
             return DriverManager.getConnection(url, user, password).withCloseable { newConn ->
-                threadLocalConn.set(newConn)
+                def newConnInfo = new ConnectionInfo()
+                newConnInfo.conn = newConn
+                newConnInfo.username = user
+                newConnInfo.password = password
+                threadLocalConn.set(newConnInfo)
                 return actionSupplier.call()
             }
         } finally {
@@ -224,6 +237,32 @@ class SuiteContext implements Closeable {
                 threadLocalConn.set(originConnection)
             }
         }
+    }
+
+    public void reconnectFe() {
+        ConnectionInfo connInfo = threadLocalConn.get()
+        if (connInfo == null) {
+            return
+        }
+        connectTo(connInfo.conn.getMetaData().getURL(), connInfo.username, connInfo.password);
+    }
+
+    public void connectTo(String url, String username, String password) {
+        ConnectionInfo oldConn = threadLocalConn.get()
+        if (oldConn != null) {
+            threadLocalConn.remove()
+            try {
+                oldConn.conn.close()
+            } catch (Throwable t) {
+                log.warn("Close connection failed", t)
+            }
+        }
+
+        def newConnInfo = new ConnectionInfo()
+        newConnInfo.conn = DriverManager.getConnection(url, username, password)
+        newConnInfo.username = username
+        newConnInfo.password = password
+        threadLocalConn.set(newConnInfo)
     }
 
     OutputUtils.OutputBlocksIterator getOutputIterator() {
@@ -312,11 +351,11 @@ class SuiteContext implements Closeable {
             }
         }
 
-        Connection conn = threadLocalConn.get()
+        ConnectionInfo conn = threadLocalConn.get()
         if (conn != null) {
             threadLocalConn.remove()
             try {
-                conn.close()
+                conn.conn.close()
             } catch (Throwable t) {
                 log.warn("Close connection failed", t)
             }
