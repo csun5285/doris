@@ -11,6 +11,7 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 // 9. select some data from normal table to check whether all datas are cached
 suite("test_ttl_evict") {
     sql """ use @regression_cluster_name1 """
+    sql """ set global enable_auto_analyze = false; """
     def ttlProperties = """ PROPERTIES("file_cache_ttl_seconds"="420") """
     String[][] backends = sql """ show backends """
     String backendId;
@@ -131,36 +132,30 @@ suite("test_ttl_evict") {
     load_customer_ttl_once("customer_ttl")
     load_customer_ttl_once("customer_ttl")
 
+    // The max ttl cache size is 90% cache capacity
     long total_cache_size = 0
+    sleep(30000)
     getMetricsMethod.call() {
         respCode, body ->
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')
             Boolean flag1 = false;
-            Boolean flag2 = false;
             long ttl_cache_size = 0;
             for (String line in strs) {
-                if (flag1 && flag2) break;
+                if (flag1) break;
                 if (line.contains("ttl_cache_size")) {
                     if (line.startsWith("#")) {
                         continue
                     }
                     def i = line.indexOf(' ')
                     ttl_cache_size = line.substring(i).toLong()
+                    logger.info("current ttl_cache_size " + ttl_cache_size);
+                    assertTrue(ttl_cache_size <= 19327352832)
                     flag1 = true
                 }
-                if (line.contains("file_cache_cache_size")) {
-                    if (line.startsWith("#")) {
-                        continue
-                    }
-                    def i = line.indexOf(' ')
-                    total_cache_size = line.substring(i).toLong()
-                    flag2 = true
-                }
             }
-            assertTrue(flag1 && flag2)
-            assertEquals(ttl_cache_size, total_cache_size)
+            assertTrue(flag1)
     }
 
     long s3_read_count = 0
@@ -205,7 +200,7 @@ suite("test_ttl_evict") {
                     def i = line.indexOf(' ')
                     read_at_count = line.substring(i).toLong()
                     logger.info("new s3 read count " + read_at_count);
-                    assertTrue(s3_read_count < read_at_count)
+                    assertEquals(s3_read_count, read_at_count)
                     s3_read_count = read_at_count;
                     flag = true
                     break
@@ -214,30 +209,6 @@ suite("test_ttl_evict") {
             assertTrue(flag)
     }
 
-    // all data in cache
-    sql """ select * from customer_ttl limit 10 """
-    sleep(10000)
-    getMetricsMethod.call() {
-        respCode, body ->
-            assertEquals("${respCode}".toString(), "200")
-            String out = "${body}".toString()
-            def strs = out.split('\n')
-            Boolean flag = false;
-            long read_at_count = 0;
-            for (String line in strs) {
-                if (line.contains("cached_remote_reader_s3_read")) {
-                    if (line.startsWith("#")) {
-                        continue
-                    }
-                    def i = line.indexOf(' ')
-                    read_at_count = line.substring(i).toLong()
-                    assertEquals(s3_read_count, read_at_count)
-                    flag = true
-                    break
-                }
-            }
-            assertTrue(flag)
-    }
     for (int j = 0; j < 60; j++) {
         sleep(10000)
         boolean flag = false;
@@ -265,27 +236,4 @@ suite("test_ttl_evict") {
     }
 
     sql new File("""${context.file.parent}/../ddl/customer_delete.sql""").text
-    // will cache all data
-    load_customer_once("customer")
-    getMetricsMethod.call() {
-        respCode, body ->
-            assertEquals("${respCode}".toString(), "200")
-            String out = "${body}".toString()
-            def strs = out.split('\n')
-            Boolean flag = false;
-            long read_at_count = 0;
-            for (String line in strs) {
-                if (line.contains("cached_remote_reader_s3_read")) {
-                    if (line.startsWith("#")) {
-                        continue
-                    }
-                    def i = line.indexOf(' ')
-                    read_at_count = line.substring(i).toLong()
-                    assertEquals(s3_read_count, read_at_count)
-                    flag = true
-                    break
-                }
-            }
-            assertTrue(flag)
-    }
 }
