@@ -140,6 +140,7 @@ suite("test_create_index_1", "inverted_index"){
 
     // case 2: alter add index
     sql "create index studentInfo_idx on ${indexTbName1}(studentInfo) using inverted"
+    wait_for_latest_op_on_table_finish(indexTbName1, timeout)
     show_result = sql "show index from ${indexTbName1}"
     logger.info("show index from " + indexTbName1 + " result: " + show_result)
     assertEquals(show_result[0][2], "studentInfo_idx")
