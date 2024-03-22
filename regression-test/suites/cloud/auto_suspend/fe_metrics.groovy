@@ -2,6 +2,33 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 import groovy.json.JsonOutput
 
 suite("test_auto_suspend_fe_metrics") {
+        // Parse url
+    String url = getServerPrepareJdbcUrl(context.config.jdbcUrl, "noexist")
+
+    def check_is_master_fe = {
+        // check if executed on master fe
+        // observer fe will forward the insert statements to master and forward does not support prepare statement
+        def fes = sql_return_maparray "show frontends"
+        logger.info("frontends: ${fes}")
+        def is_master_fe = true
+        for (def fe : fes) {
+            if (url.contains(fe.Host + ":")) {
+                if (fe.IsMaster == "false") {
+                    is_master_fe = false
+                }
+                break
+            }
+        }
+        logger.info("is master fe: ${is_master_fe}")
+        return is_master_fe
+    }
+    
+    def is_master_fe = check_is_master_fe()
+    if (!is_master_fe) {
+        logger.info("not master not run")
+        return
+    }
+
     def getRestApi = {
         StringBuilder strBuilder = new StringBuilder()
         strBuilder.append("""curl -u """ + context.config.feHttpUser + ":" + context.config.feHttpPassword)
