@@ -145,6 +145,15 @@ public class ShowDataStmt extends ShowStmt {
                         totalRows.add(result);
                         total += pair.getValue();
                         totalRecycleSize += recycleSize;
+                        dbToRecycleSize.remove(db.getId());
+                    }
+
+                    // Append left database in recycle bin
+                    for (Map.Entry<Long, Pair<Long, Long>> entry : dbToRecycleSize.entrySet()) {
+                        List<String> result = Arrays.asList("NULL:" + entry.getKey(),
+                                "0", String.valueOf(entry.getValue().first));
+                        totalRows.add(result);
+                        totalRecycleSize += entry.getValue().first;
                     }
                 } else {
                     for (String databaseName : Env.getCurrentInternalCatalog().getDbNames()) {
