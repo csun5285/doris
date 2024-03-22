@@ -120,5 +120,4 @@ public abstract class Planner {
     public abstract List<RuntimeFilter> getRuntimeFilters();
 
     public abstract Optional<ResultSet> handleQueryInFe(StatementBase parsedStmt);
-
 }
