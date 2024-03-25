@@ -876,7 +876,7 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
     KeyBoundsPB key_bounds;
     Slice min_key = (*writer)->min_encoded_key();
     Slice max_key = (*writer)->max_encoded_key();
-    DCHECK_LE(min_key.compare(max_key), 0);
+    CHECK_LE(min_key.compare(max_key), 0);
     key_bounds.set_min_key(min_key.to_string());
     key_bounds.set_max_key(max_key.to_string());
 
