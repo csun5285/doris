@@ -325,7 +325,11 @@ Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
 }
 
 void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
-    if (_failed) {
+    if (_failed) [[unlikely]] {
+        LOG(INFO) << fmt::format(
+                "path {}, part num {}, upload_id {} dropped because the previous procedure failed "
+                "for {}",
+                _path.native(), part_num, _upload_id, _st);
         return;
     }
     UploadPartRequest upload_request;
@@ -387,8 +391,10 @@ Status S3FileWriter::_complete() {
                              std::make_pair(&_failed, &_completed_parts));
     if (_failed || _completed_parts.size() != _cur_part_num) {
         _st = Status::InternalError(
-                "error status {}, complete parts {}, cur part num {}, whole parts {}", _st,
-                _completed_parts.size(), _cur_part_num, _dump_completed_part());
+                "failed {}, error status {}, complete parts {}, cur part num {}, upload_id {}, "
+                "whole parts {}",
+                _failed, _st, _completed_parts.size(), _cur_part_num, _upload_id,
+                _dump_completed_part());
         LOG(WARNING) << _st;
         return _st;
     }
@@ -400,10 +406,11 @@ Status S3FileWriter::_complete() {
     for (size_t i = 0; i < _completed_parts.size(); i++) {
         if (_completed_parts[i]->GetPartNumber() != i + 1) [[unlikely]] {
             _st = Status::InternalError(
-                    "error status {}, part num not continous, expected num {}, actual num {}, "
+                    "failed {}, error status {}, part num not continous, expected num {}, actual "
+                    "num {}, "
                     "upload_id {}, "
                     "whole parts {}",
-                    _st, i + 1, _completed_parts[i]->GetPartNumber(), _upload_id,
+                    _failed, _st, i + 1, _completed_parts[i]->GetPartNumber(), _upload_id,
                     _dump_completed_part());
             LOG(WARNING) << _st;
             return _st;
