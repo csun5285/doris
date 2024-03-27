@@ -14,6 +14,9 @@ enum class Metrics {
     READ_BLOCK = 0,
     WRITE = 1,
     COMPACTION = 2,
+    NUM_ROWSETS = 3,
+    NUM_BASE_ROWSETS = 4,
+    NUM_CUMU_ROWSETS = 5,
 };
 
 Status check_param(HttpRequest* req, int& top_n, Metrics& metrics) {
@@ -40,6 +43,12 @@ Status check_param(HttpRequest* req, int& top_n, Metrics& metrics) {
         metrics = Metrics::WRITE;
     } else if (metrics_str == "compaction") {
         metrics = Metrics::COMPACTION;
+    } else if (metrics_str == "num_rowsets") {
+        metrics = Metrics::NUM_ROWSETS;
+    } else if (metrics_str == "num_cumu_rowsets") {
+        metrics = Metrics::NUM_CUMU_ROWSETS;
+    } else if (metrics_str == "num_base_rowsets") {
+        metrics = Metrics::NUM_BASE_ROWSETS;
     } else {
         return Status::InternalError("unknown metrics: {}", metrics_str);
     }
@@ -71,12 +80,7 @@ void ShowHotspotAction::handle(HttpRequest* req) {
         return;
     }
 
-    auto tablets = cloud::tablet_mgr()->get_weak_tablets();
-
-    std::vector<TabletCounter> buffer;
-    buffer.reserve(tablets.size());
-
-    std::function<int64_t(const Tablet&)> count_fn;
+    std::function<int64_t(Tablet&)> count_fn;
     switch (metrics) {
     case Metrics::READ_BLOCK:
         count_fn = [](auto&& t) { return t.read_block_count.load(std::memory_order_relaxed); };
@@ -87,8 +91,28 @@ void ShowHotspotAction::handle(HttpRequest* req) {
     case Metrics::COMPACTION:
         count_fn = [](auto&& t) { return t.compaction_count.load(std::memory_order_relaxed); };
         break;
+    case Metrics::NUM_ROWSETS:
+        count_fn = [](auto&& t) { return t.fetch_add_approximate_num_rowsets(0); };
+        break;
+    case Metrics::NUM_BASE_ROWSETS:
+        count_fn = [](auto&& t) {
+            return t.fetch_add_approximate_num_rowsets(0) -
+                   t.fetch_add_approximate_cumu_num_rowsets(0);
+        };
+        break;
+    case Metrics::NUM_CUMU_ROWSETS:
+        count_fn = [](auto&& t) { return t.fetch_add_approximate_cumu_num_rowsets(0); };
+        break;
     }
 
+    if (!count_fn) {
+        return;
+    }
+
+    auto tablets = cloud::tablet_mgr()->get_weak_tablets();
+
+    std::vector<TabletCounter> buffer;
+    buffer.reserve(tablets.size());
     for (auto&& t : tablets) {
         if (auto tablet = t.lock(); tablet) {
             buffer.push_back({tablet->tablet_id(), count_fn(*tablet)});
