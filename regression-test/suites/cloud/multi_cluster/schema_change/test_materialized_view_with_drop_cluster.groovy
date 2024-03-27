@@ -52,7 +52,7 @@ suite("test_materialized_with_drop_cluster") {
             }
         }
     }
-    sleep(12000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -60,7 +60,7 @@ suite("test_materialized_with_drop_cluster") {
     // add cluster regression_cluster_name0
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
                      "regression_cluster_name0", "regression_cluster_id0");
-    sleep(12000)
+    wait_cluster_change()
     result  = sql "show clusters"
     assertTrue(result.size() == 1);
 
@@ -83,6 +83,7 @@ suite("test_materialized_with_drop_cluster") {
         }
         return jobStateResult[0][8]
     }
+    sql "DROP TABLE IF EXISTS ${tbName1} FORCE"
     sql """
             CREATE TABLE IF NOT EXISTS ${tbName1}(
                 siteid INT(11) NOT NULL,
@@ -102,7 +103,7 @@ suite("test_materialized_with_drop_cluster") {
 
     // drop cluster
     drop_cluster.call("regression_cluster_name0", "regression_cluster_id0");
-    sleep(12000)
+    wait_cluster_change()
 
     int max_try_secs = 60
     while (max_try_secs--) {
@@ -118,5 +119,5 @@ suite("test_materialized_with_drop_cluster") {
             }
         }
     }
-    sql "DROP TABLE IF EXISTS ${tbName1}"
+    sql "DROP TABLE IF EXISTS ${tbName1} FORCE"
 }

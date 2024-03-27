@@ -50,14 +50,14 @@ suite("rebalance") {
             }
         }
     }
-    sleep(20000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
 
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
                      "regression_cluster_name0", "regression_cluster_id0");
-    sleep(20000)
+    wait_cluster_change()
 
     result  = sql "show clusters"
     assertTrue(result.size() == 1);
@@ -112,12 +112,12 @@ suite("rebalance") {
         DISTRIBUTED BY HASH(k1) BUCKETS 3
     """
 
-    sleep(20000)
+    wait_cluster_change()
     sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
 
     add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                   "regression_cluster_name0", "regression_cluster_id0");
-    sleep(120000)
+    wait_cluster_change()
 
     sql """ use @regression_cluster_name0 """
 

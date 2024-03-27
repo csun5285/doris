@@ -59,7 +59,7 @@ suite("smooth_upgrade_load") {
             }
         }
     }
-    sleep(16000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -69,7 +69,7 @@ suite("smooth_upgrade_load") {
     add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                   "regression_cluster_name0", "regression_cluster_id0");
 
-    sleep(16000)
+    wait_cluster_change()
 
     result  = sql "show clusters"
     assertEquals(result.size(), 1);
@@ -260,7 +260,7 @@ suite("smooth_upgrade_load") {
 
     loadParallel.call(parallel, queryNumPerThread, 1);
 
-    sleep(21000)
+    wait_cluster_change()
     balanceCostSec = waitBalanced.call(2);
     log.info("balance Cost Sec: " + balanceCostSec);
 

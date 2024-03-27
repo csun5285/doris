@@ -59,7 +59,7 @@ suite("decommission_load") {
             }
         }
     }
-    sleep(16000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -71,7 +71,7 @@ suite("decommission_load") {
     add_node.call(beUniqueIdList[2], ipList[2], hbPortList[2],
                   "regression_cluster_name0", "regression_cluster_id0");
 
-    sleep(16000)
+    wait_cluster_change()
 
     result  = sql "show clusters"
     assertEquals(result.size(), 1);

@@ -50,7 +50,7 @@ suite("default_cluster") {
             }
         }
     }
-    sleep(12000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -59,7 +59,7 @@ suite("default_cluster") {
                      "regression_cluster_name2", "regression_cluster_id2");
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                      "regression_cluster_name3", "regression_cluster_id3");
-    sleep(15000)
+    wait_cluster_change()
 
     result  = sql "show clusters"
     assertTrue(result.size() == 2);

@@ -50,7 +50,7 @@ suite("test_bitmap_index_with_drop_cluster") {
             }
         }
     }
-    sleep(12000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -58,7 +58,7 @@ suite("test_bitmap_index_with_drop_cluster") {
     // add cluster regression_cluster_name0
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
                      "regression_cluster_name0", "regression_cluster_id0");
-    sleep(12000)
+    wait_cluster_change()
     result  = sql "show clusters"
     assertTrue(result.size() == 1);
 
@@ -77,6 +77,7 @@ suite("test_bitmap_index_with_drop_cluster") {
         def jobStateResult = sql """  SHOW ALTER TABLE COLUMN WHERE TableName='${tableName}' ORDER BY createtime DESC LIMIT 1 """
         return jobStateResult[0][9]
     }
+    sql "DROP TABLE IF EXISTS ${tbName1} FORCE"
     sql """
             CREATE TABLE IF NOT EXISTS ${tbName1} (
                 k1 TINYINT,
@@ -121,7 +122,7 @@ suite("test_bitmap_index_with_drop_cluster") {
     
     // drop cluster
     drop_cluster.call("regression_cluster_name0", "regression_cluster_id0");
-    sleep(12000)
+    wait_cluster_change()
 
     // get schema change job state, should cancel
     int max_try_secs = 60
@@ -138,5 +139,5 @@ suite("test_bitmap_index_with_drop_cluster") {
             }
         }
     }
-    sql "DROP TABLE IF EXISTS ${tbName1}"
+    sql "DROP TABLE IF EXISTS ${tbName1} FORCE"
 }
