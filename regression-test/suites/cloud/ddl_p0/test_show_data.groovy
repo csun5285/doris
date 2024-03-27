@@ -75,4 +75,15 @@ suite("test_show_data") {
   def result = sql """show data properties("entire_warehouse"="true")"""
 
   assertTrue(result.size() >= 3)
+
+  sql """ DROP DATABASE IF EXISTS SHOW_DATA_1; """
+  result = sql """show data properties("entire_warehouse"="true")"""
+  assertTrue(result.size() > 0)
+  for (row : result) {
+    if (row[0].toString().equalsIgnoreCase("total")) {
+      assertTrue(row[2].toInteger() > 0)
+    }
+  }
+
+
 }
