@@ -174,7 +174,8 @@ suite("test_external_stage") {
             PS_SUPPKEY     INTEGER NOT NULL,
             PS_AVAILQTY    INTEGER NOT NULL,
             PS_SUPPLYCOST  DECIMAL(15,2)  NOT NULL,
-            PS_COMMENT     VARCHAR(199) NOT NULL 
+            PS_COMMENT     VARCHAR(199) NOT NULL,
+            PS_TMP         CHAR(10) NULL
         )
         DUPLICATE KEY(PS_PARTKEY, PS_SUPPKEY)
         DISTRIBUTED BY HASH(PS_PARTKEY) BUCKETS 32

@@ -1061,6 +1061,117 @@ class Suite implements GroovyInterceptable {
     DebugPoint GetDebugPoint() {
         return debugPoint
     }
+
+    void setFeConfig(String key, Object value) {
+        sql "ADMIN SET FRONTEND CONFIG ('${key}' = '${value}')"
+    }
+
+    void setFeConfigTemporary(Map<String, Object> tempConfig, Closure actionSupplier) {
+        def oldConfig = tempConfig.keySet().collectEntries { [it, getFeConfig(it)] }
+
+        def updateConfig = { conf ->
+            conf.each { key, value -> setFeConfig(key, value) }
+        }
+
+        try {
+            updateConfig tempConfig
+            actionSupplier()
+        } finally {
+            updateConfig oldConfig
+        }
+    }
+
+    void waiteCreateTableFinished(String tableName) {
+        Thread.sleep(2000);
+        String showCreateTable = "SHOW CREATE TABLE ${tableName}"
+        String createdTableName = "";
+        List<List<Object>> result
+        long startTime = System.currentTimeMillis()
+        long timeoutTimestamp = startTime + 1 * 60 * 1000 // 1 min
+        do {
+            result = sql(showCreateTable)
+            if (!result.isEmpty()) {
+                createdTableName = result.last().get(0)
+            }
+            logger.info("create table result of ${showCreateTable} is ${createdTableName}")
+            Thread.sleep(500);
+        } while (timeoutTimestamp > System.currentTimeMillis() && createdTableName.isEmpty())
+        if (createdTableName.isEmpty()) {
+            logger.info("create table is not success")
+        }
+        Assert.assertEquals(true, !createdTableName.isEmpty())
+    }
+
+    String[][] deduplicate_tablets(String[][] tablets) {
+        def result = [:]
+
+        tablets.each { row ->
+            def tablet_id = row[0]
+            if (!result.containsKey(tablet_id)) {
+                result[tablet_id] = row
+            }
+        }
+
+        return result.values().toList()
+    }
+
+    ArrayList deduplicate_tablets(ArrayList tablets) {
+        def result = [:]
+
+        tablets.each { row ->
+
+            def tablet_id
+            if (row.containsKey("TabletId")) {
+                tablet_id = row.TabletId
+            } else {
+                tablet_id = row[0]
+            }
+
+            if (!result.containsKey(tablet_id)) {
+                result[tablet_id] = row
+            }
+        }
+
+        return result.values().toList()
+    }
+
+    def check_mv_rewrite_success = { db, mv_sql, query_sql, mv_name ->
+
+        sql """DROP MATERIALIZED VIEW IF EXISTS ${mv_name}"""
+        sql"""
+        CREATE MATERIALIZED VIEW ${mv_name} 
+        BUILD IMMEDIATE REFRESH COMPLETE ON MANUAL
+        DISTRIBUTED BY RANDOM BUCKETS 2
+        PROPERTIES ('replication_num' = '1') 
+        AS ${mv_sql}
+        """
+
+        def job_name = getJobName(db, mv_name);
+        waitingMTMVTaskFinished(job_name)
+        explain {
+            sql("${query_sql}")
+            contains("${mv_name}(${mv_name})")
+        }
+    }
+
+    def check_mv_rewrite_fail = { db, mv_sql, query_sql, mv_name ->
+
+        sql """DROP MATERIALIZED VIEW IF EXISTS ${mv_name}"""
+        sql"""
+        CREATE MATERIALIZED VIEW ${mv_name} 
+        BUILD IMMEDIATE REFRESH COMPLETE ON MANUAL
+        DISTRIBUTED BY RANDOM BUCKETS 2
+        PROPERTIES ('replication_num' = '1') 
+        AS ${mv_sql}
+        """
+
+        def job_name = getJobName(db, mv_name);
+        waitingMTMVTaskFinished(job_name)
+        explain {
+            sql("${query_sql}")
+            notContains("${mv_name}(${mv_name})")
+        }
+    }
 }
 
 
