@@ -118,7 +118,7 @@ suite('test_overdue') {
     // set wrarehouse to normal
     try {
         try {
-            alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_NORMAL")) 
+            alter_request = JsonOutput.toJson(new AlterRequest(instance_id: instance_id, op: "SET_NORMAL"))
             result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
             obj = new JsonSlurper().parseText(result)
             logger.info("try to set warehouse normal, the result is {}", obj)
@@ -149,7 +149,7 @@ suite('test_overdue') {
 
         // when warehouse is overdue
         try {
-            def alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_OVERDUE")) 
+            def alter_request = JsonOutput.toJson(new AlterRequest(instance_id: instance_id, op: "SET_OVERDUE"))
             result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
             obj = new JsonSlurper().parseText(result)
             logger.info("try to set warehouse overdue, the result is {}", obj)
@@ -178,7 +178,7 @@ suite('test_overdue') {
             logger.info("when warehouse is overdue the result of http from user is {}", obj)
             assertEquals(obj.code, 1)
         } catch (Exception e) {
-            alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_NORMAL")) 
+            alter_request = JsonOutput.toJson(new AlterRequest(instance_id: instance_id, op: "SET_NORMAL"))
             result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
             obj = new JsonSlurper().parseText(result)
             logger.info("try to set warehouse normal, the result is {}", obj)
@@ -186,7 +186,7 @@ suite('test_overdue') {
         }
 
         // when warehouse transforms to normal
-        alter_request = JsonOutput.toJson(new AlterRequest(instance_id: context.config.instanceId, op: "SET_NORMAL")) 
+        alter_request = JsonOutput.toJson(new AlterRequest(instance_id: instance_id, op: "SET_NORMAL"))
         result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
         obj = new JsonSlurper().parseText(result)
         logger.info("try to set warehouse normal, the result is {}", obj)
@@ -212,7 +212,7 @@ suite('test_overdue') {
 
         // test the case when op parametr is not set
         try {
-            alter_request = JsonOutput.toJson(new AlterRequestWithoutOp(instance_id: context.config.instanceId)) 
+            alter_request = JsonOutput.toJson(new AlterRequestWithoutOp(instance_id: instance_id))
             result = http_post(context.config.metaServiceHttpAddress, "/MetaService/http/set_instance_status?token=greedisgood9999", alter_request)
             obj = new JsonSlurper().parseText(result) 
             logger.info("the result is {}", obj)
