@@ -3526,6 +3526,9 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             ConnectContext ctx = new ConnectContext();
             ctx.setThreadLocalInfo();
             ctx.setRemoteIP(clientAddr);
+            // used for __internal_schema database in InternalDatabaseUtil#checkDatabase
+            ctx.setQualifiedUser("root");
+            ctx.setCurrentUserIdentity(UserIdentity.createAnalyzedUserIdentWithIp("root", "%"));
             long backendId = request.getBackendId();
             Backend backend = Env.getCurrentSystemInfo().getBackend(backendId);
             Preconditions.checkNotNull(backend);
