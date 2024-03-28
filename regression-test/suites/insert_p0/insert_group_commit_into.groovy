@@ -83,7 +83,7 @@ suite("insert_group_commit_into") {
     for (item in ["legacy", "nereids"]) {
         try {
             // create table
-            sql """ drop table if exists ${table}; """
+            sql """ drop table if exists ${table} force; """
 
             sql """
             CREATE TABLE ${table} (
@@ -326,7 +326,7 @@ suite("insert_group_commit_into") {
         def table_tmp = dbName + ".test_table_tmp"
         try {
             // create table
-            sql """ drop table if exists ${table}; """
+            sql """ drop table if exists ${table} force; """
             sql """CREATE table ${table} (
             `ordernum` varchar(65533) NOT NULL ,
             `dnt` datetime NOT NULL ,
@@ -338,7 +338,7 @@ suite("insert_group_commit_into") {
             PROPERTIES (
             "replication_allocation" = "tag.location.default: 1"
             );"""
-            sql """drop table if exists ${table_tmp};"""
+            sql """drop table if exists ${table_tmp} force;"""
             sql """CREATE TABLE ${table_tmp} (
             `dnt` varchar(200) NULL,
             `ordernum` varchar(200) NULL,
