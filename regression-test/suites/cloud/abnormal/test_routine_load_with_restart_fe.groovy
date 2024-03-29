@@ -30,6 +30,7 @@ import java.util.concurrent.Executors
 suite("test_routine_load_with_restart_fe") {
     def topic = "test-topic"
     def clusterMap = loadClusterMap(getConf("clusterFile"))
+    String kafka_broker_list = context.config.otherConfigs.get("externalEnvIp") + ":" + context.config.otherConfigs.get("kafka_port")
 
     logger.info("clusterMap:${clusterMap}")
 
@@ -37,7 +38,6 @@ suite("test_routine_load_with_restart_fe") {
     pool = Executors.newFixedThreadPool(1)
     pool.execute{
          def props = new Properties()
-         String kafka_broker_list = context.config.externalEnvIp + ":" + context.config.kafka_port
          props.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka_broker_list)
          props.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
          'org.apache.kafka.common.serialization.StringSerializer')

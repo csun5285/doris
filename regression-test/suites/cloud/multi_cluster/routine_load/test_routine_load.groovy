@@ -88,7 +88,7 @@ suite("test_routine_load") {
     log.info("before_cluster1_flush : ${before_cluster1_flush}".toString())
 
     ExecutorService pool;
-    String kafka_broker_list = context.config.externalEnvIp + ":" + context.config.kafka_port
+    String kafka_broker_list = context.config.otherConfigs.get("externalEnvIp") + ":" + context.config.otherConfigs.get("kafka_port")
     pool = Executors.newFixedThreadPool(1)
     pool.execute{
          def props = new Properties()
