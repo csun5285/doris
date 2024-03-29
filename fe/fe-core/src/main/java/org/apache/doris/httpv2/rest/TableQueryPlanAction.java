@@ -131,6 +131,7 @@ public class TableQueryPlanAction extends RestBaseController {
                     // TODO support it
                     ConnectContext.get().getSessionVariable().setEnableTwoPhaseReadOpt(false);
                 }
+                ConnectContext.get().setCloudCluster();
                 // parse/analysis/plan the sql and acquire tablet distributions
                 handleQuery(ConnectContext.get(), fullDbName, tblName, sql, resultMap);
             } finally {
