@@ -30,7 +30,7 @@ import java.util.concurrent.Executors
 suite("test_routine_load", "external,external_docker") {
     def topic = "test-topic"
 
-    String kafka_broker_list = context.config.externalEnvIp + ":" + context.config.kafka_port
+    String kafka_broker_list = context.config.otherConfigs.get("externalEnvIp") + ":" + context.config.otherConfigs.get("kafka_port")
     ExecutorService pool;
     pool = Executors.newFixedThreadPool(1)
     pool.execute{
