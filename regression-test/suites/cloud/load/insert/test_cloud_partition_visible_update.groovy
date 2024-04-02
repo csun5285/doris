@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-suite("test_unique_table_insert", "load") {
+suite("test_cloud_partition_visible_update", "load") {
     // define a sql table
-    def testTable1 = "tbl_test_unique_table_insert01"
+    def testTable1 = "tbl_test_cloud_partition_visible_update_01"
 
     try {
         sql "DROP TABLE IF EXISTS ${testTable1}"
