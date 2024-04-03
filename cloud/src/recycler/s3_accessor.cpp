@@ -28,14 +28,14 @@
 #include "recycler/util.h"
 
 namespace selectdb {
-bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_list_objects("recycler_list_objects",
-                                                                    {"bucket", "instance"});
+// bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_list_objects("recycler_list_objects",
+//                                                                     {"bucket", "instance"});
 
-bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_delete_objects("recycler_delete_objects",
-                                                                      {"bucket", "instance"});
+// bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_delete_objects("recycler_delete_objects",
+//                                                                       {"bucket", "instance"});
 
-bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_delete_object("recycler_delete_object",
-                                                                     {"bucket", "instance"});
+// bvar::MultiDimension<bvar::LatencyRecorder> g_recycler_delete_object("recycler_delete_object",
+//                                                                      {"bucket", "instance"});
 
 #ifndef UNIT_TEST
 #define HELP_MACRO(ret, req, point_name)
@@ -131,11 +131,11 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
             return -1;
         }
 
-        bvar::LatencyRecorder* list_objects_recorder =
-                g_recycler_list_objects.get_stats({conf_.bucket, instance_id});
-        if (list_objects_recorder != nullptr) {
-            *list_objects_recorder << sw.elapsed_us() / 1000;
-        }
+        // bvar::LatencyRecorder* list_objects_recorder =
+        //         g_recycler_list_objects.get_stats({conf_.bucket, instance_id});
+        // if (list_objects_recorder != nullptr) {
+        //     *list_objects_recorder << sw.elapsed_us() / 1000;
+        // }
 
         const auto& result = outcome.GetResult();
         VLOG_DEBUG << "get " << result.GetContents().size() << " objects";
@@ -149,7 +149,7 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
                     .tag("key", obj.GetKey());
         }
         if (!objects.empty()) {
-            auto delete_task = [this, objs = std::move(objects), &prefix, &instance_id]() mutable {
+            auto delete_task = [this, objs = std::move(objects), &prefix]() mutable {
                 Aws::S3::Model::DeleteObjectsRequest delete_request;
                 delete_request.SetBucket(conf_.bucket);
                 Aws::S3::Model::Delete del;
@@ -174,11 +174,11 @@ int S3Accessor::delete_objects_by_prefix(const std::string& relative_path,
                     }
                     return -2;
                 }
-                bvar::LatencyRecorder* delete_objects_recorder =
-                        g_recycler_delete_objects.get_stats({conf_.bucket, instance_id});
-                if (delete_objects_recorder != nullptr) {
-                    *delete_objects_recorder << delete_sw.elapsed_us() / 1000;
-                }
+                // bvar::LatencyRecorder* delete_objects_recorder =
+                //         g_recycler_delete_objects.get_stats({conf_.bucket, instance_id});
+                // if (delete_objects_recorder != nullptr) {
+                //     *delete_objects_recorder << delete_sw.elapsed_us() / 1000;
+                // }
                 if (!delete_outcome.GetResult().GetErrors().empty()) {
                     const auto& e = delete_outcome.GetResult().GetErrors().front();
                     LOG_WARNING("failed to delete object")
@@ -240,7 +240,7 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths,
         }
         del.WithObjects(std::move(objects)).SetQuiet(true);
         delete_request.SetDelete(std::move(del));
-        auto delete_task = [this, req = std::move(delete_request), &instance_id]() {
+        auto delete_task = [this, req = std::move(delete_request)]() {
             StopWatch sw;
             sw.start();
             auto delete_outcome = SYNC_POINT_HOOK_RETURN_VALUE(s3_client_->DeleteObjects(req),
@@ -266,11 +266,11 @@ int S3Accessor::delete_objects(const std::vector<std::string>& relative_paths,
                         .tag("error", e.GetMessage());
                 return -2;
             }
-            bvar::LatencyRecorder* delete_objects_recorder =
-                    g_recycler_delete_objects.get_stats({conf_.bucket, instance_id});
-            if (delete_objects_recorder != nullptr) {
-                *delete_objects_recorder << sw.elapsed_us() / 1000;
-            }
+            // bvar::LatencyRecorder* delete_objects_recorder =
+            //         g_recycler_delete_objects.get_stats({conf_.bucket, instance_id});
+            // if (delete_objects_recorder != nullptr) {
+            //     *delete_objects_recorder << sw.elapsed_us() / 1000;
+            // }
             return 0;
         };
         concurrent_delete_executor.add(std::move(delete_task));
@@ -305,11 +305,11 @@ int S3Accessor::delete_object(const std::string& relative_path, const std::strin
                 .tag("exception", outcome.GetError().GetExceptionName());
         return -1;
     }
-    bvar::LatencyRecorder* delete_object_recorder =
-            g_recycler_delete_object.get_stats({conf_.bucket, instance_id});
-    if (delete_object_recorder != nullptr) {
-        *delete_object_recorder << sw.elapsed_us() / 1000;
-    }
+    // bvar::LatencyRecorder* delete_object_recorder =
+    //         g_recycler_delete_object.get_stats({conf_.bucket, instance_id});
+    // if (delete_object_recorder != nullptr) {
+    //     *delete_object_recorder << sw.elapsed_us() / 1000;
+    // }
     return 0;
 }
 
@@ -409,11 +409,11 @@ int S3Accessor::delete_expired_objects(const std::string& relative_path, int64_t
             return -1;
         }
 
-        bvar::LatencyRecorder* recorder =
-                g_recycler_list_objects.get_stats({conf_.bucket, instance_id});
-        if (recorder != nullptr) {
-            *recorder << sw.elapsed_us() / 1000;
-        }
+        // bvar::LatencyRecorder* recorder =
+        //         g_recycler_list_objects.get_stats({conf_.bucket, instance_id});
+        // if (recorder != nullptr) {
+        //     *recorder << sw.elapsed_us() / 1000;
+        // }
 
         const auto& result = outcome.GetResult();
         std::vector<std::string> expired_keys;
