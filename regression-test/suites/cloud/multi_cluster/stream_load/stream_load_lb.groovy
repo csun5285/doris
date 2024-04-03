@@ -162,7 +162,7 @@ suite("stream_load_lb") {
     sleep(30000)
 
     try {
-        sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'true')"
+        setFeConfig('apsaradb_env_enabled', true)
 
         // case4 apsaradb public endpoint
         streamLoad {
@@ -218,7 +218,7 @@ suite("stream_load_lb") {
         order_qt_q9 "SELECT count(*) FROM ${tableName3}" // 20
         order_qt_q10 "SELECT count(*) FROM ${tableName3} where k1 <= 10"  // 11
     } finally {
-        sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'false')"
+        setFeConfig('apsaradb_env_enabled', false)
     }
     } finally {
         sql """ drop table if exists ${tableName3} """

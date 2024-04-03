@@ -95,10 +95,12 @@ suite("test_rename_cluster") {
     sleep(20000)
 
     result  = sql "show clusters"
-    for (row : result) {
-        println row
+    log.info("clusters: " + result)
+    log.info("backends:")
+    for (def be : sql("show backends")) {
+        log.info("be: " + be)
     }
-    assertTrue(result.size() == 2);
+    assertEquals(2, result.size())
 
     sql "use @regression_cluster_name0"
     sql """

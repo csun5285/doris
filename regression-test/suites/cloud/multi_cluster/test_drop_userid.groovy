@@ -12,7 +12,8 @@ suite("test_drop_userid", "cloud_auth") {
         strBuilder.append("""curl -XPUT -u ${user1}:A12345678_""")
         strBuilder.append(""" -H fileName:1.dat""")
         strBuilder.append(""" -d '1,1,2,"yyy"' """)
-        strBuilder.append(""" -L http://""" + context.config.feCloudHttpAddress + """/copy/upload""")
+        def feHttpAddress = context.config.isDorisEnv ? context.config.feHttpAddress : context.config.feCloudHttpAddress
+        strBuilder.append(""" -L http://""" + feHttpAddress + """/copy/upload""")
         String command = strBuilder.toString()
         logger.info("upload command=" + command)
         def process = command.toString().execute()

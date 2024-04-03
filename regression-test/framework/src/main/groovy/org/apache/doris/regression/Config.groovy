@@ -61,6 +61,10 @@ class Config {
     public String metaServiceHttpAddress
     public String recycleServiceHttpAddress
 
+    // db server is doris else selectdb.
+    // fetch fe version to set it.
+    public boolean isDorisEnv = false
+
     public String suitePath
     public String dataPath
     public String realDataPath
@@ -411,6 +415,7 @@ class Config {
 
         config.tryCreateDbIfNotExist()
         config.buildUrlWithDefaultDb()
+        config.fetchServerConfig()
 
         return config
     }
@@ -760,6 +765,15 @@ class Config {
             }
         } catch (Throwable t) {
             throw new IllegalStateException("Create database failed, jdbcUrl: ${jdbcUrl}", t)
+        }
+    }
+
+    void fetchServerConfig() {
+        try {
+            def result = JdbcUtils.executeToMapArray(getConnection(), "show frontends")
+            isDorisEnv = result.get(0).Version.toString().startsWith("doris")
+        } catch (Throwable t) {
+            throw new IllegalStateException("Fetch server config failed, jdbcUrl: ${jdbcUrl}", t)
         }
     }
 

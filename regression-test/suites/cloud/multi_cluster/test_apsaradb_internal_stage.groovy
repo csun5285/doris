@@ -82,7 +82,8 @@ suite("test_apsarad_internal_stage_copy_into") {
         strBuilder.append(""" -H fileName:""" + remoteFilePath)
         strBuilder.append(""" -H host:""" + "private")
         strBuilder.append(""" -T """ + localFilePath)
-        strBuilder.append(""" -L http://""" + context.config.feCloudHttpAddress + """/copy/upload""")
+        def feHttpAddress = context.config.isDorisEnv ? context.config.feHttpAddress : context.config.feCloudHttpAddress
+        strBuilder.append(""" -L http://""" + feHttpAddress + """/copy/upload""")
 
         String command = strBuilder.toString()
         logger.info("upload command=" + command)
@@ -139,7 +140,7 @@ suite("test_apsarad_internal_stage_copy_into") {
     logger.info("cloud_delete_loaded_internal_stage_files=" + cloud_delete_loaded_internal_stage_files)
 
     try {
-        sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'true')"
+        setFeConfig('apsaradb_env_enabled', true)
         def fileName = "internal_customer.csv"
         def filePath = "${context.config.dataPath}/cloud/copy_into/" + fileName
         def remoteFileName = fileName + "test_apsaradb_internal_stage"
@@ -175,7 +176,7 @@ suite("test_apsarad_internal_stage_copy_into") {
         }
 
     } finally {
-        sql "ADMIN SET FRONTEND CONFIG ('apsaradb_env_enabled' = 'false')"
+        setFeConfig('apsaradb_env_enabled', false)
         sql """ DROP TABLE IF EXISTS ${tableName}; """
     }
 }

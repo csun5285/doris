@@ -87,6 +87,8 @@ suite("rebalance") {
     }
     */
 
+    sql 'DROP TABLE IF EXISTS table100'
+
     sql """
         CREATE TABLE table100 (
         class INT,
@@ -98,6 +100,7 @@ suite("rebalance") {
 
     """
 
+    sql 'DROP TABLE IF EXISTS table_p2'
     sql """
         CREATE TABLE table_p2 ( k1 int(11) NOT NULL, k2 varchar(20) NOT NULL, k3 int sum NOT NULL )
         AGGREGATE KEY(k1, k2)
@@ -113,11 +116,15 @@ suite("rebalance") {
     """
 
     wait_cluster_change()
-    sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
+    setFeConfig('balance_tablet_percent_per_run', 0.5)
+    if (context.config.isDorisEnv) {
+        setFeConfig('pre_heating_time_limit_sec', 1)
+    }
 
     add_node.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                   "regression_cluster_name0", "regression_cluster_id0");
     wait_cluster_change()
+    sleep(100000)
 
     sql """ use @regression_cluster_name0 """
 
@@ -171,7 +178,7 @@ suite("rebalance") {
         assertTrue(Integer.valueOf((String) row[1]) <= 2 && Integer.valueOf((String) row[1]) >= 1)
     }
 
-    sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
+    setFeConfig('balance_tablet_percent_per_run', 0.05)
     sql """ drop table IF EXISTS table100 """
     sql """ drop table IF EXISTS table_p2 """
 }

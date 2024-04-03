@@ -153,65 +153,23 @@ suite("table_rebalance") {
 
     }
 
-    try {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
-        sql """ admin set frontend config("enable_global_balance"="false"); """
-        sql """ admin set frontend config("preheating_enabled"="false"); """
-
-        testFunc.call();
-    } finally {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
-        sql """ admin set frontend config("enable_global_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-    }
-
-    try {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
-        sql """ admin set frontend config("enable_global_balance"="false"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-
-        testFunc.call();
-    } finally {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
-        sql """ admin set frontend config("enable_global_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-    }
-
-    try {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
-        sql """ admin set frontend config("enable_global_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="false"); """
-
-        testFunc.call();
-    } finally {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
-        sql """ admin set frontend config("enable_global_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-    }
-
-    try {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
-        sql """ admin set frontend config("enable_global_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-
-        testFunc.call();
-    } finally {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
-        sql """ admin set frontend config("enable_global_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-    }
-
-    try {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.5"); """
-        sql """ admin set frontend config("enable_table_balance"="false"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
-
-        testFunc.call();
-    } finally {
-        sql """ admin set frontend config("balance_tablet_percent_per_run"="0.05"); """
-        sql """ admin set frontend config("enable_table_balance"="true"); """
-        sql """ admin set frontend config("preheating_enabled"="true"); """
+    def balance_tablet_percent_per_run = 0.5
+    for (def enable_global_balance in [false, true]) {
+        for (def preheating_enabled in [false, true]) {
+            log.info("test table rebalance with balance_tablet_percent_per_run=${balance_tablet_percent_per_run}, " 
+                    + "enable_global_balance=${enable_global_balance}, preheating_enabled=${preheating_enabled}")
+            try {
+                setFeConfig('balance_tablet_percent_per_run', balance_tablet_percent_per_run)
+                setFeConfig('enable_global_balance', enable_global_balance)
+                setFeConfig('preheating_enabled', preheating_enabled)
+                testFunc.call()
+            } finally {
+                setFeConfig('balance_tablet_percent_per_run', 0.05)
+                setFeConfig('enable_global_balance', true)
+                setFeConfig('preheating_enabled', true)
+            }
+        }
     }
     sql """ drop table IF EXISTS table100 """
-        sql """ drop table IF EXISTS table_p2 """
+    sql """ drop table IF EXISTS table_p2 """
 }

@@ -64,6 +64,7 @@ import java.sql.PreparedStatement
 import java.sql.ResultSetMetaData
 import org.junit.Assert
 
+
 @Slf4j
 class Suite implements GroovyInterceptable {
     final SuiteContext context
@@ -76,6 +77,16 @@ class Suite implements GroovyInterceptable {
     final List<Closure> finishCallbacks = new Vector<>()
     final List<Throwable> lazyCheckExceptions = new Vector<>()
     final List<Future> lazyCheckFutures = new Vector<>()
+
+    static final List<Tuple2<String, String>> dorisSelectdbDiffCfgNames = [
+        // each tuple: [doris config,  selectdb config]
+        ['cloud_balance_tablet_percent_per_run', 'balance_tablet_percent_per_run'],
+        ['enable_cloud_global_balance', 'enable_global_balance'],
+        ['cloud_pre_heating_time_limit_sec', 'pre_heating_time_limit_sec'],
+
+        // TODO: after doris support preheating, doris config name use `cloud_preheating_enabled`
+        ['', 'preheating_enabled'],
+    ]
 
     SuiteCluster cluster
     DebugPoint debugPoint
@@ -281,24 +292,7 @@ class Suite implements GroovyInterceptable {
 
     def sql_return_maparray(String sqlStr) {
         logger.info("Execute sql: ${sqlStr}".toString())
-        def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
-
-        // get all column names as list
-        List<String> columnNames = new ArrayList<>()
-        for (int i = 0; i < meta.getColumnCount(); i++) {
-            columnNames.add(meta.getColumnName(i + 1))
-        }
-
-        // add result to res map list, each row is a map with key is column name
-        List<Map<String, Object>> res = new ArrayList<>()
-        for (int i = 0; i < result.size(); i++) {
-            Map<String, Object> row = new HashMap<>()
-            for (int j = 0; j < columnNames.size(); j++) {
-                row.put(columnNames.get(j), result.get(i).get(j))
-            }
-            res.add(row)
-        }
-        return res;
+        return JdbcUtils.executeToMapArray(context.getConnection(), sqlStr)
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
@@ -1063,6 +1057,43 @@ class Suite implements GroovyInterceptable {
     }
 
     void setFeConfig(String key, Object value) {
+        assert key != null
+        assert key != ''
+        for (def cfg : dorisSelectdbDiffCfgNames) {
+            def dorisKey = cfg[0]
+            def selectdbKey = cfg[1]
+            if (key == dorisKey) {
+                if (!context.config.isDorisEnv) {
+                    key = selectdbKey
+                }
+                break
+            }
+
+            if (key == selectdbKey) {
+                if (context.config.isDorisEnv) {
+                    key = dorisKey
+                }
+                break
+            }
+        }
+
+        // TODO: apsaradb_env_enabled will be removed
+        if (key == 'apsaradb_env_enabled') {
+            if (context.config.isDorisEnv) {
+                key = 'security_checker_class_name'
+                if (value == true || value == 'true') {
+                    value = 'com.aliyun.securitysdk.SecurityUtil'
+                } else {
+                    value = ''
+                }
+            }
+        }
+
+        // not support this key
+        if (key == null || key == "") {
+            return
+        }
+
         sql "ADMIN SET FRONTEND CONFIG ('${key}' = '${value}')"
     }
 
