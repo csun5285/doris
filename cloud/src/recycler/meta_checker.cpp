@@ -330,7 +330,7 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
             LOG(WARNING) << "failed to init txn";
             return false;
         }
-        if (elem.second.visible_version == 0) {
+        if (elem.second.visible_version == 0 || elem.second.visible_version == 1) {
             continue;
         }
 
