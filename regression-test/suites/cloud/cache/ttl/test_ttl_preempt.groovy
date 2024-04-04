@@ -14,9 +14,9 @@ suite("test_ttl_preempt") {
     def backends = sql_return_maparray "show backends;"
     assertTrue(backends.size() > 0)
     String backend_id;
-    def backendId_to_backendIP = [:]
-    def backendId_to_backendHttpPort = [:]
-    def backendId_to_backendBrpcPort = [:]
+    def backendIdToBackendIP = [:]
+    def backendIdToBackendHttpPort = [:]
+    def backendIdToBackendBrpcPort = [:]
     String host = ''
     for (def backend in backends) {
         if (backend.keySet().contains('Host')) {

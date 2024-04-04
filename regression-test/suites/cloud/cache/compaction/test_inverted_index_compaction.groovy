@@ -7,9 +7,9 @@ suite("test_inverted_index_compaction"){
     def backends = sql_return_maparray "show backends;"
     assertTrue(backends.size() > 0)
     String backend_id;
-    def backendId_to_backendIP = [:]
-    def backendId_to_backendHttpPort = [:]
-    def backendId_to_backendBrpcPort = [:]
+    def backendIdToBackendIP = [:]
+    def backendIdToBackendHttpPort = [:]
+    def backendIdToBackendBrpcPort = [:]
     String host = ''
     for (def backend in backends) {
         if (backend.keySet().contains('Host')) {
@@ -24,8 +24,8 @@ suite("test_inverted_index_compaction"){
             backendIdToBackendBrpcPort.put(backend.BackendId, backend.BrpcPort)
         }
     }
-    String backendId = backendId_to_backendIP.keySet()[0]
-    def url = backendId_to_backendIP.get(backendId) + ":" + backendId_to_backendHttpPort.get(backendId) + """/api/clear_file_cache"""
+    String backendId = backendIdToBackendIP.keySet()[0]
+    def url = backendIdToBackendIP.get(backendId) + ":" + backendIdToBackendHttpPort.get(backendId) + """/api/clear_file_cache"""
     logger.info(url)
     def clearFileCache = { check_func ->
         httpTest {
@@ -45,9 +45,9 @@ suite("test_inverted_index_compaction"){
         backendIdToCacheSize = [:]
         StringBuilder sb = new StringBuilder();
         sb.append("curl http://")
-        sb.append(backendId_to_backendIP.get(backendId))
+        sb.append(backendIdToBackendIP.get(backendId))
         sb.append(":")
-        sb.append(backendId_to_backendBrpcPort.get(backendId))
+        sb.append(backendIdToBackendBrpcPort.get(backendId))
         sb.append("/vars/*file_cache_cache_size")
         String command = sb.toString()
         logger.info(command);
@@ -120,9 +120,9 @@ suite("test_inverted_index_compaction"){
         backend_id = tablet[2]
         StringBuilder sb = new StringBuilder();
         sb.append("curl -X POST http://")
-        sb.append(backendId_to_backendIP.get(backend_id))
+        sb.append(backendIdToBackendIP.get(backend_id))
         sb.append(":")
-        sb.append(backendId_to_backendHttpPort.get(backend_id))
+        sb.append(backendIdToBackendHttpPort.get(backend_id))
         sb.append("/api/compaction/run?tablet_id=")
         sb.append(tablet_id)
         sb.append("&compact_type=cumulative")
@@ -145,9 +145,9 @@ suite("test_inverted_index_compaction"){
             backend_id = tablet[2]
             StringBuilder sb = new StringBuilder();
             sb.append("curl -X GET http://")
-            sb.append(backendId_to_backendIP.get(backend_id))
+            sb.append(backendIdToBackendIP.get(backend_id))
             sb.append(":")
-            sb.append(backendId_to_backendHttpPort.get(backend_id))
+            sb.append(backendIdToBackendHttpPort.get(backend_id))
             sb.append("/api/compaction/run_status?tablet_id=")
             sb.append(tablet_id)
 

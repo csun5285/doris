@@ -49,20 +49,20 @@ suite("test_dup_table_limit_optimize") {
 
     String[][] backends = sql """ show backends """
     assertTrue(backends.size() > 0)
-    def backendId_to_backendIP = [:]
-    def backendId_to_backendHttpPort = [:]
+    def backendIdToBackendIP = [:]
+    def backendIdToBackendHttpPort = [:]
     for (String[] backend in backends) {
-        backendId_to_backendIP.put(backend[0], backend[2])
-        backendId_to_backendHttpPort.put(backend[0], backend[5])
+        backendIdToBackendIP.put(backend[0], backend[2])
+        backendIdToBackendHttpPort.put(backend[0], backend[5])
     }
 
     def backenId_to_org_write_buffer_size = [:]
-    for (String backend_id in backendId_to_backendIP.keySet()) {
+    for (String backend_id in backendIdToBackendIP.keySet()) {
         StringBuilder showConfigCommand = new StringBuilder();
         showConfigCommand.append("curl -X GET http://")
-        showConfigCommand.append(backendId_to_backendIP.get(backend_id))
+        showConfigCommand.append(backendIdToBackendIP.get(backend_id))
         showConfigCommand.append(":")
-        showConfigCommand.append(backendId_to_backendHttpPort.get(backend_id))
+        showConfigCommand.append(backendIdToBackendHttpPort.get(backend_id))
         showConfigCommand.append("/api/show_config")
         logger.info(showConfigCommand.toString())
         def process = showConfigCommand.toString().execute()
@@ -87,8 +87,8 @@ suite("test_dup_table_limit_optimize") {
     }
     
     try {
-        for (String backend_id in backendId_to_backendIP.keySet()) {
-            updateBeConf(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id),
+        for (String backend_id in backendIdToBackendIP.keySet()) {
+            updateBeConf(backendIdToBackendIP.get(backend_id), backendIdToBackendHttpPort.get(backend_id),
                             "write_buffer_size", "2097152");
         }
         tableName = "customer"
@@ -144,8 +144,8 @@ suite("test_dup_table_limit_optimize") {
         assertTrue(result[0].size() == 1)
         assertTrue(result[0][0] == 150000)
     } finally {
-        for (String backend_id in backendId_to_backendIP.keySet()) {
-            updateBeConf(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id),
+        for (String backend_id in backendIdToBackendIP.keySet()) {
+            updateBeConf(backendIdToBackendIP.get(backend_id), backendIdToBackendHttpPort.get(backend_id),
                             "write_buffer_size", backenId_to_org_write_buffer_size.get(backend_id));
         }
     }

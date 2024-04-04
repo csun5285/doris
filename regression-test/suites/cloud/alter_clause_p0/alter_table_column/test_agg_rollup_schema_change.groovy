@@ -33,12 +33,12 @@ suite ("test_agg_rollup_schema_change") {
 
     try {
         String backend_id;
-        def backendId_to_backendIP = [:]
-        def backendId_to_backendHttpPort = [:]
-        getBackendIpHttpPort(backendId_to_backendIP, backendId_to_backendHttpPort);
+        def backendIdToBackendIP = [:]
+        def backendIdToBackendHttpPort = [:]
+        getBackendIpHttpPort(backendIdToBackendIP, backendIdToBackendHttpPort);
 
-        backend_id = backendId_to_backendIP.keySet()[0]
-        def (code, out, err) = show_be_config(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id))
+        backend_id = backendIdToBackendIP.keySet()[0]
+        def (code, out, err) = show_be_config(backendIdToBackendIP.get(backend_id), backendIdToBackendHttpPort.get(backend_id))
         
         logger.info("Show config: code=" + code + ", out=" + out + ", err=" + err)
         assertEquals(code, 0)
@@ -168,9 +168,9 @@ suite ("test_agg_rollup_schema_change") {
         //         logger.info("run compaction:" + tablet_id)
         //         StringBuilder sb = new StringBuilder();
         //         sb.append("curl -X POST http://")
-        //         sb.append(backendId_to_backendIP.get(backend_id))
+        //         sb.append(backendIdToBackendIP.get(backend_id))
         //         sb.append(":")
-        //         sb.append(backendId_to_backendHttpPort.get(backend_id))
+        //         sb.append(backendIdToBackendHttpPort.get(backend_id))
         //         sb.append("/api/compaction/run?tablet_id=")
         //         sb.append(tablet_id)
         //         sb.append("&compact_type=cumulative")
@@ -193,9 +193,9 @@ suite ("test_agg_rollup_schema_change") {
         //             backend_id = tablet[2]
         //             StringBuilder sb = new StringBuilder();
         //             sb.append("curl -X GET http://")
-        //             sb.append(backendId_to_backendIP.get(backend_id))
+        //             sb.append(backendIdToBackendIP.get(backend_id))
         //             sb.append(":")
-        //             sb.append(backendId_to_backendHttpPort.get(backend_id))
+        //             sb.append(backendIdToBackendHttpPort.get(backend_id))
         //             sb.append("/api/compaction/run_status?tablet_id=")
         //             sb.append(tablet_id)
 
