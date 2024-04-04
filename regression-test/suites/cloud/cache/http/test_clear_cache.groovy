@@ -22,6 +22,7 @@ suite("test_clear_cache") {
         } else {
             host = backend.IP
         }
+        def cloud_tag = parseJson(backend.Tag)
         if (backend.Alive.equals("true") && cloud_tag.cloud_cluster_name.contains("regression_cluster_name1")) {
             backendIdToBackendIP.put(backend.BackendId, host)
             backendIdToBackendHttpPort.put(backend.BackendId, backend.HttpPort)
