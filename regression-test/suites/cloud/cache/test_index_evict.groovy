@@ -2,16 +2,22 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_index_evict") {
     sql """ use @regression_cluster_name1 """
-    String[][] backends = sql """ show backends """
+    def backends = sql_return_maparray "show backends;"
     String backendId;
     def backendIdToBackendIP = [:]
     def backendIdToBackendHttpPort = [:]
     def backendIdToBackendBrpcPort = [:]
-    for (String[] backend in backends) {
-        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
-            backendIdToBackendIP.put(backend[0], backend[1])
-            backendIdToBackendHttpPort.put(backend[0], backend[4])
-            backendIdToBackendBrpcPort.put(backend[0], backend[5])
+    String host = ''
+    for (def backend in backends) {
+        if (backend.keySet().contains('Host')) {
+            host = backend.Host
+        } else {
+            host = backend.IP
+        }
+        if (backend.Alive.equals("true") && cloud_tag.cloud_cluster_name.contains("regression_cluster_name1")) {
+            backendIdToBackendIP.put(backend.BackendId, host)
+            backendIdToBackendHttpPort.put(backend.BackendId, backend.HttpPort)
+            backendIdToBackendBrpcPort.put(backend.BackendId, backend.BrpcPort)
         }
     }
     assertEquals(backendIdToBackendIP.size(), 1)

@@ -38,15 +38,22 @@ DISTRIBUTED BY HASH(`siteid`) BUCKETS 1
 """
 
     long origin_count = 0;
-    String[][] backends = sql """ show backends """
+    def backends = sql_return_maparray "show backends;"
     assertTrue(backends.size() > 0)
     String backendId;
     def backendIdToBackendIP = [:]
     def backendIdToBackendBrpcPort = [:]
-    for (String[] backend in backends) {
-        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
-            backendIdToBackendIP.put(backend[0], backend[1])
-            backendIdToBackendBrpcPort.put(backend[0], backend[5])
+    String host = ''
+    for (def backend in backends) {
+        if (backend.keySet().contains('Host')) {
+            host = backend.Host
+        } else {
+            host = backend.IP
+        }
+        def cloud_tag = parseJson(backend.Tag)
+        if (backend.Alive.equals("true") && cloud_tag.cloud_cluster_name.contains("regression_cluster_name1")) {
+            backendIdToBackendIP.put(backend.BackendId, host)
+            backendIdToBackendBrpcPort.put(backend.BackendId, backend.BrpcPort)
         }
     }
 

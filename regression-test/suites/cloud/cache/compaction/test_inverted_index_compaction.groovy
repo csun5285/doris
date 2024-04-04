@@ -3,16 +3,24 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite("test_inverted_index_compaction"){
     sql """ use @regression_cluster_name1 """
     //BackendId,Cluster,IP,HeartbeatPort,BePort,HttpPort,BrpcPort,LastStartTime,LastHeartbeat,Alive,SystemDecommissioned,ClusterDecommissioned,TabletNum,DataUsedCapacity,AvailCapacity,TotalCapacity,UsedPct,MaxDiskUsedPct,Tag,ErrMsg,Version,Status
-    String[][] backends = sql """ show backends """
+    //doris show backends: BackendId  Host  HeartbeatPort  BePort  HttpPort  BrpcPort  ArrowFlightSqlPort  LastStartTime  LastHeartbeat  Alive  SystemDecommissioned  TabletNum  DataUsedCapacity  TrashUsedCapcacity  AvailCapacity  TotalCapacity  UsedPct  MaxDiskUsedPct  RemoteUsedCapacity  Tag  ErrMsg  Version  Status  HeartbeatFailureCounter  NodeRole
+    def backends = sql_return_maparray "show backends;"
     assertTrue(backends.size() > 0)
+    String backend_id;
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
     def backendId_to_backendBrpcPort = [:]
-    for (String[] backend in backends) {
-        if (backend[8].equals("true") && backend[18].contains("regression_cluster_name1")) {
-            backendId_to_backendIP.put(backend[0], backend[1])
-            backendId_to_backendHttpPort.put(backend[0], backend[4])
-            backendId_to_backendBrpcPort.put(backend[0], backend[5])
+    String host = ''
+    for (def backend in backends) {
+        if (backend.keySet().contains('Host')) {
+            host = backend.Host
+        } else {
+            host = backend.IP
+        }
+        if (backend.Alive.equals("true") && cloud_tag.cloud_cluster_name.contains("regression_cluster_name1")) {
+            backendIdToBackendIP.put(backend.BackendId, host)
+            backendIdToBackendHttpPort.put(backend.BackendId, backend.HttpPort)
+            backendIdToBackendBrpcPort.put(backend.BackendId, backend.BrpcPort)
         }
     }
     String backendId = backendId_to_backendIP.keySet()[0]
