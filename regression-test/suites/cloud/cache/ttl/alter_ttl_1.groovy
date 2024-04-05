@@ -120,6 +120,7 @@ suite("alter_ttl_1") {
                     flag2 = true
                 }
             }
+            logger.info("ttl_cache_size: ${ttl_cache_size}, total_cache_size: ${total_cache_size}")
             assertTrue(flag1 && flag2)
             assertEquals(ttl_cache_size, total_cache_size)
     }
@@ -127,6 +128,7 @@ suite("alter_ttl_1") {
     sleep(60000)
     getMetricsMethod.call() {
         respCode, body ->
+            logger.info("respCode: ${respCode}, body: ${body}")
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')

@@ -141,6 +141,7 @@ suite("test_ttl_preempt") {
     long total_cache_size = 0
     getMetricsMethod.call() {
         respCode, body ->
+            logger.info("respCode: ${respCode}, body: ${body}")
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')
@@ -171,6 +172,7 @@ suite("test_ttl_preempt") {
     long s3_read_count = 0
     getMetricsMethod.call() {
         respCode, body ->
+            logger.info("respCode: ${respCode}, body: ${body}")
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')
@@ -193,6 +195,7 @@ suite("test_ttl_preempt") {
     sleep(10000)
     getMetricsMethod.call() {
         respCode, body ->
+            logger.info("respCode: ${respCode}, body: ${body}")
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')
@@ -205,6 +208,7 @@ suite("test_ttl_preempt") {
                     }
                     def i = line.indexOf(' ')
                     read_at_count = line.substring(i).toLong()
+                    logger.info("s3_read_count: ${s3_read_count}, read_at_count: ${read_at_count}")
                     assertEquals(s3_read_count, read_at_count)
                     flag = true
                     break
@@ -221,6 +225,7 @@ suite("test_ttl_preempt") {
     sleep(10000)
     getMetricsMethod.call() {
         respCode, body ->
+            logger.info("respCode: ${respCode}, body: ${body}")
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')
@@ -233,6 +238,7 @@ suite("test_ttl_preempt") {
                     }
                     def i = line.indexOf(' ')
                     read_at_count = line.substring(i).toLong()
+                    logger.info("s3_read_count: ${s3_read_count}, read_at_count: ${read_at_count}")
                     assertEquals(s3_read_count, read_at_count)
                     flag = true
                     break
@@ -243,6 +249,7 @@ suite("test_ttl_preempt") {
     sleep(20000)
     getMetricsMethod.call() {
         respCode, body ->
+            logger.info("respCode: ${respCode}, body: ${body}")
             assertEquals("${respCode}".toString(), "200")
             String out = "${body}".toString()
             def strs = out.split('\n')
