@@ -42,11 +42,11 @@ suite("test_lease_compaction") {
                      "regression_cluster_name0", "regression_cluster_id0");
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                      "regression_cluster_name1", "regression_cluster_id1");
-    sleep(12000)
+    sleep(21000)
 
     result  = sql "show clusters"
     assertEquals(result.size(), 2);
-    
+
     def updateBeConf = { backend_ip, backend_http_port, key, value ->
         String command = "curl -X POST http://${backend_ip}:${backend_http_port}/api/update_config?${key}=${value}"
         logger.info(command)
@@ -153,7 +153,7 @@ suite("test_lease_compaction") {
         // Test preempting compaction job when lease expired
         //======================================================================
         // cluster0 disable lease
-        injectionPoint(ipList[0], httpPortList[0], "set/CloudCumulativeCompaction::do_lease?behavior=return");        
+        injectionPoint(ipList[0], httpPortList[0], "set/CloudCumulativeCompaction::do_lease?behavior=return");
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
         sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """

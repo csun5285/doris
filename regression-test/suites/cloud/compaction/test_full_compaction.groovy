@@ -50,7 +50,7 @@ suite("test_full_compaction") {
             }
         }
     }
-    sleep(12000)
+    sleep(21000)
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
@@ -59,7 +59,7 @@ suite("test_full_compaction") {
                      "regression_cluster_name0", "regression_cluster_id0");
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                      "regression_cluster_name1", "regression_cluster_id1");
-    sleep(12000)
+    sleep(21000)
 
     result  = sql "show clusters"
     assertEquals(result.size(), 2);
@@ -71,7 +71,6 @@ suite("test_full_compaction") {
         code = process.waitFor()
         assertEquals(code, 0)
     }
-
 
     try {
         updateBeConf(ipList[0], httpPortList[0], "disable_auto_compaction", "true");
