@@ -57,9 +57,9 @@ suite("test_warm_up_cluster") {
     def clearFileCache = { ip, port ->
         httpTest {
             endpoint ""
-            uri ip + ":" + port + """/api/clear_file_cache"""
+            uri ip + ":" + port + """/api/clear_file_cache?sync=true"""
             op "post"
-            body "{\"sync\"=\"true\"}"
+            body ""
         }
     }
 

@@ -173,9 +173,13 @@ public:
     std::vector<std::tuple<size_t, size_t, FileCacheType, int64_t>> get_hot_segments_meta(
             const Key& key) const;
 
-    void clear_file_cache_async();
-    // use for test
-    Status clear_file_cache_directly();
+    /**
+     * Clear all cached data for this cache instance async
+     *
+     * @returns summary message
+     */
+    std::string clear_file_cache_async();
+    std::string clear_file_cache_directly();
 
     bool get_lazy_open_success() { return _lazy_open_done; }
 
