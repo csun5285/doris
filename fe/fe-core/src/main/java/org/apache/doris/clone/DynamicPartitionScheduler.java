@@ -32,8 +32,6 @@ import org.apache.doris.catalog.DistributionInfo;
 import org.apache.doris.catalog.DynamicPartitionProperty;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.HashDistributionInfo;
-import org.apache.doris.catalog.Index;
-import org.apache.doris.catalog.MetaIdGenerator;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionItem;
@@ -52,7 +50,6 @@ import org.apache.doris.common.util.MasterDaemon;
 import org.apache.doris.common.util.PropertyAnalyzer;
 import org.apache.doris.common.util.RangeUtils;
 import org.apache.doris.common.util.TimeUtils;
-import org.apache.doris.datasource.InternalCatalog;
 import org.apache.doris.thrift.TStorageMedium;
 
 import com.google.common.base.Strings;
@@ -74,7 +71,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * This class is used to periodically add or drop partition on an olapTable which specify dynamic partition properties
@@ -582,58 +578,11 @@ public class DynamicPartitionScheduler extends MasterDaemon {
             }
 
             if (!skipAddPartition) {
-                // get partitionIds and indexIds
-                List<Long> indexIds = olapTable.getIndexes().stream()
-                        .map(Index::getIndexId).collect(Collectors.toList());
-                List<Long> generatedPatitionIds = new ArrayList<>();
-                if (executeFirstTime && Config.isCloudMode() && !addPartitionClauses.isEmpty()) {
-                    AddPartitionClause addPartitionClause = addPartitionClauses.get(0);
-                    DistributionDesc distributionDesc = addPartitionClause.getDistributionDesc();
+                for (AddPartitionClause addPartitionClause : addPartitionClauses) {
                     try {
-                        DistributionInfo distributionInfo = distributionDesc
-                                .toDistributionInfo(olapTable.getBaseSchema());
-                        if (distributionDesc == null) {
-                            distributionInfo =  olapTable.getDefaultDistributionInfo()
-                                .toDistributionDesc().toDistributionInfo(olapTable.getBaseSchema());
-                        }
-                        long allPartitionBufferSize = 0;
-                        for (int i = 0; i < addPartitionClauses.size(); i++) {
-                            long bufferSize = InternalCatalog.checkAndGetBufferSize(indexIds.size(),
-                                    distributionInfo.getBucketNum(),
-                                    addPartitionClause.getSingeRangePartitionDesc()
-                                        .getReplicaAlloc().getTotalReplicaNum(),
-                                    db, tableName);
-                            allPartitionBufferSize += bufferSize;
-                        }
-                        MetaIdGenerator.IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv()
-                                .getIdGeneratorBuffer(allPartitionBufferSize);
-                        addPartitionClauses.forEach(p -> generatedPatitionIds.add(idGeneratorBuffer.getNextId()));
-                        InternalCatalog.prepareCloudPartition(db.getId(), olapTable.getId(),
-                                generatedPatitionIds, indexIds, 0);
-                    } catch (Exception e) {
-                        LOG.warn("cloud in prepare step, dbName {}, tableName {}, tableId {} exception {}",
-                                db.getFullName(), tableName, olapTable.getId(), e.getMessage());
-                        recordCreatePartitionFailedMsg(db.getFullName(), tableName, e.getMessage(), olapTable.getId());
-                    }
-                }
-
-
-                for (int i = 0; i < addPartitionClauses.size(); i++) {
-                    try {
-                        Env.getCurrentEnv().addPartition(db, tableName, addPartitionClauses.get(i),
-                                executeFirstTime, executeFirstTime
-                                    && Config.isCloudMode() ? generatedPatitionIds.get(i) : 0);
+                        Env.getCurrentEnv().addPartition(db, tableName, addPartitionClause);
                         clearCreatePartitionFailedMsg(olapTable.getId());
                     } catch (Exception e) {
-                        recordCreatePartitionFailedMsg(db.getFullName(), tableName, e.getMessage(), olapTable.getId());
-                    }
-                }
-                if (executeFirstTime && Config.isCloudMode() && !addPartitionClauses.isEmpty()) {
-                    try {
-                        InternalCatalog.commitCloudPartition(olapTable.getId(), generatedPatitionIds, indexIds);
-                    } catch (Exception e) {
-                        LOG.warn("cloud in commit step, dbName {}, tableName {}, tableId {} exception {}",
-                                db.getFullName(), tableName, olapTable.getId(), e.getMessage());
                         recordCreatePartitionFailedMsg(db.getFullName(), tableName, e.getMessage(), olapTable.getId());
                     }
                 }

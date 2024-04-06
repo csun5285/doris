@@ -3075,10 +3075,8 @@ public class Env {
         getInternalCatalog().createTableAsSelect(stmt);
     }
 
-    public void addPartition(Database db, String tableName,
-                             AddPartitionClause addPartitionClause,
-                             boolean isCreateTable, long generatedPartitionId) throws DdlException {
-        getInternalCatalog().addPartition(db, tableName, addPartitionClause, isCreateTable, generatedPartitionId);
+    public void addPartition(Database db, String tableName, AddPartitionClause addPartitionClause) throws DdlException {
+        getInternalCatalog().addPartition(db, tableName, addPartitionClause);
     }
 
     public void addPartitionLike(Database db, String tableName, AddPartitionLikeClause addPartitionLikeClause)
