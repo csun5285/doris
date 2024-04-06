@@ -69,6 +69,7 @@ suite("default_cluster") {
 
     sql "SET PROPERTY 'default_cloud_cluster' = 'regression_cluster_name3'"
 
+    context.reconnectFe()
     def before_cluster0_flush = get_be_metric(ipList[0], httpPortList[0], "memtable_flush_total");
     log.info("before_cluster0_flush : ${before_cluster0_flush}".toString())
 
