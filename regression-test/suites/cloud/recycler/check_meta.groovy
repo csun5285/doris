@@ -66,9 +66,6 @@ suite("check_meta", "check_meta") {
         logger.info("status {}, errMsg {} start {} now {}", status, errMsg, start, now)
     } while(status != 200 && errMsg == "meta leak err" && (now - start < 3600 * 1000))
 
-    assertEquals(status, 200)
-    assertEquals(errMsg.trim(), "OK")
-
     List<List<Object>> dbRes = sql "show databases"
     for (dbRow : dbRes) {
         db = dbRow[0]
@@ -86,4 +83,7 @@ suite("check_meta", "check_meta") {
             sql """ select count(*) from ${db}.`${table}` """
         }
     }
+
+    assertEquals(status, 200)
+    assertEquals(errMsg.trim(), "OK")
 }
