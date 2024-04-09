@@ -5622,6 +5622,15 @@ public class Env {
             LOG.warn("auto start in cloud mode, but clusterName empty {}", clusterName);
             return;
         }
+
+        // ATTN: prevent `Automatic Analyzer` daemon threads from pulling up clusters
+        // root ? see StatisticsUtil.buildConnectContext
+        // TODO(dx): it's trick, fix it
+        if (ConnectContext.get() != null && ConnectContext.get().getUserIdentity().isRootUser()) {
+            LOG.warn("auto start daemon thread run in root, not resume cluster");
+            return;
+        }
+
         String clusterStatus = Env.getCurrentSystemInfo().getCloudStatusByName(clusterName);
         if (Strings.isNullOrEmpty(clusterStatus)) {
             // for cluster rename or cluster dropped
