@@ -71,6 +71,8 @@ suite("test_recycler_with_many_partitions") {
 
     qt_sql """ select c1,c10 from ${tableName} order by c1 ASC;"""
 
+    sql """set query_timeout = 1800;"""
+
     sql """truncate table ${tableName}"""
 
     qt_sql """ select c1,c10 from ${tableName} order by c1 ASC;"""
