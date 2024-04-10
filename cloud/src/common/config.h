@@ -156,4 +156,7 @@ CONF_Int32(txn_store_retry_times, "20");
 // If enabled, some high-risk HTTP api for emergency fix can be used
 CONF_mBool(enable_risky_api, "false");
 
+// The secondary package name of the MetaService.
+CONF_String(secondary_package_name, "");
+
 } // namespace selectdb::config
