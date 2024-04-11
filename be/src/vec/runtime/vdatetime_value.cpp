@@ -2155,6 +2155,24 @@ bool DateV2Value<T>::from_date_str_base(const char* date_str, int len, int scale
         return false;
     }
     format_datetime(date_val, carry_bits);
+
+    // here maybe date changed because of rouding
+    if constexpr (!is_datetime) {
+        if (sec_offset) {
+            DateV2Value<DateTimeV2ValueType> tmp;
+            if (!tmp.check_range_and_set_time(date_val[0], date_val[1], date_val[2], date_val[3],
+                                              date_val[4], date_val[5], date_val[6])) {
+                return false;
+            }
+            if (!tmp.date_add_interval<TimeUnit::SECOND>(
+                        TimeInterval {TimeUnit::SECOND, sec_offset, false})) {
+                return false;
+            }
+            this->assign_from(tmp);
+            return true;
+        }
+    }
+
     if (!check_range_and_set_time(date_val[0], date_val[1], date_val[2], date_val[3], date_val[4],
                                   date_val[5], date_val[6])) {
         return false;
