@@ -770,7 +770,7 @@ class Config {
 
     void fetchServerConfig() {
         try {
-            def result = JdbcUtils.executeToMapArray(getConnection(), "show frontends")
+            def result = JdbcUtils.executeToMapArray(getRootConnection(), "show frontends")
             isDorisEnv = result.get(0).Version.toString().startsWith("doris")
         } catch (Throwable t) {
             throw new IllegalStateException("Fetch server config failed, jdbcUrl: ${jdbcUrl}", t)
@@ -779,6 +779,10 @@ class Config {
 
     Connection getConnection() {
         return DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword)
+    }
+
+    Connection getRootConnection() {
+        return DriverManager.getConnection(jdbcUrl, 'root', '')
     }
 
     Connection getConnectionByDbName(String dbName) {
