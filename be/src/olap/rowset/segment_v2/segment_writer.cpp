@@ -1015,11 +1015,13 @@ Status SegmentWriter::finalize_footer(uint64_t* segment_file_size) {
 Status SegmentWriter::finalize(uint64_t* segment_file_size, uint64_t* index_size) {
     MonotonicStopWatch timer;
     timer.start();
+#ifndef CLOUD_MODE
     // check disk capacity
     if (_data_dir != nullptr && _data_dir->reach_capacity_limit((int64_t)estimate_segment_size())) {
         return Status::Error<DISK_REACH_CAPACITY_LIMIT>("disk {} exceed capacity limit.",
                                                         _data_dir->path_hash());
     }
+#endif
     // write data
     RETURN_IF_ERROR(finalize_columns_data());
     // write index
