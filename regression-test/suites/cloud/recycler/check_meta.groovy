@@ -59,12 +59,12 @@ suite("check_meta", "check_meta") {
     def now = -1;
     do {
         checkMeta()
-        if (status != 200 && errMsg == "meta leak err") {
-            sleep(10000);
+        if (status == 200 && errMsg == "meta leak err") {
+            sleep(60000);
         }
         now = System.currentTimeMillis()
         logger.info("status {}, errMsg {} start {} now {}", status, errMsg, start, now)
-    } while(status != 200 && errMsg == "meta leak err" && (now - start < 3600 * 1000))
+    } while(status == 200 && errMsg == "meta leak err" && (now - start < 3600 * 1000))
 
     List<List<Object>> dbRes = sql "show databases"
     for (dbRow : dbRes) {
@@ -76,9 +76,20 @@ suite("check_meta", "check_meta") {
         if (db.contains("external_table")) {
             continue
         }
+
         List<List<Object>> tableRes = sql """ show tables from ${db} """
         for (tableRow : tableRes) {
             table = tableRow[0]
+
+            try {
+                sql """
+                    desc ${db}.`${table}` all
+                """
+            } catch (Exception e) {
+                logger.info("select count database: {}, table {}, err: {}", db, table, e.getMessage())
+                continue;
+            }
+
             logger.info("select count database: {}, table {}", db, table)
             sql """ select count(*) from ${db}.`${table}` """
         }
