@@ -417,6 +417,12 @@ class Config {
         config.buildUrlWithDefaultDb()
         config.fetchServerConfig()
 
+        if (config.isDorisEnv) {
+            config.feCloudHttpAddress = config.feHttpAddress
+            config.feCloudHttpInetSocketAddress = config.feHttpInetSocketAddress
+            log.info("change feCloudHttpAddress to feHttpAddress in doris env : ${config.feCloudHttpAddress}".toString())
+        }
+
         return config
     }
 
