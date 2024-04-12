@@ -324,11 +324,11 @@ public class SystemInfoService {
         String clusterNameMeta = cpb.getClusterName();
 
         // Prepare backends
-        Map<String, String> newTagMap = Tag.DEFAULT_BACKEND_TAG.toMap();
-        newTagMap.put(Tag.CLOUD_CLUSTER_NAME, clusterNameMeta);
-        newTagMap.put(Tag.CLOUD_CLUSTER_ID, clusterId);
         List<Backend> backends = new ArrayList<>();
         for (SelectdbCloud.NodeInfoPB node : cpb.getNodesList()) {
+            Map<String, String> newTagMap = Tag.DEFAULT_BACKEND_TAG.toMap();
+            newTagMap.put(Tag.CLOUD_CLUSTER_NAME, clusterNameMeta);
+            newTagMap.put(Tag.CLOUD_CLUSTER_ID, clusterId);
             Backend b = new Backend(Env.getCurrentEnv().getNextId(), node.getIp(), node.getHeartbeatPort());
             b.setTagMap(newTagMap);
             backends.add(b);
