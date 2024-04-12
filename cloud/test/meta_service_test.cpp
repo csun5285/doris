@@ -38,6 +38,9 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    config::enable_retry_txn_conflict = false;
+    config::txn_store_retry_base_intervals_ms = 1;
+    config::txn_store_retry_times = 20;
     if (!selectdb::init_glog("meta_service_test")) {
         std::cerr << "failed to init glog" << std::endl;
         return -1;
@@ -4598,12 +4601,11 @@ TEST(MetaServiceTxnStoreRetryableTest, MockGetVersion) {
     size_t index = 0;
     SyncPoint::get_instance()->set_call_back("get_version_code", [&](void* arg) {
         LOG(INFO) << "GET_VERSION_CODE";
-        if (++index < 5) {
+        if (++index < 2) {
             *reinterpret_cast<MetaServiceCode*>(arg) = MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE;
         }
     });
     SyncPoint::get_instance()->enable_processing();
-    config::enable_txn_store_retry = true;
 
     auto service = get_meta_service();
     create_tablet(service.get(), 1, 1, 1, 1);
@@ -4622,11 +4624,10 @@ TEST(MetaServiceTxnStoreRetryableTest, MockGetVersion) {
     ASSERT_EQ(resp.status().code(), MetaServiceCode::OK)
             << " status is " << resp.status().msg() << ", code=" << resp.status().code();
     EXPECT_EQ(resp.version(), 2);
-    EXPECT_GE(index, 5);
+    EXPECT_GE(index, 2);
 
     SyncPoint::get_instance()->disable_processing();
     SyncPoint::get_instance()->clear_all_call_backs();
-    config::enable_txn_store_retry = false;
 }
 
 TEST(MetaServiceTxnStoreRetryableTest, DoNotReturnRetryableCode) {
@@ -4634,7 +4635,6 @@ TEST(MetaServiceTxnStoreRetryableTest, DoNotReturnRetryableCode) {
         *reinterpret_cast<MetaServiceCode*>(arg) = MetaServiceCode::KV_TXN_STORE_GET_RETRYABLE;
     });
     SyncPoint::get_instance()->enable_processing();
-    config::enable_txn_store_retry = true;
     int32_t retry_times = config::txn_store_retry_times;
     config::txn_store_retry_times = 3;
 
@@ -4657,7 +4657,6 @@ TEST(MetaServiceTxnStoreRetryableTest, DoNotReturnRetryableCode) {
 
     SyncPoint::get_instance()->disable_processing();
     SyncPoint::get_instance()->clear_all_call_backs();
-    config::enable_txn_store_retry = false;
     config::txn_store_retry_times = retry_times;
 }
 

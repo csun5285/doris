@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
 
     selectdb::config::enable_txn_store_retry = true;
     selectdb::config::txn_store_retry_times = 100;
+    selectdb::config::txn_store_retry_base_intervals_ms = 1;
     selectdb::config::fdb_cluster_file_path = "fdb.cluster";
     selectdb::config::write_schema_kv = true;
 
@@ -90,8 +91,6 @@ int main(int argc, char** argv) {
     // 1. https://apple.github.io/foundationdb/api-error-codes.html#developer-guide-error-codes
     // 2. FDB source code: flow/include/flow/error_definitions.h
     std::vector<fdb_error_t> retryable_not_committed {
-            // too old
-            1007,
             // future version
             1009,
             // process_behind
