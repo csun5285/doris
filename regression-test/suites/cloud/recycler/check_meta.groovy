@@ -59,12 +59,12 @@ suite("check_meta", "check_meta") {
     def now = -1;
     do {
         checkMeta()
-        if (status == 200 && errMsg == "meta leak err") {
+        if (status == 200 && errMsg == "meta leak err\n") {
             sleep(60000);
         }
         now = System.currentTimeMillis()
         logger.info("status {}, errMsg {} start {} now {}", status, errMsg, start, now)
-    } while(status == 200 && errMsg == "meta leak err" && (now - start < 3600 * 1000))
+    } while(status == 200 && errMsg == "meta leak err\n" && (now - start < 3600 * 1000))
 
     List<List<Object>> dbRes = sql "show databases"
     for (dbRow : dbRes) {
