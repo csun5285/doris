@@ -50,14 +50,14 @@ suite("test_rename_cluster") {
             }
         }
     }
-    sleep(20000)
+    wait_cluster_change()
 
     List<List<Object>> result  = sql "show clusters"
     assertTrue(result.size() == 0);
 
     add_cluster.call(beUniqueIdList[0], ipList[0], hbPortList[0],
                      "regression_cluster_name0", "regression_cluster_id0");
-    sleep(20000)
+    wait_cluster_change()
 
     result  = sql "show clusters"
     assertTrue(result.size() == 1);
@@ -87,12 +87,12 @@ suite("test_rename_cluster") {
     """
 
     rename_cloud_cluster.call("regression_cluster_name1", "regression_cluster_id0");
-    sleep(20000)
+    wait_cluster_change()
 
     // create same name cluster
     add_cluster.call(beUniqueIdList[1], ipList[1], hbPortList[1],
                      "regression_cluster_name0", "regression_cluster_id2");
-    sleep(20000)
+    wait_cluster_change()
 
     result  = sql "show clusters"
     log.info("clusters: " + result)
