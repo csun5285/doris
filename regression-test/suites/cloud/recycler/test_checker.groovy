@@ -9,6 +9,11 @@ import com.amazonaws.services.s3.AmazonS3ClientBuilder
 import com.amazonaws.services.s3.model.ListObjectsRequest
 import com.amazonaws.services.s3.model.ObjectListing
 import com.amazonaws.services.s3.model.DeleteObjectRequest
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.FileSystem
+import org.apache.hadoop.fs.LocatedFileStatus
+import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.RemoteIterator
 
 suite("test_checker") {
     def token = "greedisgood9999"
@@ -26,7 +31,7 @@ suite("test_checker") {
             `score` int(11) NULL
         )
         DUPLICATE KEY(`id`)
-        DISTRIBUTED BY HASH(`id`) BUCKETS 1;
+        DISTRIBUTED BY HASH(`id`) BUCKETS 4;
     """
     sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
     sql """ INSERT INTO ${tableName} VALUES (2, "b", 100); """
@@ -45,24 +50,45 @@ suite("test_checker") {
 
     // Randomly delete segment file under tablet dir
     def getObjStoreInfoApiResult = getObjStoreInfo(token, cloudUniqueId)
-    String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
-    String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
-    String s3Endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
-    String region = getObjStoreInfoApiResult.result.obj_info[0].region
-    String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
-    String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
-    def credentials = new BasicAWSCredentials(ak, sk)
-    def endpointConfiguration = new EndpointConfiguration(s3Endpoint, region)
-    def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
-            .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
-    def objectListing = s3Client.listObjects(
-            new ListObjectsRequest().withBucketName(bucket).withPrefix("${prefix}/data/${tabletId}/"))
-    def objectSummaries = objectListing.getObjectSummaries()
-    assertTrue(!objectSummaries.isEmpty())
-    Random random = new Random(caseStartTime);
-    def objectKey = objectSummaries[random.nextInt(objectSummaries.size())].getKey()
-    logger.info("delete objectKey: ${objectKey}")
-    s3Client.deleteObject(new DeleteObjectRequest(bucket, objectKey))
+    if (getObjStoreInfoApiResult.result.containsKey("obj_info")) {
+        String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
+        String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
+        String s3Endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
+        String region = getObjStoreInfoApiResult.result.obj_info[0].region
+        String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
+        String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
+        def credentials = new BasicAWSCredentials(ak, sk)
+        def endpointConfiguration = new EndpointConfiguration(s3Endpoint, region)
+        def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
+                .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
+        def objectListing = s3Client.listObjects(
+                new ListObjectsRequest().withBucketName(bucket).withPrefix("${prefix}/data/${tabletId}/"))
+        def objectSummaries = objectListing.getObjectSummaries()
+        assertTrue(!objectSummaries.isEmpty())
+        Random random = new Random(caseStartTime);
+        def objectKey = objectSummaries[random.nextInt(objectSummaries.size())].getKey()
+        logger.info("delete objectKey: ${objectKey}")
+        s3Client.deleteObject(new DeleteObjectRequest(bucket, objectKey))
+    } else if (getObjStoreInfoApiResult.result.containsKey("storage_vault")) {
+        String fsUri = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.build_conf.fs_name
+        String prefix = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.prefix
+        String hdfsPath = "/${prefix}/data/${tabletId}/"
+        logger.info(":${fsUri}|${hdfsPath}".toString())
+        Configuration configuration = new Configuration();
+        configuration.set("fs.defaultFS", fsUri);
+        configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+        FileSystem fs = FileSystem.get(configuration);
+        Path path = new Path(hdfsPath);
+        try {
+            fs.delete(path, true); // true means recursive
+        } catch (FileNotFoundException e) {
+            // do nothing
+        } finally {
+            fs.close();
+        }
+    } else {
+        assertTrue(false);
+    }
 
     // Make sure to complete at least one round of checking
     def checkerLastSuccessTime = -1

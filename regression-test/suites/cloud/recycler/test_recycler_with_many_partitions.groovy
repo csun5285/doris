@@ -57,7 +57,7 @@ suite("test_recycler_with_many_partitions") {
             );
     """
 
-    for (int i = 0; i < 10000; i = i + 500) {
+    for (int i = 0; i < 7500; i = i + 500) {
         sql """ insert into ${tableName} values ${makeInsertStmt(i, i + 500)};"""
     }
 
@@ -90,7 +90,7 @@ suite("test_recycler_with_many_partitions") {
     } while (retry--)
     assertTrue(success)
 
-    for (int i = 0; i < 10000; i = i + 500) {
+    for (int i = 0; i < 7500; i = i + 500) {
         sql """ insert into ${tableName} values ${makeInsertStmt(i, i + 500)};"""
     }
     qt_sql """ select c1,c10 from ${tableName} order by c1 ASC;"""

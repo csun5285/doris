@@ -25,6 +25,11 @@ import com.amazonaws.services.s3.AmazonS3
 import com.amazonaws.services.s3.AmazonS3ClientBuilder
 import com.amazonaws.services.s3.model.ListObjectsRequest
 import com.amazonaws.services.s3.model.ObjectListing
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.FileSystem
+import org.apache.hadoop.fs.LocatedFileStatus
+import org.apache.hadoop.fs.Path
+import org.apache.hadoop.fs.RemoteIterator
 
 Suite.metaClass.triggerRecycle = { String token, String instanceId /* param */ ->
     // which suite invoke current function?
@@ -70,31 +75,65 @@ Suite.metaClass.checkRecycleTable = { String token, String instanceId, String cl
     def getObjStoreInfoApiResult = suite.getObjStoreInfo(token, cloudUniqueId);
     suite.getLogger().info("checkRecycleTable(): getObjStoreInfoApiResult:${getObjStoreInfoApiResult}".toString())
 
-    String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
-    String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
-    String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
-    String region = getObjStoreInfoApiResult.result.obj_info[0].region
-    String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
-    String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
-    suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
+    if (getObjStoreInfoApiResult.result.containsKey("obj_info")) {
+        String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
+        String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
+        String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
+        String region = getObjStoreInfoApiResult.result.obj_info[0].region
+        String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
+        String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
+        suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
 
-    def credentials = new BasicAWSCredentials(ak, sk)
-    def endpointConfiguration = new EndpointConfiguration(endpoint, region)
-    def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
-            .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
+        def credentials = new BasicAWSCredentials(ak, sk)
+        def endpointConfiguration = new EndpointConfiguration(endpoint, region)
+        def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
+                .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
 
-    assertTrue(tabletIdList.size() > 0)
-    for (tabletId : tabletIdList) {
-        suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId}");
-        def objectListing = s3Client.listObjects(
-            new ListObjectsRequest().withMaxKeys(1).withBucketName(bucket).withPrefix("${prefix}/data/${tabletId}/"))
+        assertTrue(tabletIdList.size() > 0)
+        for (tabletId : tabletIdList) {
+            suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId}");
+            def objectListing = s3Client.listObjects(
+                new ListObjectsRequest().withMaxKeys(1).withBucketName(bucket).withPrefix("${prefix}/data/${tabletId}/"))
 
-        suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId}, objectListing:${objectListing.getObjectSummaries()}".toString())
-        if (!objectListing.getObjectSummaries().isEmpty()) {
-            return false;
+            suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId}, objectListing:${objectListing.getObjectSummaries()}".toString())
+            if (!objectListing.getObjectSummaries().isEmpty()) {
+                return false;
+            }
         }
+        return true;
     }
-    return true;
+
+    if (getObjStoreInfoApiResult.result.containsKey("storage_vault")) {
+        String fsUri = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.build_conf.fs_name
+        String prefix = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.prefix
+
+        assertTrue(tabletIdList.size() > 0)
+        for (tabletId : tabletIdList) {
+            suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId}");
+            String hdfsPath = "/${prefix}/data/${tabletId}/"
+            Configuration configuration = new Configuration();
+            configuration.set("fs.defaultFS", fsUri);
+            configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+            FileSystem fs = FileSystem.get(configuration);
+            Path path = new Path(hdfsPath);
+            suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId} hdfsPath:${hdfsPath}");
+            try {
+                RemoteIterator<LocatedFileStatus> files = fs.listFiles(path, false); // true means recursive
+                while (files.hasNext()) {
+                    LocatedFileStatus file = files.next();
+                    suite.getLogger().info("file: ${file}".toString())
+                    suite.getLogger().info("tableName: ${tableName}, tabletId:${tabletId}, file:${file}".toString())
+                    return false
+                }
+            } catch (FileNotFoundException e) {
+                continue;
+            } finally {
+                fs.close();
+            }
+        }
+        return true;
+    }
+    return false
 }
 
 logger.info("Added 'checkRecycleTable' function to Suite")
@@ -110,33 +149,66 @@ Suite.metaClass.checkRecycleInternalStage = { String token, String instanceId, S
     def getObjStoreInfoApiResult = suite.getObjStoreInfo(token, cloudUniqueId);
     suite.getLogger().info("checkRecycleTable(): getObjStoreInfoApiResult:${getObjStoreInfoApiResult}".toString())
 
-    String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
-    String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
-    String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
-    String region = getObjStoreInfoApiResult.result.obj_info[0].region
-    String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
-    String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
-    suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
+    if (getObjStoreInfoApiResult.result.containsKey("obj_info")) {
+        String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
+        String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
+        String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
+        String region = getObjStoreInfoApiResult.result.obj_info[0].region
+        String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
+        String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
+        suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
 
-    def credentials = new BasicAWSCredentials(ak, sk)
-    def endpointConfiguration = new EndpointConfiguration(endpoint, region)
-    def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
-            .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
+        def credentials = new BasicAWSCredentials(ak, sk)
+        def endpointConfiguration = new EndpointConfiguration(endpoint, region)
+        def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
+                .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
 
-    // for root and admin, userId equal userName
-    String userName = suite.context.config.jdbcUser;
-    String userId = suite.context.config.jdbcUser;
-    def objectListing = s3Client.listObjects(
-        new ListObjectsRequest().withMaxKeys(1)
-            .withBucketName(bucket)
-            .withPrefix("${prefix}/stage/${userName}/${userId}/${fileName}"))
+        // for root and admin, userId equal userName
+        String userName = suite.context.config.jdbcUser;
+        String userId = suite.context.config.jdbcUser;
+        def objectListing = s3Client.listObjects(
+            new ListObjectsRequest().withMaxKeys(1)
+                .withBucketName(bucket)
+                .withPrefix("${prefix}/stage/${userName}/${userId}/${fileName}"))
 
-    suite.getLogger().info("${prefix}/stage/${userName}/${userId}/${fileName}, objectListing:${objectListing.getObjectSummaries()}".toString())
-    if (!objectListing.getObjectSummaries().isEmpty()) {
-        return false;
+        suite.getLogger().info("${prefix}/stage/${userName}/${userId}/${fileName}, objectListing:${objectListing.getObjectSummaries()}".toString())
+        if (!objectListing.getObjectSummaries().isEmpty()) {
+            return false;
+        }
+        return true;
     }
 
-    return true;
+    if (getObjStoreInfoApiResult.result.containsKey("storage_vault")) {
+        String fsUri = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.build_conf.fs_name
+        String prefix = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.prefix
+        // for root and admin, userId equal userName
+        String userName = suite.context.config.jdbcUser;
+        String userId = suite.context.config.jdbcUser;
+
+        String hdfsPath = "/${prefix}/stage/${userName}/${userId}/${fileName}"
+        suite.getLogger().info(":${fsUri}|${hdfsPath}".toString())
+        Configuration configuration = new Configuration();
+        configuration.set("fs.defaultFS", fsUri);
+        configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+        FileSystem fs = FileSystem.get(configuration);
+        Path path = new Path(hdfsPath);
+        try {
+            RemoteIterator<LocatedFileStatus> files = fs.listFiles(path, false); // true means recursive
+            while (files.hasNext()) {
+                LocatedFileStatus file = files.next();
+                suite.getLogger().info("file exist: ${file}".toString())
+                return false
+            }
+        } catch (FileNotFoundException e) {
+            return true;
+        } finally {
+            fs.close();
+        }
+
+        return true;
+    }
+
+    return false
 }
 logger.info("Added 'checkRecycleInternalStage' function to Suite")
 
@@ -146,50 +218,56 @@ Suite.metaClass.checkRecycleExpiredStageObjects = { String token, String instanc
 
     // function body
     suite.getLogger().info("""Test plugin: suiteName: ${suite.name}, instanceId: ${instanceId}, token:${token}, cloudUniqueId:${cloudUniqueId}""".toString())
-
     def getObjStoreInfoApiResult = suite.getObjStoreInfo(token, cloudUniqueId);
     suite.getLogger().info("checkRecycleExpiredStageObjects(): getObjStoreInfoApiResult:${getObjStoreInfoApiResult}".toString())
+    
+    if (getObjStoreInfoApiResult.result.containsKey("obj_info")) {
+        String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
+        String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
+        String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
+        String region = getObjStoreInfoApiResult.result.obj_info[0].region
+        String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
+        String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
+        suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
 
-    String ak = getObjStoreInfoApiResult.result.obj_info[0].ak
-    String sk = getObjStoreInfoApiResult.result.obj_info[0].sk
-    String endpoint = getObjStoreInfoApiResult.result.obj_info[0].endpoint
-    String region = getObjStoreInfoApiResult.result.obj_info[0].region
-    String prefix = getObjStoreInfoApiResult.result.obj_info[0].prefix
-    String bucket = getObjStoreInfoApiResult.result.obj_info[0].bucket
-    suite.getLogger().info("ak:${ak}, sk:${sk}, endpoint:${endpoint}, prefix:${prefix}".toString())
+        def credentials = new BasicAWSCredentials(ak, sk)
+        def endpointConfiguration = new EndpointConfiguration(endpoint, region)
+        def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
+                .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
 
-    def credentials = new BasicAWSCredentials(ak, sk)
-    def endpointConfiguration = new EndpointConfiguration(endpoint, region)
-    def s3Client = AmazonS3ClientBuilder.standard().withEndpointConfiguration(endpointConfiguration)
-            .withCredentials(new AWSStaticCredentialsProvider(credentials)).build()
+        // for root and admin, userId equal userName
+        String userName = suite.context.config.jdbcUser;
+        String userId = suite.context.config.jdbcUser;
+        def objectListing = s3Client.listObjects(
+                new ListObjectsRequest()
+                        .withBucketName(bucket)
+                        .withPrefix("${prefix}/stage/${userName}/${userId}/"))
 
-    // for root and admin, userId equal userName
-    String userName = suite.context.config.jdbcUser;
-    String userId = suite.context.config.jdbcUser;
-    def objectListing = s3Client.listObjects(
-            new ListObjectsRequest()
-                    .withBucketName(bucket)
-                    .withPrefix("${prefix}/stage/${userName}/${userId}/"))
-
-    suite.getLogger().info("${prefix}/stage/${userName}/${userId}/, objectListing:${objectListing.getObjectSummaries()}".toString())
-    Set<String> fileNames = new HashSet<>()
-    for (def os: objectListing.getObjectSummaries()) {
-        def split = os.key.split("/")
-        if (split.length <= 0 ) {
-            continue
+        suite.getLogger().info("${prefix}/stage/${userName}/${userId}/, objectListing:${objectListing.getObjectSummaries()}".toString())
+        Set<String> fileNames = new HashSet<>()
+        for (def os: objectListing.getObjectSummaries()) {
+            def split = os.key.split("/")
+            if (split.length <= 0 ) {
+                continue
+            }
+            fileNames.add(split[split.length-1])
         }
-        fileNames.add(split[split.length-1])
-    }
-    for(def f : nonExistFileNames) {
-        if (fileNames.contains(f)) {
-            return false
+        for(def f : nonExistFileNames) {
+            if (fileNames.contains(f)) {
+                return false
+            }
         }
-    }
-    for(def f : existFileNames) {
-        if (!fileNames.contains(f)) {
-            return false
+        for(def f : existFileNames) {
+            if (!fileNames.contains(f)) {
+                return false
+            }
         }
+        return true
     }
-    return true
+
+    if (getObjStoreInfoApiResult.result.containsKey("storage_vault")) {
+        throw new Exception("Not support in hdfs storage mode")
+    }
+    return false
 }
 logger.info("Added 'checkRecycleExpiredStageObjects' function to Suite")
