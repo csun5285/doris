@@ -31,7 +31,7 @@ suite("test_checker") {
             `score` int(11) NULL
         )
         DUPLICATE KEY(`id`)
-        DISTRIBUTED BY HASH(`id`) BUCKETS 4;
+        DISTRIBUTED BY HASH(`id`) BUCKETS 1;
     """
     sql """ INSERT INTO ${tableName} VALUES (1, "a", 100); """
     sql """ INSERT INTO ${tableName} VALUES (2, "b", 100); """
