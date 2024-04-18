@@ -17,12 +17,8 @@
 
 suite("test_array_with_func_load", "p0") {
     def tableName = "test_array_split_string"
-<<<<<<< HEAD
-	sql """ set enable_fallback_to_original_planner=false;"""
-=======
     // 2-0 old planner support array
     sql """ set enable_nereids_planner=false; """
->>>>>>> b15854a19f
     sql """ DROP TABLE IF EXISTS ${tableName} """
     sql """ CREATE TABLE ${tableName} (
                 id int,
@@ -59,3 +55,4 @@ suite("test_array_with_func_load", "p0") {
     qt_sql """select * from ${tableName} order by id;"""
 
 }
+

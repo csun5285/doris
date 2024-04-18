@@ -76,12 +76,9 @@ class ClientCache;
 class HeartbeatFlags;
 class FrontendServiceClient;
 class FileMetaCache;
-<<<<<<< HEAD
 class GroupCommitMgr;
 class WalManager;
-=======
 class DNSCache;
->>>>>>> b15854a19f
 
 // Execution environment for queries/plan fragments.
 // Contains all required global structures, and handles to
@@ -311,14 +308,11 @@ private:
     BlockSpillManager* _block_spill_mgr = nullptr;
     // To save meta info of external file, such as parquet footer.
     FileMetaCache* _file_meta_cache = nullptr;
-<<<<<<< HEAD
 
     std::shared_mutex _zone_cache_rw_lock;
     GroupCommitMgr* _group_commit_mgr = nullptr;
     std::shared_ptr<WalManager> _wal_manager;
-=======
     DNSCache* _dns_cache = nullptr;
->>>>>>> b15854a19f
 
     RuntimeQueryStatiticsMgr* _runtime_query_statistics_mgr = nullptr;
 };

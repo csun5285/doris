@@ -18,15 +18,12 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.analysis.AdminCopyTabletStmt;
-<<<<<<< HEAD
 import org.apache.doris.analysis.AdminDiagnoseTabletStmt;
 import org.apache.doris.analysis.AdminShowConfigStmt;
 import org.apache.doris.analysis.AdminShowReplicaDistributionStmt;
 import org.apache.doris.analysis.AdminShowReplicaStatusStmt;
 import org.apache.doris.analysis.AdminShowTabletStorageFormatStmt;
 import org.apache.doris.analysis.CompoundPredicate.Operator;
-=======
->>>>>>> b15854a19f
 import org.apache.doris.analysis.DescribeStmt;
 import org.apache.doris.analysis.DiagnoseTabletStmt;
 import org.apache.doris.analysis.HelpStmt;
@@ -405,7 +402,6 @@ public class ShowExecutor {
             handleShowTrash();
         } else if (stmt instanceof ShowTrashDiskStmt) {
             handleShowTrashDisk();
-<<<<<<< HEAD
         } else if (stmt instanceof AdminShowReplicaStatusStmt) {
             if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(Auth.ROOT_USER)) {
@@ -426,13 +422,21 @@ public class ShowExecutor {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operation");
             }
-=======
         } else if (stmt instanceof ShowReplicaStatusStmt) {
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
+                    .getUser().equals(Auth.ROOT_USER)) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleAdminShowTabletStatus();
         } else if (stmt instanceof ShowReplicaDistributionStmt) {
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
+                    .getUser().equals(Auth.ROOT_USER)) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleAdminShowTabletDistribution();
         } else if (stmt instanceof ShowConfigStmt) {
->>>>>>> b15854a19f
             handleAdminShowConfig();
         } else if (stmt instanceof ShowSmallFilesStmt) {
             handleShowSmallFiles();
@@ -466,7 +470,6 @@ public class ShowExecutor {
             handleShowTableCreation();
         } else if (stmt instanceof ShowLastInsertStmt) {
             handleShowLastInsert();
-<<<<<<< HEAD
         } else if (stmt instanceof AdminShowTabletStorageFormatStmt) {
             if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
@@ -479,11 +482,13 @@ public class ShowExecutor {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
                 throw new AnalysisException("Unsupported operation");
             }
-=======
         } else if (stmt instanceof ShowTabletStorageFormatStmt) {
+            if (Config.isCloudMode()) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleAdminShowTabletStorageFormat();
         } else if (stmt instanceof DiagnoseTabletStmt) {
->>>>>>> b15854a19f
             handleAdminDiagnoseTablet();
         } else if (stmt instanceof ShowCreateMaterializedViewStmt) {
             handleShowCreateMaterializedView();

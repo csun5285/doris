@@ -33,13 +33,10 @@ EngineIndexChangeTask::EngineIndexChangeTask(
 }
 
 Status EngineIndexChangeTask::execute() {
-<<<<<<< HEAD
 #ifdef CLOUD_MODE
     return Status::NotSupported("should not call EngineIndexChangeTask in CLOUD MODE");
 #else
     SCOPED_ATTACH_TASK(_mem_tracker);
-=======
->>>>>>> b15854a19f
     DorisMetrics::instance()->alter_inverted_index_requests_total->increment(1);
     uint64_t start = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::system_clock::now().time_since_epoch())

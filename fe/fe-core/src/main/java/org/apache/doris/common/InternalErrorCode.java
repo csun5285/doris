@@ -35,7 +35,8 @@ public enum InternalErrorCode {
     TOO_MANY_FAILURE_ROWS_ERR(102),
     CREATE_TASKS_ERR(103),
     TASKS_ABORT_ERR(104),
-<<<<<<< HEAD
+    CANNOT_RESUME_ERR(105),
+    TIMEOUT_TOO_MUCH(106),
 
     // for external catalog
     GET_REMOTE_METADATA_ERROR(201),
@@ -43,10 +44,6 @@ public enum InternalErrorCode {
 
     // for MoW table
     DELETE_BITMAP_LOCK_ERR(301);
-=======
-    CANNOT_RESUME_ERR(105),
-    TIMEOUT_TOO_MUCH(106);
->>>>>>> b15854a19f
 
     private long errCode;
 

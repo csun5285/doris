@@ -651,11 +651,8 @@ terminal String
     KW_VERBOSE,
     KW_VERSION,
     KW_VIEW,
-<<<<<<< HEAD
-    KW_WARM,
-=======
     KW_VIEWS,
->>>>>>> b15854a19f
+    KW_WARM,
     KW_WARNINGS,
     KW_WEEK,
     KW_WHEN,

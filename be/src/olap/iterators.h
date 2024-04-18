@@ -107,7 +107,6 @@ public:
 
     RowsetId rowset_id;
     int32_t tablet_id = 0;
-<<<<<<< HEAD
 
     vectorized::VExpr* remaining_vconjunct_root = nullptr;
     const std::set<int32_t>* output_columns = nullptr;
@@ -121,9 +120,7 @@ public:
 
     std::vector<vectorized::VExprSPtr> remaining_conjunct_roots;
     vectorized::VExprContextSPtrs common_expr_ctxs_push_down;
-=======
     size_t topn_limit = 0;
->>>>>>> b15854a19f
 };
 
 class RowwiseIterator;

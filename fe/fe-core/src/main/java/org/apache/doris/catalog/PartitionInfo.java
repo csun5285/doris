@@ -385,11 +385,6 @@ public class PartitionInfo implements Writable {
             idToInMemory.put(entry.getKey(), origIdToInMemory.get(entry.getValue()));
             idToStoragePolicy.put(entry.getKey(), origIdToStoragePolicy.get(entry.getValue()));
         }
-<<<<<<< HEAD
-        idToInMemory.put(newPartitionId, idToInMemory.remove(oldPartitionId));
-        idToPersistent.put(newPartitionId, idToPersistent.remove(oldPartitionId));
-=======
->>>>>>> b15854a19f
     }
 
     @Override

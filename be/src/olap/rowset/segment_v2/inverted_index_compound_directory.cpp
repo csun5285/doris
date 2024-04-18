@@ -263,20 +263,10 @@ bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, co
         buffer_size = CL_NS(store)::BufferedIndexOutput::BUFFER_SIZE;
     }
     auto* h = _CLNEW SharedHandle(path);
-<<<<<<< HEAD
     io::FileBlockCachePathPolicy cache_policy;
     auto type = config::enable_file_cache ? config::file_cache_type : "";
     io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
     if (!fs->open_file(path, &h->_reader, &reader_options).ok()) {
-=======
-
-    io::FileDescription fd;
-    fd.path = path;
-    io::FileBlockCachePathPolicy cache_policy;
-    auto type = config::enable_file_cache ? config::file_cache_type : "";
-    io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
-    if (!fs->open_file(fd, reader_options, &h->_reader).ok()) {
->>>>>>> b15854a19f
         error.set(CL_ERR_IO, "open file error");
     }
 

@@ -31,7 +31,6 @@ set -eo pipefail
 build_version_prefix="selectdb"
 build_version_major=0
 build_version_minor=0
-<<<<<<< HEAD
 build_version_patch=0
 build_version_hotfix=0
 build_version_rc_version=""
@@ -43,17 +42,7 @@ if [[ ${build_version_hotfix} -gt 0 ]]; then
 fi
 
 #doris version
-build_base_version="2.0.6"
-=======
-build_version_patch=8
-build_version_rc_version=""
-
-if [[ -z "${build_version_rc_version}" ]]; then
-    build_version="${build_version_prefix}-${build_version_major}.${build_version_minor}.${build_version_patch}"
-else
-    build_version="${build_version_prefix}-${build_version_major}.${build_version_minor}.${build_version_patch}-${build_version_rc_version}"
-fi
->>>>>>> b15854a19f
+build_base_version="2.0.9"
 
 unset LANG
 unset LC_CTYPE

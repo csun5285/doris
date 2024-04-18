@@ -232,7 +232,6 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
             }
         }
     }
-<<<<<<< HEAD
 
     _read_options.io_ctx.reader_type = read_context->reader_type;
     _read_options.output_columns = read_context->output_columns;
@@ -258,17 +257,8 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     //        && !_read_options.use_topn_opt && _read_options.push_down_agg_type_opt == TPushAggOp::NONE) {
     //    _read_options.is_lazy_open = read_context->lazy_open_segment;
     //}
-=======
-    _read_options.use_page_cache = _read_context->use_page_cache;
-    _read_options.tablet_schema = _read_context->tablet_schema;
     _read_options.enable_unique_key_merge_on_write =
             _read_context->enable_unique_key_merge_on_write;
-    _read_options.record_rowids = _read_context->record_rowids;
-    _read_options.use_topn_opt = _read_context->use_topn_opt;
-    _read_options.read_orderby_key_reverse = _read_context->read_orderby_key_reverse;
-    _read_options.read_orderby_key_columns = _read_context->read_orderby_key_columns;
-    _read_options.io_ctx.reader_type = _read_context->reader_type;
->>>>>>> b15854a19f
     _read_options.io_ctx.file_cache_stats = &_stats->file_cache_stats;
 
     // load segments

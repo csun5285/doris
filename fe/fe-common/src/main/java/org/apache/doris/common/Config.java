@@ -2667,7 +2667,6 @@ public class Config extends ConfigBase {
     })
     public static int label_num_threshold = 2000;
 
-<<<<<<< HEAD
     @ConfField(mutable = true, masterOnly = false, description = {
             "控制是否允许创建resource",
             "Control whether to allow the creation of resource."
@@ -2680,12 +2679,11 @@ public class Config extends ConfigBase {
                     + "Multiple users are separated by commas."
     })
     public static String skip_audit_user_list = "";
-=======
+
     @ConfField(description = {
             "是否开启 Proxy Protocol 支持",
             "Whether to enable proxy protocol"
     })
     public static boolean enable_proxy_protocol = false;
 
->>>>>>> b15854a19f
 }

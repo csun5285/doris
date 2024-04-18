@@ -179,21 +179,12 @@ public:
             _cancel_reason = msg;
             // Create a error status, so that we could print error stack, and
             // we could know which path call cancel.
-<<<<<<< HEAD
-            LOG(WARNING) << "Task is already cancelled, query id: " << print_id(_query_id)
-                         << ", instance id" << print_id(_fragment_instance_id)
-                         << ", st = " << Status::Error<ErrorCode::CANCELLED>(msg);
-        } else {
-            LOG(WARNING) << "Task is already cancelled, query id: " << print_id(_query_id)
-                         << ", instance id" << print_id(_fragment_instance_id)
-=======
             LOG(WARNING) << "Task is cancelled, query id: " << print_id(_query_id)
                          << ", instance id: " << print_id(_fragment_instance_id)
                          << ", st = " << Status::Error<ErrorCode::CANCELLED>(msg);
         } else {
             LOG(WARNING) << "Task is cancelled, query id: " << print_id(_query_id)
                          << ", instance id: " << print_id(_fragment_instance_id)
->>>>>>> b15854a19f
                          << ", original cancel msg: " << _cancel_reason
                          << ", new cancel msg: " << Status::Error<ErrorCode::CANCELLED>(msg);
         }

@@ -84,12 +84,9 @@ Status SingleReplicaCompaction::execute_compact_impl() {
     // do single replica compaction
     RETURN_IF_ERROR(_do_single_replica_compaction());
 
-<<<<<<< HEAD
     // 3. set state to success
     _compaction_succeed = true;
-=======
     _state = CompactionState::SUCCESS;
->>>>>>> b15854a19f
 
     return Status::OK();
 }

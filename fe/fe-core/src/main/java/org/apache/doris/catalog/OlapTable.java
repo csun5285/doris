@@ -78,11 +78,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
-<<<<<<< HEAD
 import com.selectdb.cloud.catalog.CloudPartition;
-import org.apache.commons.codec.digest.DigestUtils;
-=======
->>>>>>> b15854a19f
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

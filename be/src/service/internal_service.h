@@ -185,7 +185,6 @@ public:
     void glob(google::protobuf::RpcController* controller, const PGlobRequest* request,
               PGlobResponse* response, google::protobuf::Closure* done) override;
 
-<<<<<<< HEAD
     void group_commit_insert(google::protobuf::RpcController* controller,
                              const PGroupCommitInsertRequest* request,
                              PGroupCommitInsertResponse* response,
@@ -195,12 +194,10 @@ public:
                             const PGetWalQueueSizeRequest* request,
                             PGetWalQueueSizeResponse* response,
                             google::protobuf::Closure* done) override;
-=======
     void test_jdbc_connection(google::protobuf::RpcController* controller,
                               const PJdbcTestConnectionRequest* request,
                               PJdbcTestConnectionResult* result,
                               google::protobuf::Closure* done) override;
->>>>>>> b15854a19f
 
 private:
     void _exec_plan_fragment_in_pthread(google::protobuf::RpcController* controller,

@@ -269,10 +269,16 @@ int main(int argc, char** argv) {
         auto fs = doris::io::global_local_filesystem();
 
         auto read_file_to_json = [&](const std::string& file, std::string& output) {
-            if (!fs->read_file_to_string(file, &output).ok()) {
+            std::ifstream ifs(file);
+            if (!ifs.is_open()) {
                 std::cout << "read file " << file << " failed" << std::endl;
                 return false;
             }
+            file.seekg(0, std::ios::end);
+            size_t sz = file.tellg();
+            output.resize(sz, ' ');
+            file.seekg(0);
+            file.read(&buffer[0], sz); 
             return true;
         };
 
