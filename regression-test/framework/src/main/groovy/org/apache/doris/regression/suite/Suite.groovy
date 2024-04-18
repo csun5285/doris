@@ -279,23 +279,7 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
-<<<<<<< HEAD
-    List<List<Object>> insert_into_sql(String sqlStr, int num) {
-        logger.info("insert into " + num + " records")
-        def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
-        return result
-    }
 
-    List<List<Object>> exec(Object stmt) {
-        logger.info("Execute sql: ${stmt}".toString())
-        def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
-        return result
-    }
-
-    def sql_return_maparray(String sqlStr) {
-        logger.info("Execute sql: ${sqlStr}".toString())
-        return JdbcUtils.executeToMapArray(context.getConnection(), sqlStr)
-=======
     List<List<Object>> insert_into_sql_impl(Connection conn, String sqlStr, int num) {
         logger.info("insert into " + num + " records")
         def (result, meta) = JdbcUtils.executeToList(conn, sqlStr)
@@ -341,7 +325,6 @@ class Suite implements GroovyInterceptable {
             res.add(row)
         }
         return res;
->>>>>>> b15854a19f
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
