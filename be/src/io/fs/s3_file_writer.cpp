@@ -116,10 +116,22 @@ S3FileWriter::~S3FileWriter() {
     if (!_closed || _failed) {
         // if we don't abort multi part upload, the uploaded part in object
         // store will not automatically reclaim itself, it would cost more money
+<<<<<<< HEAD
         _abort();
         _bytes_written = 0;
     }
     s3_bytes_written_total << _bytes_written;
+=======
+        abort();
+        _bytes_appended = 0;
+    }
+    s3_bytes_written_total << _bytes_appended;
+    CHECK(_closed) << ", closed: " << _closed;
+    // in case there are task which might run after this object is destroyed
+    // for example, if the whole task failed and some task are still pending
+    // in threadpool
+    _wait_until_finish("dtor");
+>>>>>>> b15854a19f
     s3_file_being_written << -1;
 }
 
@@ -165,9 +177,18 @@ Status S3FileWriter::_open() {
         _upload_id = outcome.GetResult().GetUploadId();
         return Status::OK();
     }
+<<<<<<< HEAD
     return s3fs_error(outcome.GetError(),
                       fmt::format("failed to create multipart upload {} upload_id={}",
                                   _path.native(), _upload_id));
+=======
+    return Status::IOError(
+            "failed to create multipart upload(bucket={}, key={}, upload_id={}): {}, exception {}, "
+            "error code {}, request id {}",
+            _bucket, _path.native(), _upload_id, outcome.GetError().GetMessage(),
+            outcome.GetError().GetExceptionName(), outcome.GetError().GetResponseCode(),
+            outcome.GetError().GetRequestId());
+>>>>>>> b15854a19f
 }
 
 Status S3FileWriter::_abort() {
@@ -206,9 +227,18 @@ Status S3FileWriter::_abort() {
         _aborted = true;
         return Status::OK();
     }
+<<<<<<< HEAD
     return s3fs_error(outcome.GetError(),
                       fmt::format("failed to abort multipart upload {} upload_id={} whole parts {}",
                                   _path.native(), _upload_id, _dump_completed_part()));
+=======
+    return Status::IOError(
+            "failed to abort multipart upload(bucket={}, key={}, upload_id={}): {}, exception {}, "
+            "error code {}, request id {}",
+            _bucket, _path.native(), _upload_id, outcome.GetError().GetMessage(),
+            outcome.GetError().GetExceptionName(), outcome.GetError().GetResponseCode(),
+            outcome.GetError().GetRequestId());
+>>>>>>> b15854a19f
 }
 
 Status S3FileWriter::close() {
@@ -218,6 +248,33 @@ Status S3FileWriter::close() {
     }
     Defer defer {[&]() { _closed = true; }};
     VLOG_DEBUG << "S3FileWriter::close, path: " << _path.native();
+<<<<<<< HEAD
+=======
+
+    if (_upload_id.empty()) {
+        if (_pending_buf != nullptr) {
+            // it might be one file less than 5MB, we do upload here
+            _pending_buf->set_upload_remote_callback(
+                    [this, buf = _pending_buf]() { _put_object(*buf); });
+        }
+
+        if (_bytes_appended == 0 && _create_empty_file) {
+            // No data written, but need to create an empty file
+            _pending_buf = S3FileBufferPool::GetInstance()->allocate();
+            // if there is no upload id, we need to create a new one
+            _pending_buf->set_upload_remote_callback(
+                    [this, buf = _pending_buf]() { _put_object(*buf); });
+            _pending_buf->set_finish_upload([this]() { _countdown_event.signal(); });
+            _pending_buf->set_is_cancel([this]() { return _failed.load(); });
+            _pending_buf->set_on_failed([this](Status st) {
+                VLOG_NOTICE << "failed at key: " << _key << ", status: " << st.to_string();
+                std::unique_lock<std::mutex> _lck {_completed_lock};
+                this->_st = std::move(st);
+                _failed = true;
+            });
+        }
+    }
+>>>>>>> b15854a19f
     if (_pending_buf != nullptr) {
         if (_upload_id.empty()) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
@@ -352,11 +409,24 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
     }
     TEST_SYNC_POINT_CALLBACK("S3FileWriter::_upload_one_part", &upload_part_outcome);
     if (!upload_part_outcome.IsSuccess()) {
+<<<<<<< HEAD
         _st = s3fs_error(upload_part_outcome.GetError(),
                          fmt::format("failed to upload part {}, part_num={}, upload_id={}",
                                      _path.native(), part_num, _upload_id));
         LOG(WARNING) << _st;
         buf.set_status(_st);
+=======
+        auto s = Status::IOError(
+                "failed to upload part (bucket={}, key={}, part_num={}, up_load_id={}): {}, "
+                "exception {}, error code {}, request id {}",
+                _bucket, _path.native(), part_num, _upload_id,
+                upload_part_outcome.GetError().GetMessage(),
+                upload_part_outcome.GetError().GetExceptionName(),
+                upload_part_outcome.GetError().GetResponseCode(),
+                upload_part_outcome.GetError().GetRequestId());
+        LOG_WARNING(s.to_string());
+        buf._on_failed(s);
+>>>>>>> b15854a19f
         return;
     }
 
@@ -369,8 +439,11 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
 
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
+<<<<<<< HEAD
     _bytes_written += buf.get_size();
     s3_bytes_uploaded_total << buf.get_size();
+=======
+>>>>>>> b15854a19f
 }
 
 Status S3FileWriter::_complete() {
@@ -426,6 +499,7 @@ Status S3FileWriter::_complete() {
             DO_S3_PUT_RATE_LIMIT(_client->CompleteMultipartUpload(complete_request)),
             "s3_file_writer::complete_multi_part", std::cref(complete_request).get());
 
+<<<<<<< HEAD
     if (!complete_outcome.IsSuccess()) {
         _st = s3fs_error(
                 complete_outcome.GetError(),
@@ -433,6 +507,18 @@ Status S3FileWriter::_complete() {
                             _path.native(), _upload_id, _dump_completed_part()));
         LOG(WARNING) << _st;
         return _st;
+=======
+    if (!compute_outcome.IsSuccess()) {
+        auto s = Status::IOError(
+                "failed to create complete multi part upload (bucket={}, key={}): {}, exception "
+                "{}, error code {}, request id {}",
+                _bucket, _path.native(), compute_outcome.GetError().GetMessage(),
+                compute_outcome.GetError().GetExceptionName(),
+                compute_outcome.GetError().GetResponseCode(),
+                compute_outcome.GetError().GetRequestId());
+        LOG_WARNING(s.to_string());
+        return s;
+>>>>>>> b15854a19f
     }
     s3_file_created_total << 1;
     return Status::OK();
@@ -477,14 +563,26 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
                                                  "s3_file_writer::put_object",
                                                  std::cref(request).get(), &buf);
     if (!response.IsSuccess()) {
+<<<<<<< HEAD
         _st = s3fs_error(response.GetError(), fmt::format("failed to put object {}, upload_id={}",
                                                           _path.native(), _upload_id));
+=======
+        _st = Status::InternalError(
+                "failed to put object (bucket={}, key={}), Error: [{}:{}, responseCode:{}, request "
+                "id:{}]",
+                _bucket, _path.native(), response.GetError().GetExceptionName(),
+                response.GetError().GetMessage(), response.GetError().GetResponseCode(),
+                response.GetError().GetRequestId());
+>>>>>>> b15854a19f
         LOG(WARNING) << _st;
         buf.set_status(_st);
         return;
     }
+<<<<<<< HEAD
     _bytes_written += buf.get_size();
     s3_bytes_uploaded_total << buf.get_size();
+=======
+>>>>>>> b15854a19f
     s3_file_created_total << 1;
 }
 

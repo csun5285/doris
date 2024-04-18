@@ -498,8 +498,17 @@ Status S3FileSystem::get_key(const Path& path, std::string* key) const {
     return Status::OK();
 }
 
+<<<<<<< HEAD
 std::string S3FileSystem::full_path(std::string_view key) const {
     return fmt::format("{}/{}/{}", _s3_conf.endpoint, _s3_conf.bucket, key);
+=======
+template <typename AwsOutcome>
+std::string S3FileSystem::error_msg(const std::string& key, const AwsOutcome& outcome) const {
+    return fmt::format("(endpoint: {}, bucket: {}, key:{}, {}), {}, error code {}, request id {}",
+                       _s3_conf.endpoint, _s3_conf.bucket, key,
+                       outcome.GetError().GetExceptionName(), outcome.GetError().GetMessage(),
+                       outcome.GetError().GetResponseCode(), outcome.GetError().GetRequestId());
+>>>>>>> b15854a19f
 }
 
 // oss has public endpoint and private endpoint, is_public_endpoint determines

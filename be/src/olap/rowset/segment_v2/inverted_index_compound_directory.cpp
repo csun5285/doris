@@ -70,12 +70,16 @@
 #define PATH_DELIMITERA "/"
 #endif
 
-#define LOG_AND_THROW_IF_ERROR(status, msg)                      \
-    if (!status.ok()) {                                          \
-        auto err = std::string(msg) + ": " + status.to_string(); \
-        LOG(WARNING) << err;                                     \
-        _CLTHROWA(CL_ERR_IO, err.c_str());                       \
-    }
+#define LOG_AND_THROW_IF_ERROR(status, msg)                                  \
+    do {                                                                     \
+        auto _status_result = (status);                                      \
+        if (!_status_result.ok()) {                                          \
+            auto err = std::string(msg) + ": " + _status_result.to_string(); \
+            LOG(WARNING) << err;                                             \
+            _CLTHROWA(CL_ERR_IO, err.c_str());                               \
+        }                                                                    \
+    } while (0)
+
 namespace doris::segment_v2 {
 
 const char* const DorisCompoundDirectory::WRITE_LOCK_FILE = "write.lock";
@@ -259,10 +263,20 @@ bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, co
         buffer_size = CL_NS(store)::BufferedIndexOutput::BUFFER_SIZE;
     }
     auto* h = _CLNEW SharedHandle(path);
+<<<<<<< HEAD
     io::FileBlockCachePathPolicy cache_policy;
     auto type = config::enable_file_cache ? config::file_cache_type : "";
     io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
     if (!fs->open_file(path, &h->_reader, &reader_options).ok()) {
+=======
+
+    io::FileDescription fd;
+    fd.path = path;
+    io::FileBlockCachePathPolicy cache_policy;
+    auto type = config::enable_file_cache ? config::file_cache_type : "";
+    io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
+    if (!fs->open_file(fd, reader_options, &h->_reader).ok()) {
+>>>>>>> b15854a19f
         error.set(CL_ERR_IO, "open file error");
     }
 
@@ -300,6 +314,7 @@ DorisCompoundDirectory::FSIndexInput::FSIndexInput(const FSIndexInput& other)
     std::lock_guard<std::mutex> wlock(*other._handle->_shared_lock);
     _handle = _CL_POINTER(other._handle);
     _pos = other._handle->_fpos; //note where we are currently...
+    _io_ctx = other._io_ctx;
 }
 
 DorisCompoundDirectory::FSIndexInput::SharedHandle::SharedHandle(const char* path) {
@@ -366,9 +381,13 @@ void DorisCompoundDirectory::FSIndexInput::readInternal(uint8_t* b, const int32_
 
     Slice result {b, (size_t)len};
     size_t bytes_read = 0;
+<<<<<<< HEAD
     io::IOContext io_ctx;
     io_ctx.reader_type = ReaderType::READER_QUERY;
     if (!_handle->_reader->read_at(_pos, result, &bytes_read, &io_ctx).ok()) {
+=======
+    if (!_handle->_reader->read_at(_pos, result, &bytes_read, &_io_ctx).ok()) {
+>>>>>>> b15854a19f
         _CLTHROWA(CL_ERR_IO, "read past EOF");
     }
     bufferLength = len;
@@ -539,7 +558,8 @@ void DorisCompoundDirectory::init(const io::FileSystemSPtr& _fs, const char* _pa
         return;
     }
     bool exists = false;
-    LOG_AND_THROW_IF_ERROR(fs->exists(directory, &exists), "Doris compound directory init IO error")
+    LOG_AND_THROW_IF_ERROR(fs->exists(directory, &exists),
+                           "Doris compound directory init IO error");
     if (!exists) {
         auto e = "Doris compound directory init error: " + directory + " is not a directory";
         LOG(WARNING) << e;
@@ -581,7 +601,7 @@ bool DorisCompoundDirectory::fileExists(const char* name) const {
     char fl[CL_MAX_DIR];
     priv_getFN(fl, name);
     bool exists = false;
-    LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "File exists IO error")
+    LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "File exists IO error");
     return exists;
 }
 
@@ -608,7 +628,7 @@ void DorisCompoundDirectory::touchFile(const char* name) {
 
     io::FileWriterPtr tmp_writer;
     io::FileWriterOptions opts {.create_empty_file = false};
-    LOG_AND_THROW_IF_ERROR(fs->create_file(buffer, &tmp_writer, &opts), "Touch file IO error")
+    LOG_AND_THROW_IF_ERROR(fs->create_file(buffer, &tmp_writer, &opts), "Touch file IO error");
 }
 
 int64_t DorisCompoundDirectory::fileLength(const char* name) const {
@@ -643,7 +663,7 @@ bool DorisCompoundDirectory::doDeleteFile(const char* name) {
     CND_PRECONDITION(directory[0] != 0, "directory is not open");
     char fl[CL_MAX_DIR];
     priv_getFN(fl, name);
-    LOG_AND_THROW_IF_ERROR(fs->delete_file(fl), "Delete file IO error")
+    LOG_AND_THROW_IF_ERROR(fs->delete_file(fl), "Delete file IO error");
     return true;
 }
 
@@ -652,7 +672,7 @@ bool DorisCompoundDirectory::deleteDirectory() {
     char fl[CL_MAX_DIR];
     priv_getFN(fl, "");
     LOG_AND_THROW_IF_ERROR(fs->delete_directory(fl),
-                           fmt::format("Delete directory {} IO error", fl))
+                           fmt::format("Delete directory {} IO error", fl));
     return true;
 }
 
@@ -666,11 +686,16 @@ void DorisCompoundDirectory::renameFile(const char* from, const char* to) {
     priv_getFN(nu, to);
 
     bool exists = false;
-    LOG_AND_THROW_IF_ERROR(fs->exists(nu, &exists), "File exists IO error")
+    LOG_AND_THROW_IF_ERROR(fs->exists(nu, &exists), "File exists IO error");
     if (exists) {
-        LOG_AND_THROW_IF_ERROR(fs->delete_directory(nu), fmt::format("Delete {} IO error", nu))
+        LOG_AND_THROW_IF_ERROR(fs->delete_directory(nu), fmt::format("Delete {} IO error", nu));
     }
+<<<<<<< HEAD
     LOG_AND_THROW_IF_ERROR(fs->rename(old, nu), fmt::format("Rename {} to {} IO error", old, nu))
+=======
+    LOG_AND_THROW_IF_ERROR(fs->rename_dir(old, nu),
+                           fmt::format("Rename {} to {} IO error", old, nu));
+>>>>>>> b15854a19f
 }
 
 lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* name) {
@@ -678,11 +703,11 @@ lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* nam
     char fl[CL_MAX_DIR];
     priv_getFN(fl, name);
     bool exists = false;
-    LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "Create output file exists IO error")
+    LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "Create output file exists IO error");
     if (exists) {
         LOG_AND_THROW_IF_ERROR(fs->delete_file(fl),
-                               fmt::format("Create output delete file {} IO error", fl))
-        LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "Create output file exists IO error")
+                               fmt::format("Create output delete file {} IO error", fl));
+        LOG_AND_THROW_IF_ERROR(fs->exists(fl, &exists), "Create output file exists IO error");
         assert(!exists);
     }
     auto* ret = _CLNEW FSIndexOutput();
@@ -911,10 +936,10 @@ DorisCompoundDirectory* DorisCompoundDirectoryFactory::getDirectory(
         dir = _CLNEW DorisRAMCompoundDirectory();
     } else {
         bool exists = false;
-        LOG_AND_THROW_IF_ERROR(_fs->exists(file, &exists), "Get directory exists IO error")
+        LOG_AND_THROW_IF_ERROR(_fs->exists(file, &exists), "Get directory exists IO error");
         if (!exists) {
             LOG_AND_THROW_IF_ERROR(_fs->create_directory(file),
-                                   "Get directory create directory IO error")
+                                   "Get directory create directory IO error");
         }
         dir = _CLNEW DorisCompoundDirectory();
     }

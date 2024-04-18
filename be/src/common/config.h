@@ -1053,6 +1053,8 @@ DECLARE_mInt32(inverted_index_max_buffered_docs);
 DECLARE_Int32(max_depth_in_bkd_tree);
 // index compaction
 DECLARE_mBool(inverted_index_compaction_enable);
+// Only for debug, do not use in production
+DECLARE_mBool(debug_inverted_index_compaction);
 // index by RAM directory
 DECLARE_mBool(inverted_index_ram_dir_enable);
 // use num_broadcast_buffer blocks as buffer to do broadcast
@@ -1320,6 +1322,19 @@ DECLARE_mInt64(s3_put_token_limit);
 DECLARE_mInt32(cloud_base_compaction_delete_threshold);
 
 DECLARE_mInt64(max_ttl_cache_ratio);
+
+// max s3 client retry times
+DECLARE_mInt32(max_s3_client_retry);
+
+// the directory for storing the trino-connector plugins.
+DECLARE_String(trino_connector_plugin_dir);
+
+// the file paths(one or more) of CA cert, splite using ";" aws s3 lib use it to init s3client
+DECLARE_mString(ca_cert_file_paths);
+
+// Number of open tries, default 1 means only try to open once.
+// Retry the Open num_retries time waiting 100 milliseconds between retries.
+DECLARE_mInt32(thrift_client_open_num_tries);
 
 #ifdef BE_TEST
 // test s3

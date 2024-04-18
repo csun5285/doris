@@ -48,6 +48,7 @@ public class ShowProcStmt extends ShowStmt {
 
     @Override
     public void analyze(Analyzer analyzer) throws AnalysisException {
+<<<<<<< HEAD
         // ATTN: root has admin and operator Privileges
         if (Config.isCloudMode()
                 && !Arrays.stream(Config.cloud_show_proc_white_list).anyMatch(path::contains)
@@ -57,6 +58,10 @@ public class ShowProcStmt extends ShowStmt {
         }
 
         if (!Env.getCurrentEnv().getAccessManager().checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN)) {
+=======
+        if (!Env.getCurrentEnv().getAccessManager()
+                .checkGlobalPriv(ConnectContext.get(), PrivPredicate.ADMIN_OR_NODE)) {
+>>>>>>> b15854a19f
             ErrorReport.reportAnalysisException(ErrorCode.ERR_SPECIFIC_ACCESS_DENIED_ERROR, "ADMIN");
         }
 

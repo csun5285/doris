@@ -59,6 +59,7 @@ import java.util.stream.Collectors
 import java.util.stream.LongStream
 import static org.apache.doris.regression.util.DataUtils.sortByToString
 
+import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSetMetaData
@@ -278,6 +279,7 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
+<<<<<<< HEAD
     List<List<Object>> insert_into_sql(String sqlStr, int num) {
         logger.info("insert into " + num + " records")
         def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
@@ -293,6 +295,53 @@ class Suite implements GroovyInterceptable {
     def sql_return_maparray(String sqlStr) {
         logger.info("Execute sql: ${sqlStr}".toString())
         return JdbcUtils.executeToMapArray(context.getConnection(), sqlStr)
+=======
+    List<List<Object>> insert_into_sql_impl(Connection conn, String sqlStr, int num) {
+        logger.info("insert into " + num + " records")
+        def (result, meta) = JdbcUtils.executeToList(conn, sqlStr)
+        return result
+    }
+
+    List<List<Object>> jdbc_insert_into_sql(String sqlStr, int num) {
+        return insert_into_sql_impl(context.getConnection(), sqlStr, num)
+    }
+
+    List<List<Object>> arrow_flight_insert_into_sql(String sqlStr, int num) {
+        return insert_into_sql_impl(context.getArrowFlightSqlConnection(), (String) ("USE ${context.dbName};" + sqlStr), num)
+    }
+
+    List<List<Object>> insert_into_sql(String sqlStr, int num) {
+        if (context.useArrowFlightSql()) {
+            return arrow_flight_insert_into_sql(sqlStr, num)
+        } else {
+            return jdbc_insert_into_sql(sqlStr, num)
+        }
+    }
+
+    def sql_return_maparray(String sqlStr, Connection conn = null) {        
+        logger.info("Execute sql: ${sqlStr}".toString())
+        if (conn == null) {
+            conn = context.getConnection()
+        }
+        def (result, meta) = JdbcUtils.executeToList(conn, sqlStr)
+
+        // get all column names as list
+        List<String> columnNames = new ArrayList<>()
+        for (int i = 0; i < meta.getColumnCount(); i++) {
+            columnNames.add(meta.getColumnName(i + 1))
+        }
+
+        // add result to res map list, each row is a map with key is column name
+        List<Map<String, Object>> res = new ArrayList<>()
+        for (int i = 0; i < result.size(); i++) {
+            Map<String, Object> row = new HashMap<>()
+            for (int j = 0; j < columnNames.size(); j++) {
+                row.put(columnNames.get(j), result.get(i).get(j))
+            }
+            res.add(row)
+        }
+        return res;
+>>>>>>> b15854a19f
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
@@ -554,6 +603,11 @@ class Suite implements GroovyInterceptable {
         return lines;
     }
 
+
+    Connection getTargetConnection() {
+        return context.getTargetConnection(this)
+    }
+    
     boolean deleteFile(String filePath) {
         def file = new File(filePath)
         file.delete()
@@ -1056,6 +1110,7 @@ class Suite implements GroovyInterceptable {
         return debugPoint
     }
 
+<<<<<<< HEAD
     void setFeConfig(String key, Object value) {
         assert key != null
         assert key != ''
@@ -1094,6 +1149,17 @@ class Suite implements GroovyInterceptable {
             return
         }
 
+=======
+    boolean isCloudMode() {
+        return !getFeConfig("cloud_unique_id").isEmpty()
+    }
+
+    String getFeConfig(String key) {
+        return sql_return_maparray("SHOW FRONTEND CONFIG LIKE '${key}'")[0].Value
+    }
+
+    void setFeConfig(String key, Object value) {
+>>>>>>> b15854a19f
         sql "ADMIN SET FRONTEND CONFIG ('${key}' = '${value}')"
     }
 
@@ -1111,6 +1177,7 @@ class Suite implements GroovyInterceptable {
             updateConfig oldConfig
         }
     }
+<<<<<<< HEAD
 
     void waiteCreateTableFinished(String tableName) {
         Thread.sleep(2000);
@@ -1203,6 +1270,8 @@ class Suite implements GroovyInterceptable {
             notContains("${mv_name}(${mv_name})")
         }
     }
+=======
+>>>>>>> b15854a19f
 }
 
 

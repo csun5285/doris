@@ -445,8 +445,12 @@ public class StmtExecutor {
             LogicalPlan logicalPlan = ((LogicalPlanAdapter) parsedStmt).getLogicalPlan();
             return logicalPlan instanceof InsertIntoTableCommand;
         }
+<<<<<<< HEAD
         return parsedStmt instanceof InsertStmt
                 || parsedStmt instanceof CopyStmt
+=======
+        return parsedStmt instanceof InsertStmt || parsedStmt instanceof InsertOverwriteTableStmt
+>>>>>>> b15854a19f
                 || parsedStmt instanceof CreateTableAsSelectStmt;
     }
 

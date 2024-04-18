@@ -43,12 +43,19 @@
 #include "io/fs/path.h"
 #include "util/doris_metrics.h"
 
+<<<<<<< HEAD
 namespace doris {
 namespace io {
 namespace {
 
 Status sync_dir(const io::Path& dirname) {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("sync_dir", Status::IOError(""));
+=======
+namespace doris::io {
+
+namespace {
+Status sync_dir(const Path& dirname) {
+>>>>>>> b15854a19f
     int fd;
     RETRY_ON_EINTR(fd, ::open(dirname.c_str(), O_DIRECTORY | O_RDONLY));
     if (-1 == fd) {
@@ -57,6 +64,7 @@ Status sync_dir(const io::Path& dirname) {
     Defer defer {[fd] { ::close(fd); }};
 #ifdef __APPLE__
     if (fcntl(fd, F_FULLFSYNC) < 0) {
+<<<<<<< HEAD
         return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
     }
 #else
@@ -64,6 +72,14 @@ Status sync_dir(const io::Path& dirname) {
         return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
     }
 #endif
+=======
+#else
+    if (0 != ::fdatasync(fd)) {
+#endif
+        return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
+    }
+    ::close(fd);
+>>>>>>> b15854a19f
     return Status::OK();
 }
 
@@ -104,8 +120,11 @@ void LocalFileWriter::_abort() {
 }
 
 Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
+<<<<<<< HEAD
     TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::appendv",
                                       Status::IOError("inject io error"));
+=======
+>>>>>>> b15854a19f
     if (_closed) [[unlikely]] {
         return Status::InternalError("append to closed file: {}", _path.native());
     }
@@ -161,6 +180,29 @@ Status LocalFileWriter::appendv(const Slice* data, size_t data_cnt) {
     return Status::OK();
 }
 
+<<<<<<< HEAD
+=======
+Status LocalFileWriter::write_at(size_t offset, const Slice& data) {
+    DCHECK(!_closed);
+    _dirty = true;
+
+    size_t bytes_req = data.size;
+    char* from = data.data;
+
+    while (bytes_req != 0) {
+        auto res = ::pwrite(_fd, from, bytes_req, offset);
+        if (-1 == res && errno != EINTR) {
+            return localfs_error(errno, fmt::format("failed to write {}", _path.native()));
+        }
+        if (res > 0) {
+            from += res;
+            bytes_req -= res;
+        }
+    }
+    return Status::OK();
+}
+
+>>>>>>> b15854a19f
 Status LocalFileWriter::finalize() {
     TEST_SYNC_POINT_RETURN_WITH_VALUE("LocalFileWriter::finalize",
                                       Status::IOError("inject io error"));
@@ -184,6 +226,7 @@ Status LocalFileWriter::_close(bool sync) {
     if (sync) {
         if (_dirty) {
 #ifdef __APPLE__
+<<<<<<< HEAD
             if (fcntl(_fd, F_FULLFSYNC) < 0) [[unlikely]] {
                 return localfs_error(errno, fmt::format("failed to sync {}", _path.native()));
             }
@@ -195,6 +238,16 @@ Status LocalFileWriter::_close(bool sync) {
             _dirty = false;
         }
         RETURN_IF_ERROR(sync_dir(_path.parent_path()));
+=======
+        if (fcntl(_fd, F_FULLFSYNC) < 0) {
+#else
+        if (0 != ::fdatasync(_fd)) {
+#endif
+            return localfs_error(errno, fmt::format("failed to sync {}", _path.native()));
+        }
+        RETURN_IF_ERROR(sync_dir(_path.parent_path()));
+        _dirty = false;
+>>>>>>> b15854a19f
     }
 
     if (0 != ::close(_fd)) {
@@ -205,5 +258,4 @@ Status LocalFileWriter::_close(bool sync) {
     return Status::OK();
 }
 
-} // namespace io
-} // namespace doris
+} // namespace doris::io

@@ -1044,8 +1044,14 @@ Status SegmentIterator::_apply_inverted_index_on_block_column_predicate(
 }
 
 bool SegmentIterator::_need_read_data(ColumnId cid) {
+    // only support DUP_KEYS and UNIQUE_KEYS with MOW
+    if (!((_opts.tablet_schema->keys_type() == KeysType::DUP_KEYS ||
+           (_opts.tablet_schema->keys_type() == KeysType::UNIQUE_KEYS &&
+            _opts.enable_unique_key_merge_on_write)))) {
+        return true;
+    }
     // if there is delete predicate, we always need to read data
-    if (_opts.delete_condition_predicates->num_of_column_predicate() > 0) {
+    if (_has_delete_predicate(cid)) {
         return true;
     }
     if (_output_columns.count(-1)) {
@@ -1233,9 +1239,10 @@ Status SegmentIterator::_init_inverted_index_iterators() {
     for (auto cid : _schema->column_ids()) {
         int32_t unique_id = _opts.tablet_schema->column(cid).unique_id();
         if (_inverted_index_iterators[cid] == nullptr) {
+            // Use segment’s own index_meta, for compatibility with future indexing needs to default to lowercase.
             RETURN_IF_ERROR(_segment->new_inverted_index_iterator(
                     _opts.tablet_schema->column(cid),
-                    _opts.tablet_schema->get_inverted_index(unique_id), _opts,
+                    _segment->_tablet_schema->get_inverted_index(unique_id), _opts,
                     &_inverted_index_iterators[cid]));
         }
     }
@@ -1781,7 +1788,7 @@ Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint32
 
     for (auto cid : _first_read_column_ids) {
         auto& column = _current_return_columns[cid];
-        if (_need_read_key_data(cid, column, nrows_read)) {
+        if (_no_need_read_key_data(cid, column, nrows_read)) {
             continue;
         }
         if (_prune_column(cid, column, true, nrows_read)) {
@@ -2064,6 +2071,9 @@ Status SegmentIterator::_next_batch_internal(vectorized::Block* block) {
 
     _current_batch_rows_read = 0;
     uint32_t nrows_read_limit = _opts.block_row_max;
+    if (_can_opt_topn_reads()) {
+        nrows_read_limit = std::min(static_cast<uint32_t>(_opts.topn_limit), nrows_read_limit);
+    }
     RETURN_IF_ERROR(_read_columns_by_index(
             nrows_read_limit, _current_batch_rows_read,
             _lazy_materialization_read || _opts.record_rowids || _is_need_expr_eval));
@@ -2457,8 +2467,8 @@ void SegmentIterator::_calculate_pred_in_remaining_conjunct_root(
     }
 }
 
-bool SegmentIterator::_need_read_key_data(ColumnId cid, vectorized::MutableColumnPtr& column,
-                                          size_t nrows_read) {
+bool SegmentIterator::_no_need_read_key_data(ColumnId cid, vectorized::MutableColumnPtr& column,
+                                             size_t nrows_read) {
     if (_opts.tablet_schema->keys_type() != KeysType::DUP_KEYS) {
         return false;
     }
@@ -2468,6 +2478,10 @@ bool SegmentIterator::_need_read_key_data(ColumnId cid, vectorized::MutableColum
     }
 
     if (!_opts.tablet_schema->column(cid).is_key()) {
+        return false;
+    }
+
+    if (_has_delete_predicate(cid)) {
         return false;
     }
 
@@ -2490,6 +2504,28 @@ bool SegmentIterator::_need_read_key_data(ColumnId cid, vectorized::MutableColum
         nullable_col_ptr->get_nested_column_ptr()->insert_many_defaults(nrows_read);
     } else {
         column->insert_many_defaults(nrows_read);
+    }
+
+    return true;
+}
+
+bool SegmentIterator::_has_delete_predicate(ColumnId cid) {
+    std::set<uint32_t> delete_columns_set;
+    _opts.delete_condition_predicates->get_all_column_ids(delete_columns_set);
+    return delete_columns_set.contains(cid);
+}
+
+bool SegmentIterator::_can_opt_topn_reads() const {
+    if (_opts.topn_limit <= 0) {
+        return false;
+    }
+
+    if (_opts.delete_condition_predicates->num_of_column_predicate() > 0) {
+        return false;
+    }
+
+    if (!_col_predicates.empty() || !_col_preds_except_leafnode_of_andnode.empty()) {
+        return false;
     }
 
     return true;

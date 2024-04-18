@@ -93,6 +93,7 @@ public:
     int block_row_max = 4096 - 32; // see https://github.com/apache/doris/pull/11816
 
     TabletSchemaSPtr tablet_schema = nullptr;
+    bool enable_unique_key_merge_on_write = false;
     bool record_rowids = false;
     // flag for enable topn opt
     bool use_topn_opt = false;
@@ -106,6 +107,7 @@ public:
 
     RowsetId rowset_id;
     int32_t tablet_id = 0;
+<<<<<<< HEAD
 
     vectorized::VExpr* remaining_vconjunct_root = nullptr;
     const std::set<int32_t>* output_columns = nullptr;
@@ -119,6 +121,9 @@ public:
 
     std::vector<vectorized::VExprSPtr> remaining_conjunct_roots;
     vectorized::VExprContextSPtrs common_expr_ctxs_push_down;
+=======
+    size_t topn_limit = 0;
+>>>>>>> b15854a19f
 };
 
 class RowwiseIterator;

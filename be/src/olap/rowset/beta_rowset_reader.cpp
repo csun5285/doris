@@ -119,6 +119,7 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     _read_options.rowset_id = _rowset->rowset_id();
     _read_options.version = _rowset->version();
     _read_options.tablet_id = _rowset->rowset_meta()->tablet_id();
+    _read_options.topn_limit = _topn_limit;
     if (_read_context->lower_bound_keys != nullptr) {
         for (int i = 0; i < _read_context->lower_bound_keys->size(); ++i) {
             _read_options.key_ranges.emplace_back(&_read_context->lower_bound_keys->at(i),
@@ -231,6 +232,7 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
             }
         }
     }
+<<<<<<< HEAD
 
     _read_options.io_ctx.reader_type = read_context->reader_type;
     _read_options.output_columns = read_context->output_columns;
@@ -256,6 +258,17 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
     //        && !_read_options.use_topn_opt && _read_options.push_down_agg_type_opt == TPushAggOp::NONE) {
     //    _read_options.is_lazy_open = read_context->lazy_open_segment;
     //}
+=======
+    _read_options.use_page_cache = _read_context->use_page_cache;
+    _read_options.tablet_schema = _read_context->tablet_schema;
+    _read_options.enable_unique_key_merge_on_write =
+            _read_context->enable_unique_key_merge_on_write;
+    _read_options.record_rowids = _read_context->record_rowids;
+    _read_options.use_topn_opt = _read_context->use_topn_opt;
+    _read_options.read_orderby_key_reverse = _read_context->read_orderby_key_reverse;
+    _read_options.read_orderby_key_columns = _read_context->read_orderby_key_columns;
+    _read_options.io_ctx.reader_type = _read_context->reader_type;
+>>>>>>> b15854a19f
     _read_options.io_ctx.file_cache_stats = &_stats->file_cache_stats;
 
     // load segments

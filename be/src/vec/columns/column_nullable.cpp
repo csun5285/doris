@@ -60,6 +60,7 @@ ColumnNullable::ColumnNullable(MutableColumnPtr&& nested_column_, MutableColumnP
     _need_update_has_null = true;
 }
 
+<<<<<<< HEAD
 void ColumnNullable::update_null_data() {
     const auto& null_map_data = _get_null_map_data();
     auto s = size();
@@ -69,9 +70,19 @@ void ColumnNullable::update_null_data() {
         }
     }
 }
+=======
+bool ColumnNullable::could_shrinked_column() {
+    return get_nested_column_ptr()->could_shrinked_column();
+}
+
+>>>>>>> b15854a19f
 MutableColumnPtr ColumnNullable::get_shrinked_column() {
-    return ColumnNullable::create(get_nested_column_ptr()->get_shrinked_column(),
-                                  get_null_map_column_ptr());
+    if (could_shrinked_column()) {
+        return ColumnNullable::create(get_nested_column_ptr()->get_shrinked_column(),
+                                      get_null_map_column_ptr());
+    } else {
+        return ColumnNullable::create(get_nested_column_ptr(), get_null_map_column_ptr());
+    }
 }
 
 void ColumnNullable::update_xxHash_with_value(size_t start, size_t end, uint64_t& hash,

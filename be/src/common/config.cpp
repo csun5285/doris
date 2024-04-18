@@ -618,7 +618,7 @@ DEFINE_mInt32(result_buffer_cancelled_interval_time, "300");
 DEFINE_mInt32(priority_queue_remaining_tasks_increased_frequency, "512");
 
 // sync tablet_meta when modifying meta
-DEFINE_mBool(sync_tablet_meta, "true");
+DEFINE_mBool(sync_tablet_meta, "false");
 
 // default thrift rpc timeout ms
 DEFINE_mInt32(thrift_rpc_timeout_ms, "60000");
@@ -1032,7 +1032,7 @@ DEFINE_mInt32(inverted_index_cache_stale_sweep_time_sec, "600");
 // inverted index searcher cache size
 DEFINE_String(inverted_index_searcher_cache_limit, "10%");
 // set `true` to enable insert searcher into cache when write inverted index data
-DEFINE_Bool(enable_write_index_searcher_cache, "true");
+DEFINE_Bool(enable_write_index_searcher_cache, "false");
 DEFINE_Bool(enable_inverted_index_cache_check_timestamp, "true");
 DEFINE_Int32(inverted_index_fd_number_limit_percent, "50"); // 50%
 
@@ -1052,6 +1052,8 @@ DEFINE_Int32(inverted_index_read_buffer_size, "4096");
 DEFINE_Int32(max_depth_in_bkd_tree, "32");
 // index compaction
 DEFINE_mBool(inverted_index_compaction_enable, "false");
+// Only for debug, do not use in production
+DEFINE_mBool(debug_inverted_index_compaction, "false");
 // index by RAM directory
 DEFINE_mBool(inverted_index_ram_dir_enable, "false");
 // use num_broadcast_buffer blocks as buffer to do broadcast
@@ -1092,11 +1094,16 @@ DEFINE_Bool(enable_feature_binlog, "false");
 // enable set in BitmapValue
 DEFINE_Bool(enable_set_in_bitmap_value, "false");
 
+<<<<<<< HEAD
 DEFINE_mBool(enable_stack_trace, "true");
 
 DEFINE_Int64(max_hdfs_file_handle_cache_num, "20000");
+=======
+DEFINE_Int64(max_hdfs_file_handle_cache_num, "1000");
+>>>>>>> b15854a19f
 DEFINE_Int32(max_hdfs_file_handle_cache_time_sec, "3600");
-DEFINE_Int64(max_external_file_meta_cache_num, "20000");
+DEFINE_Int64(max_external_file_meta_cache_num, "1000");
+
 // Apply delete pred in cumu compaction
 DEFINE_mBool(enable_delete_when_cumu_compaction, "false");
 
@@ -1302,6 +1309,20 @@ DEFINE_mInt64(s3_put_token_limit, "0");
 DEFINE_mInt32(cloud_base_compaction_delete_threshold, "200");
 
 DEFINE_mInt64(max_ttl_cache_ratio, "90");
+
+DEFINE_mInt32(max_s3_client_retry, "10");
+
+DEFINE_String(trino_connector_plugin_dir, "${DORIS_HOME}/connectors");
+
+// ca_cert_file is in this path by default, Normally no modification is required
+// ca cert default path is different from different OS
+DEFINE_mString(ca_cert_file_paths,
+               "/etc/pki/tls/certs/ca-bundle.crt;/etc/ssl/certs/ca-certificates.crt;"
+               "/etc/ssl/ca-bundle.pem");
+
+// Number of open tries, default 1 means only try to open once.
+// Retry the Open num_retries time waiting 100 milliseconds between retries.
+DEFINE_mInt32(thrift_client_open_num_tries, "1");
 
 // clang-format off
 #ifdef BE_TEST
