@@ -832,7 +832,7 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
                 code = cast_as<ErrCategory::READ>(err);
                 ss << "failed to get tablet table index ids,"
                    << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " not found" : " internal error")
-                   << " tablet_id=" << tablet_id << " key=" << hex(key);
+                   << " tablet_id=" << tablet_id << " key=" << hex(key) << " err=" << err;
                 msg = ss.str();
                 LOG(INFO) << msg << " err=" << err << " txn_id=" << txn_id;
                 return;
