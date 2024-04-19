@@ -115,7 +115,6 @@ class Config {
     public Integer actionParallel
     public Integer times
     public boolean withOutLoadData
-<<<<<<< HEAD
     public boolean isSmokeTest
     public String multiClusterBes
     public String metaServiceToken
@@ -138,10 +137,11 @@ class Config {
     public String clusterDir
     public String kafkaBrokerList
     public String cloudVersion
+    public String caseNamePrefix
 
     Config() {}
 
-    Config(String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
+    Config(String caseNamePrefix, String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
            String feSourceThriftAddress, String feTargetThriftAddress, String feSyncerUser, String feSyncerPassword, String syncerPassword,
            String feHttpAddress, String feHttpUser, String feHttpPassword,
            String feCloudHttpAddress, String feCloudHttpUser, String feCloudHttpPassword, String instanceId,
@@ -153,19 +153,7 @@ class Config {
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
            String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId,
            String clusterDir, kafkaBrokerList, String cloudVersion) {
-=======
-    public String caseNamePrefix
-
-    Config() {}
-
-    Config(String caseNamePrefix, String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
-           String feSourceThriftAddress, String feTargetThriftAddress, String feSyncerUser, String feSyncerPassword,
-           String syncerPassword, String feHttpAddress, String feHttpUser, String feHttpPassword, String metaServiceHttpAddress,
-           String suitePath, String dataPath, String realDataPath, String cacheDataPath, Boolean enableCacheData,
-           String testGroups, String excludeGroups, String testSuites, String excludeSuites,
-           String testDirectories, String excludeDirectories, String pluginPath, String sslCertificatePath) {
         this.caseNamePrefix = caseNamePrefix
->>>>>>> b15854a19f
         this.defaultDb = defaultDb
         this.jdbcUrl = jdbcUrl
         this.jdbcUser = jdbcUser
@@ -420,11 +408,8 @@ class Config {
         config.randomOrder = cmd.hasOption(randomOrderOpt)
         config.stopWhenFail = cmd.hasOption(stopWhenFailOpt)
         config.withOutLoadData = cmd.hasOption(withOutLoadDataOpt)
-<<<<<<< HEAD
         config.isSmokeTest = cmd.hasOption(isSmokeTestOpt)
-=======
         config.caseNamePrefix = cmd.getOptionValue(caseNamePrefixOpt, config.caseNamePrefix)
->>>>>>> b15854a19f
         config.dryRun = cmd.hasOption(dryRunOpt)
 
         log.info("randomOrder is ${config.randomOrder}".toString())
@@ -502,7 +487,7 @@ class Config {
             configToString(obj.stageIamUserId),
             configToString(obj.clusterDir),
             configToString(obj.kafkaBrokerList),
-            configToString(obj.cloudVersion),
+            configToString(obj.cloudVersion)
         )
 
         config.ccrDownstreamUrl = configToString(obj.ccrDownstreamUrl)
@@ -830,7 +815,6 @@ class Config {
         return DriverManager.getConnection(dbUrl, jdbcUser, jdbcPassword)
     }
 
-<<<<<<< HEAD
     /*
     Connection resetConnectionByDbName(String dbName) {
         String dbUrl = buildUrl(dbName)
@@ -838,7 +822,7 @@ class Config {
         return DriverManager.getConnection(dbUrl, jdbcUser, jdbcPassword)
     }
     */
-=======
+
     public static String buildUrlWithDbImpl(String jdbcUrl, String dbName) {
         String urlWithDb = jdbcUrl
         String urlWithoutSchema = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3)
@@ -881,7 +865,6 @@ class Config {
         log.info("connect to ${dbUrl}".toString())
         return DriverManager.getConnection(dbUrl, ccrDownstreamUser, ccrDownstreamPassword)
     }
->>>>>>> b15854a19f
 
     String getDbNameByFile(File suiteFile) {
         String dir = new File(suitePath).relativePath(suiteFile.parentFile)
