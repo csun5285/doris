@@ -221,7 +221,7 @@ Status S3FileWriter::close() {
     if (_pending_buf != nullptr) {
         if (_upload_id.empty()) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
-            DCHECK(buf != nullptr);
+            CHECK(buf != nullptr);
             buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
         _countdown_event.add_count();
@@ -235,7 +235,9 @@ Status S3FileWriter::close() {
 }
 
 Status S3FileWriter::appendv(const Slice* data, size_t data_cnt) {
-    DCHECK(!_closed);
+    if (_closed) [[unlikely]] {
+        return Status::IOError("Write data to closed file writer");
+    }
     size_t buffer_size = config::s3_write_buffer_size;
     TEST_SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::appenv", Status());
     for (size_t i = 0; i < data_cnt; i++) {
@@ -439,7 +441,9 @@ Status S3FileWriter::_complete() {
 }
 
 Status S3FileWriter::finalize() {
-    DCHECK(!_closed);
+    if (_closed) [[unlikely]] {
+        return Status::IOError("Finalize closed file writer");
+    }
     SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::finalize", Status());
     // submit pending buf if it's not nullptr
     // it's the last buf, we can submit it right now
@@ -447,7 +451,9 @@ Status S3FileWriter::finalize() {
         // the whole file size is less than one buffer, we can just call PutObject to reduce network RTT
         if (1 == _cur_part_num) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
-            DCHECK(buf != nullptr);
+            if (buf == nullptr) [[unlikely]] {
+                return Status::InternalError("Failed to finalize due to dynamic cast failed");
+            }
             buf->set_upload_to_remote([this](UploadFileBuffer& b) { _put_object(b); });
         }
         _countdown_event.add_count();
@@ -458,7 +464,7 @@ Status S3FileWriter::finalize() {
 }
 
 void S3FileWriter::_put_object(UploadFileBuffer& buf) {
-    DCHECK(!_closed) << "closed " << _closed;
+    CHECK(!_closed) << "closed " << _closed;
     LOG(INFO) << "enter put object operation for key " << _key << " bucket " << _bucket;
     // the task might already be aborted
     if (_failed) [[unlikely]] {
