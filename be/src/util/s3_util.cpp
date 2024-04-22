@@ -19,11 +19,8 @@
 
 #include <aws/core/auth/AWSAuthSigner.h>
 #include <aws/core/auth/AWSCredentials.h>
-<<<<<<< HEAD
 #include <aws/core/client/DefaultRetryStrategy.h>
-=======
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
->>>>>>> b15854a19f
 #include <aws/core/utils/logging/LogLevel.h>
 #include <aws/core/utils/logging/LogSystemInterface.h>
 #include <aws/core/utils/memory/stl/AWSStringStream.h>
@@ -186,16 +183,6 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
         }
     }
 
-<<<<<<< HEAD
-    Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
-    DCHECK(!aws_cred.IsExpiredOrEmpty());
-
-    if (!s3_conf.token.empty()) {
-        aws_cred.SetSessionToken(s3_conf.token);
-    }
-
-=======
->>>>>>> b15854a19f
     Aws::Client::ClientConfiguration aws_config = S3ClientFactory::getClientConfiguration();
     aws_config.endpointOverride = s3_conf.endpoint;
     aws_config.region = s3_conf.region;
@@ -230,21 +217,14 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
     if (s3_conf.connect_timeout_ms > 0) {
         aws_config.connectTimeoutMs = s3_conf.connect_timeout_ms;
     }
-<<<<<<< HEAD
 
     if (config::s3_client_http_scheme == "http") {
         aws_config.scheme = Aws::Http::Scheme::HTTP;
     }
 
-    aws_config.executor = ExecEnv::GetInstance()->s3_pool_executor();
     aws_config.retryStrategy = std::make_shared<Aws::Client::DefaultRetryStrategy>(
             /*maxRetries = 10, scaleFactor = 25*/);
 
-    std::shared_ptr<Aws::S3::S3Client> new_client = std::make_shared<Aws::S3::S3Client>(
-            std::move(aws_cred), std::move(aws_config),
-            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-            s3_conf.use_virtual_addressing);
-=======
     std::shared_ptr<Aws::S3::S3Client> new_client;
     if (!s3_conf.ak.empty() && !s3_conf.sk.empty()) {
         Aws::Auth::AWSCredentials aws_cred(s3_conf.ak, s3_conf.sk);
@@ -264,7 +244,6 @@ std::shared_ptr<Aws::S3::S3Client> S3ClientFactory::create(const S3Conf& s3_conf
                 Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
                 s3_conf.use_virtual_addressing);
     }
->>>>>>> b15854a19f
 
     {
         std::lock_guard l(_lock);
