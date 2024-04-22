@@ -83,15 +83,10 @@ Status LocalFileSystem::open_file_impl(const Path& file, FileReaderSPtr* reader,
     int fd = -1;
     RETRY_ON_EINTR(fd, open(file.c_str(), O_RDONLY));
     if (fd < 0) {
-<<<<<<< HEAD
         return localfs_error(errno, fmt::format("failed to open {}", file.native()));
-=======
-        return localfs_error(errno, fmt::format("failed to open {}", abs_path.native()));
->>>>>>> b15854a19f
     }
     *reader = std::make_shared<LocalFileReader>(
-            std::move(file), fsize, fd,
-            std::static_pointer_cast<LocalFileSystem>(shared_from_this()));
+            file, fsize, fd, std::static_pointer_cast<LocalFileSystem>(shared_from_this()));
     return Status::OK();
 }
 
@@ -137,11 +132,7 @@ Status LocalFileSystem::delete_directory_impl(const Path& dir) {
         return Status::OK();
     }
     if (!std::filesystem::is_directory(dir)) {
-<<<<<<< HEAD
         return Status::InternalError("failed to delete {}, not a directory", dir.native());
-=======
-        return Status::InternalError("failed to delete {}, not a dir", dir.native());
->>>>>>> b15854a19f
     }
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
@@ -186,11 +177,7 @@ Status LocalFileSystem::file_size_impl(const Path& file, int64_t* file_size) con
     std::error_code ec;
     *file_size = std::filesystem::file_size(file, ec);
     if (ec) {
-<<<<<<< HEAD
         return localfs_error(ec, fmt::format("failed to get file size {}", file.native()));
-=======
-        return localfs_error(ec, fmt::format("failed to check exists {}", file.native()));
->>>>>>> b15854a19f
     }
     return Status::OK();
 }
@@ -273,11 +260,7 @@ Status LocalFileSystem::is_directory(const Path& path, bool* res) {
     std::error_code ec;
     *res = std::filesystem::is_directory(tmp_path, ec);
     if (ec) {
-<<<<<<< HEAD
-        return localfs_error(ec, fmt::format("failed to check is dir {}", path.native()));
-=======
         return localfs_error(ec, fmt::format("failed to check is dir {}", tmp_path.native()));
->>>>>>> b15854a19f
     }
     return Status::OK();
 }
@@ -296,14 +279,9 @@ Status LocalFileSystem::md5sum_impl(const Path& file, std::string* md5sum) {
 
     struct stat statbuf;
     if (fstat(fd, &statbuf) < 0) {
-<<<<<<< HEAD
-        close(fd);
-        return localfs_error(errno, fmt::format("failed to stat file {}", file.native()));
-=======
         int err = errno;
         close(fd);
         return localfs_error(err, fmt::format("failed to stat file {}", file.native()));
->>>>>>> b15854a19f
     }
     size_t file_len = statbuf.st_size;
     CONSUME_THREAD_MEM_TRACKER(file_len);
@@ -343,33 +321,6 @@ Status LocalFileSystem::iterate_directory_impl(
     return Status::OK();
 }
 
-<<<<<<< HEAD
-=======
-Status LocalFileSystem::mtime(const Path& file, time_t* m_time) {
-    auto path = absolute_path(file);
-    FILESYSTEM_M(mtime_impl(path, m_time));
-}
-
-Status LocalFileSystem::mtime_impl(const Path& file, time_t* m_time) {
-    struct stat statbuf;
-    if (stat(file.c_str(), &statbuf) < 0) {
-        return localfs_error(errno, fmt::format("failed to stat file {}", file.native()));
-    }
-    *m_time = statbuf.st_mtime;
-    return Status::OK();
-}
-
-Status LocalFileSystem::delete_and_create_directory(const Path& dir) {
-    auto path = absolute_path(dir);
-    FILESYSTEM_M(delete_and_create_directory_impl(path));
-}
-
-Status LocalFileSystem::delete_and_create_directory_impl(const Path& dir) {
-    RETURN_IF_ERROR(delete_directory_impl(dir));
-    return create_directory_impl(dir);
-}
-
->>>>>>> b15854a19f
 Status LocalFileSystem::get_space_info(const Path& dir, size_t* capacity, size_t* available) {
     auto path = absolute_path(dir);
     FILESYSTEM_M(get_space_info_impl(path, capacity, available));
@@ -434,26 +385,6 @@ bool LocalFileSystem::contain_path(const Path& parent_, const Path& sub_) {
     return true;
 }
 
-<<<<<<< HEAD
-=======
-Status LocalFileSystem::read_file_to_string(const Path& file, std::string* content) {
-    FileReaderSPtr file_reader;
-    FileDescription fd;
-    fd.path = file.native();
-    RETURN_IF_ERROR(open_file(fd, &file_reader));
-    size_t file_size = file_reader->size();
-    content->resize(file_size);
-    size_t bytes_read = 0;
-    RETURN_IF_ERROR(file_reader->read_at(0, {*content}, &bytes_read));
-    if (bytes_read != file_size) {
-        return Status::InternalError(
-                "failed to read file {} to string. bytes read: {}, file size: {}", file.native(),
-                bytes_read, file_size);
-    }
-    return file_reader->close();
-}
-
->>>>>>> b15854a19f
 static std::shared_ptr<LocalFileSystem> local_fs = io::LocalFileSystem::create("");
 
 const std::shared_ptr<LocalFileSystem>& global_local_filesystem() {
