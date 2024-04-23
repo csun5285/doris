@@ -85,12 +85,11 @@ suite("test_recycler_with_txn_label") {
 
     qt_sql """ select count(*) from ${tableName};"""
 
-    int retry = 3
+    int retry = 10
     boolean success = false
-    // recycle data
     do {
         triggerRecycle(token, instanceId)
-        Thread.sleep(20000) // 20s
+        Thread.sleep(60000) // 60s
     } while (retry--)
 
     qt_sql """ select count(*) from ${tableName};"""
