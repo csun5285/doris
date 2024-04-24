@@ -411,12 +411,14 @@ class Config {
         config.isSmokeTest = cmd.hasOption(isSmokeTestOpt)
         config.caseNamePrefix = cmd.getOptionValue(caseNamePrefixOpt, config.caseNamePrefix)
         config.dryRun = cmd.hasOption(dryRunOpt)
+        config.caseNamePrefix = cmd.getOptionValue(caseNamePrefixOpt, config.caseNamePrefix)
 
         log.info("randomOrder is ${config.randomOrder}".toString())
         log.info("stopWhenFail is ${config.stopWhenFail}".toString())
         log.info("withOutLoadData is ${config.withOutLoadData}".toString())
         log.info("caseNamePrefix is ${config.caseNamePrefix}".toString())
         log.info("dryRun is ${config.dryRun}".toString())
+        log.info("caseNamePrefix is ${config.caseNamePrefix}".toString())
 
         Properties props = cmd.getOptionProperties("conf")
         config.otherConfigs.putAll(props)
