@@ -371,13 +371,7 @@ void DorisCompoundDirectory::FSIndexInput::readInternal(uint8_t* b, const int32_
 
     Slice result {b, (size_t)len};
     size_t bytes_read = 0;
-<<<<<<< HEAD
-    io::IOContext io_ctx;
-    io_ctx.reader_type = ReaderType::READER_QUERY;
-    if (!_handle->_reader->read_at(_pos, result, &bytes_read, &io_ctx).ok()) {
-=======
     if (!_handle->_reader->read_at(_pos, result, &bytes_read, &_io_ctx).ok()) {
->>>>>>> b15854a19f
         _CLTHROWA(CL_ERR_IO, "read past EOF");
     }
     bufferLength = len;
@@ -680,12 +674,7 @@ void DorisCompoundDirectory::renameFile(const char* from, const char* to) {
     if (exists) {
         LOG_AND_THROW_IF_ERROR(fs->delete_directory(nu), fmt::format("Delete {} IO error", nu));
     }
-<<<<<<< HEAD
     LOG_AND_THROW_IF_ERROR(fs->rename(old, nu), fmt::format("Rename {} to {} IO error", old, nu))
-=======
-    LOG_AND_THROW_IF_ERROR(fs->rename_dir(old, nu),
-                           fmt::format("Rename {} to {} IO error", old, nu));
->>>>>>> b15854a19f
 }
 
 lucene::store::IndexOutput* DorisCompoundDirectory::createOutput(const char* name) {
