@@ -83,9 +83,8 @@ class Suite implements GroovyInterceptable {
         ['cloud_balance_tablet_percent_per_run', 'balance_tablet_percent_per_run'],
         ['enable_cloud_global_balance', 'enable_global_balance'],
         ['cloud_pre_heating_time_limit_sec', 'pre_heating_time_limit_sec'],
-
-        // TODO: after doris support preheating, doris config name use `cloud_preheating_enabled`
-        ['', 'preheating_enabled'],
+        // doris config name use `enable_cloud_warm_up_for_rebalance`
+        ['enable_cloud_warm_up_for_rebalance', 'preheating_enabled'],
     ]
 
     SuiteCluster cluster
