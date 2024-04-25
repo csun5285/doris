@@ -278,7 +278,7 @@ int main(int argc, char** argv) {
             size_t sz = file.tellg();
             output.resize(sz, ' ');
             file.seekg(0);
-            file.read(&buffer[0], sz); 
+            file.read(&buffer[0], sz);
             return true;
         };
 

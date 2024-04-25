@@ -19,8 +19,8 @@
 
 #include <aws/core/auth/AWSAuthSigner.h>
 #include <aws/core/auth/AWSCredentials.h>
-#include <aws/core/client/DefaultRetryStrategy.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include <aws/core/client/DefaultRetryStrategy.h>
 #include <aws/core/utils/logging/LogLevel.h>
 #include <aws/core/utils/logging/LogSystemInterface.h>
 #include <aws/core/utils/memory/stl/AWSStringStream.h>
