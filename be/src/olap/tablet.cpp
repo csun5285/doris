@@ -1818,24 +1818,16 @@ std::vector<RowsetSharedPtr> Tablet::pick_candidate_rowsets_to_base_compaction()
 
 std::vector<RowsetSharedPtr> Tablet::pick_candidate_rowsets_to_full_compaction() {
     std::vector<RowsetSharedPtr> candidate_rowsets;
-<<<<<<< HEAD
-    {
-        std::shared_lock rlock(_meta_lock);
-        for (auto& [v, rs] : _rs_version_map) {
-            // MUST NOT compact rowset [0-1] for some historical reasons (see cloud_schema_change)
-            if (v.first != 0) {
-                candidate_rowsets.push_back(rs);
-            }
-        }
-    }
-=======
     traverse_rowsets([&candidate_rowsets](const auto& rs) {
-        // Do full compaction on all local rowsets.
-        if (rs->is_local()) {
-            candidate_rowsets.emplace_back(rs);
+        // MUST NOT compact rowset [0-1] for some historical reasons (see cloud_schema_change)
+        if (v.first != 0
+#ifndef CLOUD_MODE
+            && rs->is_local()
+#endif
+        ) {
+            candidate_rowsets.push_back(rs);
         }
     });
->>>>>>> b15854a19f
     std::sort(candidate_rowsets.begin(), candidate_rowsets.end(), Rowset::comparator);
     return candidate_rowsets;
 }
@@ -2360,9 +2352,6 @@ Status Tablet::prepare_compaction_and_calculate_permits(CompactionType compactio
     return Status::OK();
 }
 
-<<<<<<< HEAD
-std::vector<Version> Tablet::get_all_versions() {
-=======
 void Tablet::execute_single_replica_compaction(SingleReplicaCompaction& compaction) {
     Status res = compaction.execute_compact();
     if (!res.ok()) {
@@ -2375,7 +2364,6 @@ void Tablet::execute_single_replica_compaction(SingleReplicaCompaction& compacti
 }
 
 std::vector<Version> Tablet::get_all_local_versions() {
->>>>>>> b15854a19f
     std::vector<Version> local_versions;
     {
         std::shared_lock rlock(_meta_lock);
@@ -4035,23 +4023,16 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
     }
     auto t3 = watch.get_elapse_time_us();
 
-<<<<<<< HEAD
     // When there is only one segment, it will be calculated in the current thread.
     // Otherwise, it will be submitted to the thread pool for calculation.
     if (segments.size() <= 1) {
         RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
-                                           cur_version - 1, nullptr, rowset_writer));
-=======
-    auto token = StorageEngine::instance()->calc_delete_bitmap_executor()->create_token();
-    RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
-                                       cur_version - 1, token.get(), rowset_writer.get()));
-    RETURN_IF_ERROR(token->wait());
->>>>>>> b15854a19f
+                                           cur_version - 1, nullptr, rowset_writer.get()));
 
     } else {
         auto token = StorageEngine::instance()->calc_delete_bitmap_executor()->create_token();
         RETURN_IF_ERROR(calc_delete_bitmap(rowset, segments, specified_rowsets, delete_bitmap,
-                                           cur_version - 1, token.get(), rowset_writer));
+                                           cur_version - 1, token.get(), rowset_writer.get()));
         RETURN_IF_ERROR(token->wait());
     }
     std::stringstream ss;
@@ -4089,19 +4070,6 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
         _remove_sentinel_mark_from_delete_bitmap(delete_bitmap);
     }
 
-<<<<<<< HEAD
-#ifdef CLOUD_MODE
-    DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
-    for (auto iter = delete_bitmap->delete_bitmap.begin();
-         iter != delete_bitmap->delete_bitmap.end(); ++iter) {
-        new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
-                                 iter->second);
-    }
-
-    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
-            this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
-#else
-=======
     if (txn_info->partial_update_info && txn_info->partial_update_info->is_partial_update) {
         DBUG_EXECUTE_IF("Tablet.update_delete_bitmap.partial_update_write_rowset_fail", {
             if (rand() % 100 < (100 * dp->param("percent", 0.5))) {
@@ -4121,7 +4089,17 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
         SegmentLoader::instance()->erase_segments(rowset->rowset_id());
     }
 
->>>>>>> b15854a19f
+#ifdef CLOUD_MODE
+    DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
+    for (auto iter = delete_bitmap->delete_bitmap.begin();
+         iter != delete_bitmap->delete_bitmap.end(); ++iter) {
+        new_delete_bitmap->merge({std::get<0>(iter->first), std::get<1>(iter->first), cur_version},
+                                 iter->second);
+    }
+
+    RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
+            this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
+#else
     // update version without write lock, compaction and publish_txn
     // will update delete bitmap, handle compaction with _rowset_update_lock
     // and publish_txn runs sequential so no need to lock here
