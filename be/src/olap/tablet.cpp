@@ -3971,7 +3971,8 @@ Status Tablet::commit_phase_update_delete_bitmap(
     return Status::OK();
 }
 
-Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_id) {
+Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_id,
+                                    int64_t txn_expiration) {
     SCOPED_BVAR_LATENCY(g_tablet_update_delete_bitmap_latency);
     RowsetIdUnorderedSet cur_rowset_ids;
     RowsetIdUnorderedSet rowset_ids_to_add;
@@ -3980,8 +3981,8 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
     int64_t cur_version = rowset->start_version();
 
     std::unique_ptr<RowsetWriter> rowset_writer;
-    RETURN_IF_ERROR(
-            create_transient_rowset_writer(rowset, &rowset_writer, txn_info->partial_update_info));
+    RETURN_IF_ERROR(create_transient_rowset_writer(rowset, &rowset_writer,
+                                                   txn_info->partial_update_info, txn_expiration));
 
     DeleteBitmapPtr delete_bitmap = txn_info->delete_bitmap;
     // Partial update might generate new segments when there is conflicts while publish, and mark
