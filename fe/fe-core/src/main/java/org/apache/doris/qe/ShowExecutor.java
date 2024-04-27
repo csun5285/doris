@@ -18,11 +18,6 @@
 package org.apache.doris.qe;
 
 import org.apache.doris.analysis.AdminCopyTabletStmt;
-import org.apache.doris.analysis.AdminDiagnoseTabletStmt;
-import org.apache.doris.analysis.AdminShowConfigStmt;
-import org.apache.doris.analysis.AdminShowReplicaDistributionStmt;
-import org.apache.doris.analysis.AdminShowReplicaStatusStmt;
-import org.apache.doris.analysis.AdminShowTabletStorageFormatStmt;
 import org.apache.doris.analysis.CompoundPredicate.Operator;
 import org.apache.doris.analysis.DescribeStmt;
 import org.apache.doris.analysis.DiagnoseTabletStmt;
@@ -402,26 +397,6 @@ public class ShowExecutor {
             handleShowTrash();
         } else if (stmt instanceof ShowTrashDiskStmt) {
             handleShowTrashDisk();
-        } else if (stmt instanceof AdminShowReplicaStatusStmt) {
-            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
-                    .getUser().equals(Auth.ROOT_USER)) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
-            handleAdminShowTabletStatus();
-        } else if (stmt instanceof AdminShowReplicaDistributionStmt) {
-            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
-                    .getUser().equals(Auth.ROOT_USER)) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
-            handleAdminShowTabletDistribution();
-        } else if (stmt instanceof AdminShowConfigStmt) {
-            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
-                    .getUser().equals(Auth.ROOT_USER)) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
         } else if (stmt instanceof ShowReplicaStatusStmt) {
             if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
                     .getUser().equals(Auth.ROOT_USER)) {
@@ -437,6 +412,11 @@ public class ShowExecutor {
             }
             handleAdminShowTabletDistribution();
         } else if (stmt instanceof ShowConfigStmt) {
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
+                    .getUser().equals(Auth.ROOT_USER)) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleAdminShowConfig();
         } else if (stmt instanceof ShowSmallFilesStmt) {
             handleShowSmallFiles();
@@ -470,18 +450,6 @@ public class ShowExecutor {
             handleShowTableCreation();
         } else if (stmt instanceof ShowLastInsertStmt) {
             handleShowLastInsert();
-        } else if (stmt instanceof AdminShowTabletStorageFormatStmt) {
-            if (Config.isCloudMode()) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
-            handleAdminShowTabletStorageFormat();
-        } else if (stmt instanceof AdminDiagnoseTabletStmt) {
-            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
-                    .getUser().equals(Auth.ROOT_USER)) {
-                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
-                throw new AnalysisException("Unsupported operation");
-            }
         } else if (stmt instanceof ShowTabletStorageFormatStmt) {
             if (Config.isCloudMode()) {
                 LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
@@ -489,6 +457,11 @@ public class ShowExecutor {
             }
             handleAdminShowTabletStorageFormat();
         } else if (stmt instanceof DiagnoseTabletStmt) {
+            if (Config.isCloudMode() && !ctx.getCurrentUserIdentity()
+                    .getUser().equals(Auth.ROOT_USER)) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleAdminDiagnoseTablet();
         } else if (stmt instanceof ShowCreateMaterializedViewStmt) {
             handleShowCreateMaterializedView();

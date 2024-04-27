@@ -513,6 +513,11 @@ public class StreamLoadPlanner {
         DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
         dataDescription.analyzeWithoutCheckPriv(db.getFullName());
         BrokerFileGroup fileGroup = new BrokerFileGroup(dataDescription);
+        Expr whereExpr = null;
+        if (null != taskInfo.getWhereExpr()) {
+            whereExpr = taskInfo.getWhereExpr().clone();
+            whereExpr.analyze(analyzer);
+        }
         fileGroup.setWhereExpr(whereExpr);
         fileGroup.parse(db, dataDescription);
         // 2. create dummy file status
