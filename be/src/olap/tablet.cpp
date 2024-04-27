@@ -1820,7 +1820,7 @@ std::vector<RowsetSharedPtr> Tablet::pick_candidate_rowsets_to_full_compaction()
     std::vector<RowsetSharedPtr> candidate_rowsets;
     traverse_rowsets([&candidate_rowsets](const auto& rs) {
         // MUST NOT compact rowset [0-1] for some historical reasons (see cloud_schema_change)
-        if (v.first != 0
+        if (rs->start_version() != 0
 #ifndef CLOUD_MODE
             && rs->is_local()
 #endif

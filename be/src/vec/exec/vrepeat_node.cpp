@@ -150,7 +150,7 @@ Status VRepeatNode::get_repeated_block(Block* child_block, int repeat_id_idx, Bl
         }
         cur_col++;
     }
-    auto rows = _child_block.rows();
+    auto rows = _child_block->rows();
     // Fill grouping ID to block
     RETURN_IF_ERROR(add_grouping_id_column(rows, cur_col, columns, repeat_id_idx));
     DCHECK_EQ(cur_col, column_size);
@@ -199,14 +199,14 @@ Status VRepeatNode::pull(doris::RuntimeState* state, vectorized::Block* output_b
     } else if (_expr_ctxs.empty()) {
         auto m_block = vectorized::VectorizedUtils::build_mutable_mem_reuse_block(output_block,
                                                                                   _output_slots);
-        auto rows = _child_block.rows();
+        auto rows = _child_block->rows();
         auto& columns = m_block.mutable_columns();
 
         for (int repeat_id_idx = 0; repeat_id_idx < _repeat_id_list.size(); repeat_id_idx++) {
             std::size_t cur_col = 0;
             RETURN_IF_ERROR(add_grouping_id_column(rows, cur_col, columns, repeat_id_idx));
         }
-        release_block_memory(_child_block);
+        release_block_memory(*_child_block);
     }
     RETURN_IF_ERROR(VExprContext::filter_block(_conjuncts, output_block, output_block->columns()));
     *eos = _child_eos && _child_block->rows() == 0;
