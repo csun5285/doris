@@ -223,11 +223,6 @@ public class StreamLoadPlanner {
         }
         scanTupleDesc.setTable(destTable);
         analyzer.registerTupleDescriptor(scanTupleDesc);
-        Expr whereExpr = null;
-        if (null != taskInfo.getWhereExpr()) {
-            whereExpr = taskInfo.getWhereExpr().clone();
-            whereExpr.analyze(analyzer);
-        }
         // create scan node
         scanNode = createScanNode(loadId, scanTupleDesc);
         scanNode.init(analyzer);
@@ -418,11 +413,6 @@ public class StreamLoadPlanner {
         }
         scanTupleDesc.setTable(destTable);
         analyzer.registerTupleDescriptor(scanTupleDesc);
-        Expr whereExpr = null;
-        if (null != taskInfo.getWhereExpr()) {
-            whereExpr = taskInfo.getWhereExpr().clone();
-            whereExpr.analyze(analyzer);
-        }
         // create scan node
         scanNode = createScanNode(loadId, scanTupleDesc);
         scanNode.init(analyzer);
