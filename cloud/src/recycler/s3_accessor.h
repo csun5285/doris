@@ -10,6 +10,10 @@ class S3Client;
 
 namespace selectdb {
 
+enum class S3RateLimitType;
+extern int reset_s3_rate_limiter(S3RateLimitType type, size_t max_speed, size_t max_burst,
+                                 size_t limit);
+
 struct ObjectMeta {
     std::string path; // Relative path
     int64_t size {0};

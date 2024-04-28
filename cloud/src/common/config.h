@@ -162,6 +162,15 @@ CONF_Bool(enable_retry_txn_conflict, "true");
 // If enabled, some high-risk HTTP api for emergency fix can be used
 CONF_mBool(enable_risky_api, "false");
 
+CONF_mBool(enable_s3_rate_limiter, "false");
+CONF_mInt64(s3_get_bucket_tokens, "1000000000000000000");
+CONF_mInt64(s3_get_token_per_second, "1000000000000000000");
+CONF_mInt64(s3_get_token_limit, "0");
+
+CONF_mInt64(s3_put_bucket_tokens, "1000000000000000000");
+CONF_mInt64(s3_put_token_per_second, "1000000000000000000");
+CONF_mInt64(s3_put_token_limit, "0");
+
 // The secondary package name of the MetaService.
 CONF_String(secondary_package_name, "");
 

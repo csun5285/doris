@@ -49,6 +49,10 @@ add_executable(rate_limiter_test
     rate_limiter_test.cpp
 )
 
+add_executable(s3_rate_limiter_test
+    s3_rate_limiter_test.cpp
+)
+
 add_executable(encryption_test
    encryption_test.cpp
 )
@@ -107,6 +111,10 @@ target_link_libraries(meta_server_test
 )
 
 target_link_libraries(rate_limiter_test
+    ${TEST_LINK_LIBS}
+)
+
+target_link_libraries(s3_rate_limiter_test
     ${TEST_LINK_LIBS}
 )
 
