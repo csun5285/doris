@@ -391,6 +391,7 @@ struct OlapReaderStatistics {
 
     int64_t lazy_open_segment_number = 0;
     int64_t lazy_open_segment_timer = 0;
+    int64_t delete_bitmap_get_agg_ns = 0;
 };
 
 using ColumnId = uint32_t;

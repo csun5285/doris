@@ -64,6 +64,7 @@ import org.apache.doris.plugin.AuditEvent.EventType;
 import org.apache.doris.proto.Data;
 import org.apache.doris.qe.QueryState.MysqlStateType;
 import org.apache.doris.service.FrontendOptions;
+import org.apache.doris.thrift.TExprNode;
 import org.apache.doris.thrift.TMasterOpRequest;
 import org.apache.doris.thrift.TMasterOpResult;
 import org.apache.doris.thrift.TUniqueId;
@@ -71,6 +72,7 @@ import org.apache.doris.thrift.TUniqueId;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.MetricRegistry;
 import com.google.common.base.Strings;
+import com.google.common.collect.Maps;
 import com.selectdb.cloud.proto.SelectdbCloud.InstanceInfoPB;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
@@ -81,6 +83,7 @@ import io.opentelemetry.context.propagation.TextMapGetter;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.thrift.TException;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -782,7 +785,7 @@ public class ConnectProcessor {
         }
     }
 
-    public TMasterOpResult proxyExecute(TMasterOpRequest request) {
+    public TMasterOpResult proxyExecute(TMasterOpRequest request) throws TException {
         ctx.setDatabase(request.db);
         ctx.setQualifiedUser(request.user);
         ctx.setEnv(Env.getCurrentEnv());
@@ -842,6 +845,9 @@ public class ConnectProcessor {
                 ctx.getSessionVariable().setQueryTimeoutS(request.getQueryTimeout());
             }
         }
+        if (request.isSetUserVariables()) {
+            ctx.setUserVars(userVariableFromThrift(request.getUserVariables()));
+        }
 
         Map<String, String> traceCarrier = new HashMap<>();
         if (request.isSetTraceCarrier()) {
@@ -857,7 +863,6 @@ public class ConnectProcessor {
         if (Span.fromContext(extractedContext).getSpanContext().isValid()) {
             ctx.initTracer("master trace");
         }
-
         ctx.setThreadLocalInfo();
         StmtExecutor executor = null;
         try {
@@ -976,6 +981,20 @@ public class ConnectProcessor {
                 ctx.setKilled();
                 break;
             }
+        }
+    }
+
+    private Map<String, LiteralExpr> userVariableFromThrift(Map<String, TExprNode> thriftMap) throws TException {
+        try {
+            Map<String, LiteralExpr> userVariables = Maps.newHashMap();
+            for (Map.Entry<String, TExprNode> entry : thriftMap.entrySet()) {
+                TExprNode tExprNode = entry.getValue();
+                LiteralExpr literalExpr = LiteralExpr.getLiteralExprFromThrift(tExprNode);
+                userVariables.put(entry.getKey(), literalExpr);
+            }
+            return userVariables;
+        } catch (AnalysisException e) {
+            throw new TException(e.getMessage());
         }
     }
 }

@@ -91,7 +91,7 @@ public class AutoBucketUtils {
         } else {
             bucketsNumByBE = getBucketsNumByBEDisks();
         }
-        int bucketsNum = Math.min(bucketsNumByPartitionSize, bucketsNumByBE);
+        int bucketsNum = Math.min(Config.autobucket_max_buckets, Math.min(bucketsNumByPartitionSize, bucketsNumByBE));
         int beNum = getBENum();
         logger.debug("AutoBucketsUtil: bucketsNumByPartitionSize {}, bucketsNumByBE {}, bucketsNum {}, beNum {}",
                 bucketsNumByPartitionSize, bucketsNumByBE, bucketsNum, beNum);
