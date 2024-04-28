@@ -78,17 +78,17 @@ std::string glob_err_to_str(int code) {
 
 Status localfs_error(const std::error_code& ec, std::string_view msg) {
     if (ec == std::errc::io_error) {
-        return Status::IOError(msg);
+        return Status::Error<IO_ERROR, false>(msg);
     } else if (ec == std::errc::no_such_file_or_directory) {
-        return Status::NotFound(msg);
+        return Status::Error<NOT_FOUND, false>(msg);
     } else if (ec == std::errc::file_exists) {
-        return Status::AlreadyExist(msg);
+        return Status::Error<ALREADY_EXIST, false>(msg);
     } else if (ec == std::errc::no_space_on_device) {
-        return Status::Error<DISK_REACH_CAPACITY_LIMIT>(msg);
+        return Status::Error<DISK_REACH_CAPACITY_LIMIT, false>(msg);
     } else if (ec == std::errc::permission_denied) {
-        return Status::Error<PERMISSION_DENIED>(msg);
+        return Status::Error<PERMISSION_DENIED, false>(msg);
     } else {
-        return Status::InternalError("{}: {}", msg, ec.message());
+        return Status::Error<ErrorCode::INTERNAL_ERROR, false>("{}: {}", msg, ec.message());
     }
 }
 

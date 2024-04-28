@@ -194,6 +194,10 @@ public:
                             const PGetWalQueueSizeRequest* request,
                             PGetWalQueueSizeResponse* response,
                             google::protobuf::Closure* done) override;
+    void test_jdbc_connection(google::protobuf::RpcController* controller,
+                              const PJdbcTestConnectionRequest* request,
+                              PJdbcTestConnectionResult* result,
+                              google::protobuf::Closure* done) override;
 
 private:
     void _exec_plan_fragment_in_pthread(google::protobuf::RpcController* controller,

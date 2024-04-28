@@ -395,6 +395,7 @@ message PKafkaMetaProxyRequest {
 
 message PProxyRequest {
     optional PKafkaMetaProxyRequest kafka_meta_request = 1;
+    optional int64 timeout_secs = 2;
 };
 
 message PKafkaMetaProxyResult {
@@ -640,6 +641,16 @@ message PFetchTableSchemaResult {
   repeated PTypeDesc column_types = 4;
 }
 
+message PJdbcTestConnectionRequest {
+    optional bytes jdbc_table = 1;
+    optional int32 jdbc_table_type = 2;
+    optional string query_str = 3;
+}
+
+message PJdbcTestConnectionResult {
+    optional PStatus status = 1;
+}
+
 message PRowLocation {
     optional int64 tablet_id = 1;
     optional string rowset_id = 2;
@@ -816,5 +827,6 @@ service PBackendService {
     rpc glob(PGlobRequest) returns (PGlobResponse);
     rpc group_commit_insert(PGroupCommitInsertRequest) returns (PGroupCommitInsertResponse);
     rpc get_wal_queue_size(PGetWalQueueSizeRequest) returns(PGetWalQueueSizeResponse);
+    rpc test_jdbc_connection(PJdbcTestConnectionRequest) returns (PJdbcTestConnectionResult);
 };
 

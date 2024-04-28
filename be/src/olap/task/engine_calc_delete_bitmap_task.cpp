@@ -134,11 +134,12 @@ void TabletCalcDeleteBitmapTask::handle() {
     }
 
     rowset->set_version(Version(_version, _version));
-    std::unique_ptr<RowsetWriter> rowset_writer;
-    _tablet->create_transient_rowset_writer(rowset, &rowset_writer, partial_update_info,
-                                            txn_expiration);
-    status = _tablet->update_delete_bitmap(rowset, rowset_ids, delete_bitmap, _transaction_id,
-                                           rowset_writer.get());
+    TabletTxnInfo txn_info;
+    txn_info.rowset = rowset;
+    txn_info.delete_bitmap = delete_bitmap;
+    txn_info.rowset_ids = rowset_ids;
+    txn_info.partial_update_info = partial_update_info;
+    status = _tablet->update_delete_bitmap(&txn_info, _transaction_id, txn_expiration);
 
     if (status != Status::OK()) {
         LOG(WARNING) << "failed to calculate delete bitmap. rowset_id=" << rowset->rowset_id()
@@ -146,42 +147,6 @@ void TabletCalcDeleteBitmapTask::handle() {
                      << ", status=" << status;
         _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
         return;
-    }
-
-    if (partial_update_info && partial_update_info->is_partial_update &&
-        rowset_writer->num_rows() > 0) {
-        // build rowset writer and merge transient rowset
-        status = rowset_writer->flush();
-        if (status != Status::OK()) {
-            LOG(WARNING) << "failed to flush the transient rowset writer. rowset_id="
-                         << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
-                         << ", txn_id=" << _transaction_id << ", status=" << status;
-            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
-            return;
-        }
-        RowsetSharedPtr transient_rowset;
-        auto st = rowset_writer->build(transient_rowset);
-        if (!st.ok()) {
-            std::string msg = fmt::format(
-                    "failed to build the transient rowset. rowset_id={}, tablet_id={}, txn_id={}",
-                    rowset->rowset_id().to_string(), _tablet->tablet_id(), _transaction_id);
-            LOG(WARNING) << msg << " status=" << st;
-            status = Status::Error<ErrorCode::INTERNAL_ERROR, false>(msg);
-            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
-            return;
-        }
-        rowset->merge_rowset_meta(transient_rowset->rowset_meta());
-        const auto& rowset_meta = rowset->rowset_meta();
-        status = cloud::meta_mgr()->update_tmp_rowset(*rowset_meta);
-        if (!status.ok()) {
-            LOG(WARNING) << "failed to update the committed rowset. rowset_id="
-                         << rowset->rowset_id() << ", tablet_id=" << _tablet->tablet_id()
-                         << ", txn_id=" << _transaction_id << ", status=" << status;
-            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
-            return;
-        }
-        // erase segment cache cause we will add a segment to rowset
-        SegmentLoader::instance()->erase_segments(rowset->rowset_id());
     }
 
     _engine_calc_delete_bitmap_task->add_succ_tablet_id(_tablet->tablet_id());

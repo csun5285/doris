@@ -20,10 +20,12 @@ package org.apache.doris.mysql;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
+import org.apache.doris.mysql.ProxyProtocolHandler.ProxyProtocolResult;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.ConnectProcessor;
 import org.apache.doris.qe.ConnectScheduler;
 
+import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -67,6 +69,17 @@ public class AcceptListener implements ChannelListener<AcceptingChannel<StreamCo
                         // Set thread local info
                         context.setThreadLocalInfo();
                         context.setConnectScheduler(connectScheduler);
+
+                        if (Config.enable_proxy_protocol) {
+                            ProxyProtocolResult result = ProxyProtocolHandler.handle(context.getMysqlChannel());
+                            Preconditions.checkNotNull(result);
+                            if (!result.isUnknown) {
+                                context.getMysqlChannel().setRemoteAddr(result.sourceIP, result.sourcePort);
+                            }
+                            // ignore the UNKNOWN, and just use IP from MySQL protocol.
+                            // which is already set when creating MysqlChannel.
+                        }
+
                         // authenticate check failed.
                         if (!MysqlProto.negotiate(context)) {
                             throw new AfterConnectedException("mysql negotiate failed");

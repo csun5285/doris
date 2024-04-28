@@ -71,6 +71,7 @@ class ConfigOptions {
     static Option stopWhenFailOpt
     static Option timesOpt
     static Option withOutLoadDataOpt
+    static Option caseNamePrefixOpt
     static Option dryRunOpt
     static Option isSmokeTestOpt
     static Option multiClusterBesOpt
@@ -92,6 +93,7 @@ class ConfigOptions {
     static Option clusterDirOpt
     static Option kafkaBrokerListOpt
     static Option cloudVersionOpt
+    static Option caseNamePrefixOpt
 
     static CommandLine initCommands(String[] args) {
         helpOption = Option.builder("h")
@@ -450,6 +452,13 @@ class ConfigOptions {
                 .longOpt("withOutLoadData")
                 .desc("do not run load.groovy to reload data to Doris.")
                 .build()
+        caseNamePrefixOpt = Option.builder("cnp")
+                .required(false)
+                .hasArg(true)
+                .type(String.class)
+                .longOpt("caseNamePrefix")
+                .desc("add prefix to each case name")
+                .build()
         dryRunOpt = Option.builder("dryRun")
                 .required(false)
                 .hasArg(false)
@@ -555,6 +564,13 @@ class ConfigOptions {
                 .hasArg(false)
                 .desc("selectdb cloud version")
                 .build()
+        caseNamePrefixOpt = Option.builder("cnp")
+                .required(false)
+                .hasArg(true)
+                .type(String.class)
+                .longOpt("caseNamePrefix")
+                .desc("add prefix to each case name")
+                .build()
 
         Options options = new Options()
                 .addOption(helpOption)
@@ -596,6 +612,7 @@ class ConfigOptions {
                 .addOption(stopWhenFailOpt)
                 .addOption(timesOpt)
                 .addOption(withOutLoadDataOpt)
+                .addOption(caseNamePrefixOpt)
                 .addOption(dryRunOpt)
                 .addOption(isSmokeTestOpt)
                 .addOption(multiClusterBesOpt)
@@ -617,6 +634,7 @@ class ConfigOptions {
                 .addOption(clusterDirOpt)
                 .addOption(kafkaBrokerListOpt)
                 .addOption(cloudVersionOpt)
+                .addOption(caseNamePrefixOpt)
 
         CommandLine cmd = new DefaultParser().parse(options, args, true)
         if (cmd.hasOption(helpOption)) {

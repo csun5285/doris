@@ -42,6 +42,10 @@ class Config {
     public String jdbcPassword
     public String defaultDb
 
+    public String ccrDownstreamUrl
+    public String ccrDownstreamUser
+    public String ccrDownstreamPassword
+
     public String feSourceThriftAddress
     public String feTargetThriftAddress
     public String feSyncerUser
@@ -133,10 +137,11 @@ class Config {
     public String clusterDir
     public String kafkaBrokerList
     public String cloudVersion
+    public String caseNamePrefix
 
     Config() {}
 
-    Config(String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
+    Config(String caseNamePrefix, String defaultDb, String jdbcUrl, String jdbcUser, String jdbcPassword,
            String feSourceThriftAddress, String feTargetThriftAddress, String feSyncerUser, String feSyncerPassword, String syncerPassword,
            String feHttpAddress, String feHttpUser, String feHttpPassword,
            String feCloudHttpAddress, String feCloudHttpUser, String feCloudHttpPassword, String instanceId,
@@ -148,6 +153,7 @@ class Config {
            String stageIamEndpoint, String stageIamRegion, String stageIamBucket, String stageIamPolicy,
            String stageIamRole, String stageIamArn, String stageIamAk, String stageIamSk, String stageIamUserId,
            String clusterDir, kafkaBrokerList, String cloudVersion) {
+        this.caseNamePrefix = caseNamePrefix
         this.defaultDb = defaultDb
         this.jdbcUrl = jdbcUrl
         this.jdbcUser = jdbcUser
@@ -403,12 +409,16 @@ class Config {
         config.stopWhenFail = cmd.hasOption(stopWhenFailOpt)
         config.withOutLoadData = cmd.hasOption(withOutLoadDataOpt)
         config.isSmokeTest = cmd.hasOption(isSmokeTestOpt)
+        config.caseNamePrefix = cmd.getOptionValue(caseNamePrefixOpt, config.caseNamePrefix)
         config.dryRun = cmd.hasOption(dryRunOpt)
+        config.caseNamePrefix = cmd.getOptionValue(caseNamePrefixOpt, config.caseNamePrefix)
 
         log.info("randomOrder is ${config.randomOrder}".toString())
         log.info("stopWhenFail is ${config.stopWhenFail}".toString())
         log.info("withOutLoadData is ${config.withOutLoadData}".toString())
+        log.info("caseNamePrefix is ${config.caseNamePrefix}".toString())
         log.info("dryRun is ${config.dryRun}".toString())
+        log.info("caseNamePrefix is ${config.caseNamePrefix}".toString())
 
         Properties props = cmd.getOptionProperties("conf")
         config.otherConfigs.putAll(props)
@@ -428,6 +438,7 @@ class Config {
 
     static Config fromConfigObject(ConfigObject obj) {
         def config = new Config(
+            configToString(obj.caseNamePrefix),
             configToString(obj.defaultDb),
             configToString(obj.jdbcUrl),
             configToString(obj.jdbcUser),
@@ -478,9 +489,12 @@ class Config {
             configToString(obj.stageIamUserId),
             configToString(obj.clusterDir),
             configToString(obj.kafkaBrokerList),
-            configToString(obj.cloudVersion),
+            configToString(obj.cloudVersion)
         )
 
+        config.ccrDownstreamUrl = configToString(obj.ccrDownstreamUrl)
+        config.ccrDownstreamUser = configToString(obj.ccrDownstreamUser)
+        config.ccrDownstreamPassword = configToString(obj.ccrDownstreamPassword)
         config.image = configToString(obj.image)
         config.dockerEndDeleteFiles = configToBoolean(obj.dockerEndDeleteFiles)
         config.excludeDockerTest = configToBoolean(obj.excludeDockerTest)
@@ -545,6 +559,11 @@ class Config {
     }
 
     static void fillDefaultConfig(Config config) {
+        if (config.caseNamePrefix == null) {
+            config.caseNamePrefix = ""
+            log.info("set caseNamePrefix to '' because not specify.".toString())
+        }
+
         if (config.defaultDb == null) {
             config.defaultDb = "regression_test"
             log.info("Set defaultDb to '${config.defaultDb}' because not specify.".toString())
@@ -805,6 +824,49 @@ class Config {
         return DriverManager.getConnection(dbUrl, jdbcUser, jdbcPassword)
     }
     */
+
+    public static String buildUrlWithDbImpl(String jdbcUrl, String dbName) {
+        String urlWithDb = jdbcUrl
+        String urlWithoutSchema = jdbcUrl.substring(jdbcUrl.indexOf("://") + 3)
+        if (urlWithoutSchema.indexOf("/") >= 0) {
+            if (jdbcUrl.contains("?")) {
+                // e.g: jdbc:mysql://locahost:8080/?a=b
+                urlWithDb = jdbcUrl.substring(0, jdbcUrl.lastIndexOf("?"))
+                urlWithDb = urlWithDb.substring(0, urlWithDb.lastIndexOf("/"))
+                urlWithDb += ("/" + dbName) + jdbcUrl.substring(jdbcUrl.lastIndexOf("?"))
+            } else {
+                // e.g: jdbc:mysql://locahost:8080/
+                urlWithDb += dbName
+            }
+        } else {
+            // e.g: jdbc:mysql://locahost:8080
+            urlWithDb += ("/" + dbName)
+        }
+
+        return urlWithDb
+    }
+
+    Connection getConnectionByArrowFlightSql(String dbName) {
+        Class.forName("org.apache.arrow.driver.jdbc.ArrowFlightJdbcDriver")
+        String arrowFlightSqlHost = otherConfigs.get("extArrowFlightSqlHost")
+        String arrowFlightSqlPort = otherConfigs.get("extArrowFlightSqlPort")
+        String arrowFlightSqlUrl = "jdbc:arrow-flight-sql://${arrowFlightSqlHost}:${arrowFlightSqlPort}" +
+                "/?useServerPrepStmts=false&useSSL=false&useEncryption=false"
+        // TODO jdbc:arrow-flight-sql not support connect db
+        String dbUrl = buildUrlWithDbImpl(arrowFlightSqlUrl, dbName)
+        tryCreateDbIfNotExist(dbName)
+        log.info("connect to ${dbUrl}".toString())
+        String arrowFlightSqlJdbcUser = otherConfigs.get("extArrowFlightSqlUser")
+        String arrowFlightSqlJdbcPassword = otherConfigs.get("extArrowFlightSqlPassword")
+        return DriverManager.getConnection(dbUrl, arrowFlightSqlJdbcUser, arrowFlightSqlJdbcPassword)
+    }
+
+    Connection getDownstreamConnectionByDbName(String dbName) {
+        String dbUrl = buildUrlWithDb(ccrDownstreamUrl, dbName)
+        tryCreateDbIfNotExist(dbName)
+        log.info("connect to ${dbUrl}".toString())
+        return DriverManager.getConnection(dbUrl, ccrDownstreamUser, ccrDownstreamPassword)
+    }
 
     String getDbNameByFile(File suiteFile) {
         String dir = new File(suitePath).relativePath(suiteFile.parentFile)

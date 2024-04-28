@@ -86,8 +86,7 @@ Status LocalFileSystem::open_file_impl(const Path& file, FileReaderSPtr* reader,
         return localfs_error(errno, fmt::format("failed to open {}", file.native()));
     }
     *reader = std::make_shared<LocalFileReader>(
-            std::move(file), fsize, fd,
-            std::static_pointer_cast<LocalFileSystem>(shared_from_this()));
+            file, fsize, fd, std::static_pointer_cast<LocalFileSystem>(shared_from_this()));
     return Status::OK();
 }
 
@@ -212,7 +211,7 @@ Status LocalFileSystem::list_impl(const Path& dir, bool only_file, std::vector<F
     } catch (const std::filesystem::filesystem_error& e) {
         // although `directory_iterator(dir, ec)` does not throw an exception,
         // it may throw an exception during iterator++, so we need to catch the exception here
-        return Status::IOError("failed to list {}: {}", dir.native(), e.what());
+        return localfs_error(e.code(), fmt::format("failed to list {}", dir.native()));
     }
     if (ec) {
         return localfs_error(ec, fmt::format("failed to list {}", dir.native()));
@@ -261,7 +260,7 @@ Status LocalFileSystem::is_directory(const Path& path, bool* res) {
     std::error_code ec;
     *res = std::filesystem::is_directory(tmp_path, ec);
     if (ec) {
-        return localfs_error(ec, fmt::format("failed to check is dir {}", path.native()));
+        return localfs_error(ec, fmt::format("failed to check is dir {}", tmp_path.native()));
     }
     return Status::OK();
 }
@@ -280,8 +279,9 @@ Status LocalFileSystem::md5sum_impl(const Path& file, std::string* md5sum) {
 
     struct stat statbuf;
     if (fstat(fd, &statbuf) < 0) {
+        int err = errno;
         close(fd);
-        return localfs_error(errno, fmt::format("failed to stat file {}", file.native()));
+        return localfs_error(err, fmt::format("failed to stat file {}", file.native()));
     }
     size_t file_len = statbuf.st_size;
     CONSUME_THREAD_MEM_TRACKER(file_len);
@@ -463,8 +463,7 @@ Status LocalFileSystem::permission_impl(const Path& file, std::filesystem::perms
     std::error_code ec;
     std::filesystem::permissions(file, prms, ec);
     if (ec) {
-        return Status::IOError("failed to change file permission {}: {}", file.native(),
-                               errcode_to_str(ec));
+        return localfs_error(ec, fmt::format("failed to change file permission {}", file.native()));
     }
     return Status::OK();
 }

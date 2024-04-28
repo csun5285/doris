@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <numeric>
 #include <ostream>
 #include <set>
@@ -42,6 +43,7 @@
 #include "common/sync_point.h"
 #include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_system.h"
+#include "io/fs/file_writer.h"
 #include "io/fs/remote_file_system.h"
 #include "olap/cumulative_compaction_policy.h"
 #include "olap/cumulative_compaction_time_series_policy.h"
@@ -437,7 +439,8 @@ Status Compaction::do_compaction_impl(int64_t permits) {
         if (!allow_delete_in_cumu_compaction()) {
             missed_rows_size = missed_rows.size();
             if (compaction_type() == ReaderType::READER_CUMULATIVE_COMPACTION &&
-                stats.merged_rows != missed_rows_size) {
+                stats.merged_rows != missed_rows_size &&
+                _tablet->tablet_state() == TABLET_RUNNING) {
                 std::string err_msg = fmt::format(
                         "cumulative compaction: the merged rows({}) is not equal to missed "
                         "rows({}) in rowid conversion, tablet_id: {}, table_id:{}",
@@ -475,9 +478,11 @@ Status Compaction::do_compaction_impl(int64_t permits) {
             // src index files
             // format: rowsetId_segmentId
             std::vector<std::string> src_index_files(src_segment_num);
+            std::vector<RowsetId> src_rowset_ids;
             for (const auto& m : src_seg_to_id_map) {
                 std::pair<RowsetId, uint32_t> p = m.first;
                 src_index_files[m.second] = p.first.to_string() + "_" + std::to_string(p.second);
+                src_rowset_ids.push_back(p.first);
             }
 
             // dest index files
@@ -486,6 +491,46 @@ Status Compaction::do_compaction_impl(int64_t permits) {
             for (int i = 0; i < dest_segment_num; ++i) {
                 auto prefix = dest_rowset_id.to_string() + "_" + std::to_string(i);
                 dest_index_files[i] = prefix;
+            }
+
+            // Only write info files when debug index compaction is enabled.
+            // The files are used to debug index compaction and works with index_tool.
+            if (config::debug_inverted_index_compaction) {
+                auto write_json_to_file = [&](const nlohmann::json& json_obj,
+                                              const std::string& file_name) {
+                    io::FileWriterPtr file_writer;
+                    std::string file_path =
+                            fmt::format("{}/{}.json", config::sys_log_dir, file_name);
+                    RETURN_IF_ERROR(
+                            io::global_local_filesystem()->create_file(file_path, &file_writer));
+                    RETURN_IF_ERROR(file_writer->append(json_obj.dump()));
+                    RETURN_IF_ERROR(file_writer->append("\n"));
+                    return file_writer->close();
+                };
+
+                // Convert trans_vec to JSON and print it
+                nlohmann::json trans_vec_json = trans_vec;
+                auto output_version = _output_version.to_string().substr(
+                        1, _output_version.to_string().size() - 2);
+                RETURN_IF_ERROR(write_json_to_file(
+                        trans_vec_json,
+                        fmt::format("trans_vec_{}_{}", _tablet->tablet_id(), output_version)));
+
+                nlohmann::json src_index_files_json = src_index_files;
+                RETURN_IF_ERROR(write_json_to_file(
+                        src_index_files_json,
+                        fmt::format("src_idx_dirs_{}_{}", _tablet->tablet_id(), output_version)));
+
+                nlohmann::json dest_index_files_json = dest_index_files;
+                RETURN_IF_ERROR(write_json_to_file(
+                        dest_index_files_json,
+                        fmt::format("dest_idx_dirs_{}_{}", _tablet->tablet_id(), output_version)));
+
+                nlohmann::json dest_segment_num_rows_json = dest_segment_num_rows;
+                RETURN_IF_ERROR(
+                        write_json_to_file(dest_segment_num_rows_json,
+                                           fmt::format("dest_seg_num_rows_{}_{}",
+                                                       _tablet->tablet_id(), output_version)));
             }
 
             // create index_writer to compaction indexes
@@ -504,43 +549,58 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                     ctx.skip_inverted_index.cbegin(), ctx.skip_inverted_index.cend(),
                     [&src_segment_num, &dest_segment_num, &index_writer_path, &src_index_files,
                      &dest_index_files, &fs, &tablet_path, &trans_vec, &dest_segment_num_rows,
-                     &status, this](int32_t column_uniq_id) {
+                     &status, &src_rowset_ids, this](int32_t column_uniq_id) {
+                        auto error_handler = [this](int64_t index_id, int64_t column_uniq_id) {
+                            LOG(WARNING) << "failed to do index compaction"
+                                         << ". tablet=" << _tablet->tablet_id()
+                                         << ". column uniq id=" << column_uniq_id
+                                         << ". index_id=" << index_id;
+                            for (auto& rowset : _input_rowsets) {
+                                rowset->set_skip_index_compaction(column_uniq_id);
+                                LOG(INFO) << "mark skipping inverted index compaction next time"
+                                          << ". tablet=" << _tablet->tablet_id()
+                                          << ", rowset=" << rowset->rowset_id()
+                                          << ", column uniq id=" << column_uniq_id
+                                          << ", index_id=" << index_id;
+                            }
+                        };
+
                         auto index_id =
                                 _cur_tablet_schema->get_inverted_index(column_uniq_id)->index_id();
+
+                        // if index properties are different, index compaction maybe needs to be skipped.
+                        std::optional<std::map<std::string, std::string>> first_properties;
+                        for (const auto& rowset_id : src_rowset_ids) {
+                            auto rowset_ptr = _tablet->get_rowset(rowset_id);
+                            const auto* tablet_index =
+                                    rowset_ptr->tablet_schema()->get_inverted_index(column_uniq_id);
+                            const auto& properties = tablet_index->properties();
+                            if (!first_properties.has_value()) {
+                                first_properties = properties;
+                            } else {
+                                if (properties != first_properties.value()) {
+                                    error_handler(index_id, column_uniq_id);
+                                    status = Status::Error<INVERTED_INDEX_COMPACTION_ERROR>(
+                                            "if index properties are different, index compaction "
+                                            "needs to be "
+                                            "skipped.");
+                                    return;
+                                }
+                            }
+                        }
+
                         try {
                             auto st = compact_column(index_id, src_segment_num, dest_segment_num,
                                                      src_index_files, dest_index_files, fs,
                                                      index_writer_path, tablet_path, trans_vec,
                                                      dest_segment_num_rows);
                             if (!st.ok()) {
-                                LOG(WARNING) << "failed to do index compaction"
-                                             << ". tablet=" << _tablet->full_name()
-                                             << ". column uniq id=" << column_uniq_id
-                                             << ". index_id=" << index_id;
-                                for (auto& rowset : _input_rowsets) {
-                                    rowset->set_skip_index_compaction(column_uniq_id);
-                                    LOG(INFO) << "mark skipping inverted index compaction next time"
-                                              << ". tablet=" << _tablet->full_name()
-                                              << ", rowset=" << rowset->rowset_id()
-                                              << ", column uniq id=" << column_uniq_id
-                                              << ", index_id=" << index_id;
-                                }
+                                error_handler(index_id, column_uniq_id);
                                 status = Status::Error<ErrorCode::INVERTED_INDEX_COMPACTION_ERROR>(
                                         st.msg());
                             }
                         } catch (CLuceneError& e) {
-                            LOG(WARNING) << "failed to do index compaction"
-                                         << ". tablet=" << _tablet->full_name()
-                                         << ", column uniq id=" << column_uniq_id
-                                         << ", index_id=" << index_id;
-                            for (auto& rowset : _input_rowsets) {
-                                rowset->set_skip_index_compaction(column_uniq_id);
-                                LOG(INFO) << "mark skipping inverted index compaction next time"
-                                          << ". tablet=" << _tablet->full_name()
-                                          << ", rowset=" << rowset->rowset_id()
-                                          << ", column uniq id=" << column_uniq_id
-                                          << ", index_id=" << index_id;
-                            }
+                            error_handler(index_id, column_uniq_id);
                             status = Status::Error<ErrorCode::INVERTED_INDEX_COMPACTION_ERROR>(
                                     e.what());
                         }
@@ -785,7 +845,8 @@ Status Compaction::modify_rowsets(const Merger::Statistics* stats) {
         if (!allow_delete_in_cumu_compaction()) {
             missed_rows_size = missed_rows.size();
             if (compaction_type() == ReaderType::READER_CUMULATIVE_COMPACTION && stats != nullptr &&
-                stats->merged_rows != missed_rows_size) {
+                stats->merged_rows != missed_rows_size &&
+                _tablet->tablet_state() == TABLET_RUNNING) {
                 std::string err_msg = fmt::format(
                         "cumulative compaction: the merged rows({}) is not equal to missed "
                         "rows({}) in rowid conversion, tablet_id: {}, table_id:{}",

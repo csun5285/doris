@@ -59,6 +59,7 @@ import java.util.stream.Collectors
 import java.util.stream.LongStream
 import static org.apache.doris.regression.util.DataUtils.sortByToString
 
+import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSetMetaData
@@ -277,21 +278,52 @@ class Suite implements GroovyInterceptable {
         return result
     }
 
-    List<List<Object>> insert_into_sql(String sqlStr, int num) {
+
+    List<List<Object>> insert_into_sql_impl(Connection conn, String sqlStr, int num) {
         logger.info("insert into " + num + " records")
-        def (result, meta) = JdbcUtils.executeToList(context.getConnection(), sqlStr)
+        def (result, meta) = JdbcUtils.executeToList(conn, sqlStr)
         return result
     }
 
-    List<List<Object>> exec(Object stmt) {
-        logger.info("Execute sql: ${stmt}".toString())
-        def (result, meta )= JdbcUtils.executeToList(context.getConnection(),  (PreparedStatement) stmt)
-        return result
+    List<List<Object>> jdbc_insert_into_sql(String sqlStr, int num) {
+        return insert_into_sql_impl(context.getConnection(), sqlStr, num)
     }
 
-    def sql_return_maparray(String sqlStr) {
+    List<List<Object>> arrow_flight_insert_into_sql(String sqlStr, int num) {
+        return insert_into_sql_impl(context.getArrowFlightSqlConnection(), (String) ("USE ${context.dbName};" + sqlStr), num)
+    }
+
+    List<List<Object>> insert_into_sql(String sqlStr, int num) {
+        if (context.useArrowFlightSql()) {
+            return arrow_flight_insert_into_sql(sqlStr, num)
+        } else {
+            return jdbc_insert_into_sql(sqlStr, num)
+        }
+    }
+
+    def sql_return_maparray(String sqlStr, Connection conn = null) {        
         logger.info("Execute sql: ${sqlStr}".toString())
-        return JdbcUtils.executeToMapArray(context.getConnection(), sqlStr)
+        if (conn == null) {
+            conn = context.getConnection()
+        }
+        def (result, meta) = JdbcUtils.executeToList(conn, sqlStr)
+
+        // get all column names as list
+        List<String> columnNames = new ArrayList<>()
+        for (int i = 0; i < meta.getColumnCount(); i++) {
+            columnNames.add(meta.getColumnName(i + 1))
+        }
+
+        // add result to res map list, each row is a map with key is column name
+        List<Map<String, Object>> res = new ArrayList<>()
+        for (int i = 0; i < result.size(); i++) {
+            Map<String, Object> row = new HashMap<>()
+            for (int j = 0; j < columnNames.size(); j++) {
+                row.put(columnNames.get(j), result.get(i).get(j))
+            }
+            res.add(row)
+        }
+        return res;
     }
 
     List<List<Object>> target_sql(String sqlStr, boolean isOrder = false) {
@@ -553,6 +585,11 @@ class Suite implements GroovyInterceptable {
         return lines;
     }
 
+
+    Connection getTargetConnection() {
+        return context.getTargetConnection(this)
+    }
+    
     boolean deleteFile(String filePath) {
         def file = new File(filePath)
         file.delete()
@@ -1055,44 +1092,15 @@ class Suite implements GroovyInterceptable {
         return debugPoint
     }
 
+    boolean isCloudMode() {
+        return !getFeConfig("cloud_unique_id").isEmpty()
+    }
+
+    String getFeConfig(String key) {
+        return sql_return_maparray("SHOW FRONTEND CONFIG LIKE '${key}'")[0].Value
+    }
+
     void setFeConfig(String key, Object value) {
-        assert key != null
-        assert key != ''
-        for (def cfg : dorisSelectdbDiffCfgNames) {
-            def dorisKey = cfg[0]
-            def selectdbKey = cfg[1]
-            if (key == dorisKey) {
-                if (!context.config.isDorisEnv) {
-                    key = selectdbKey
-                }
-                break
-            }
-
-            if (key == selectdbKey) {
-                if (context.config.isDorisEnv) {
-                    key = dorisKey
-                }
-                break
-            }
-        }
-
-        // TODO: apsaradb_env_enabled will be removed
-        if (key == 'apsaradb_env_enabled') {
-            if (context.config.isDorisEnv) {
-                key = 'security_checker_class_name'
-                if (value == true || value == 'true') {
-                    value = 'com.aliyun.securitysdk.SecurityUtil'
-                } else {
-                    value = ''
-                }
-            }
-        }
-
-        // not support this key
-        if (key == null || key == "") {
-            return
-        }
-
         sql "ADMIN SET FRONTEND CONFIG ('${key}' = '${value}')"
     }
 
@@ -1108,98 +1116,6 @@ class Suite implements GroovyInterceptable {
             actionSupplier()
         } finally {
             updateConfig oldConfig
-        }
-    }
-
-    void waiteCreateTableFinished(String tableName) {
-        Thread.sleep(2000);
-        String showCreateTable = "SHOW CREATE TABLE ${tableName}"
-        String createdTableName = "";
-        List<List<Object>> result
-        long startTime = System.currentTimeMillis()
-        long timeoutTimestamp = startTime + 1 * 60 * 1000 // 1 min
-        do {
-            result = sql(showCreateTable)
-            if (!result.isEmpty()) {
-                createdTableName = result.last().get(0)
-            }
-            logger.info("create table result of ${showCreateTable} is ${createdTableName}")
-            Thread.sleep(500);
-        } while (timeoutTimestamp > System.currentTimeMillis() && createdTableName.isEmpty())
-        if (createdTableName.isEmpty()) {
-            logger.info("create table is not success")
-        }
-        Assert.assertEquals(true, !createdTableName.isEmpty())
-    }
-
-    String[][] deduplicate_tablets(String[][] tablets) {
-        def result = [:]
-
-        tablets.each { row ->
-            def tablet_id = row[0]
-            if (!result.containsKey(tablet_id)) {
-                result[tablet_id] = row
-            }
-        }
-
-        return result.values().toList()
-    }
-
-    ArrayList deduplicate_tablets(ArrayList tablets) {
-        def result = [:]
-
-        tablets.each { row ->
-
-            def tablet_id
-            if (row.containsKey("TabletId")) {
-                tablet_id = row.TabletId
-            } else {
-                tablet_id = row[0]
-            }
-
-            if (!result.containsKey(tablet_id)) {
-                result[tablet_id] = row
-            }
-        }
-
-        return result.values().toList()
-    }
-
-    def check_mv_rewrite_success = { db, mv_sql, query_sql, mv_name ->
-
-        sql """DROP MATERIALIZED VIEW IF EXISTS ${mv_name}"""
-        sql"""
-        CREATE MATERIALIZED VIEW ${mv_name} 
-        BUILD IMMEDIATE REFRESH COMPLETE ON MANUAL
-        DISTRIBUTED BY RANDOM BUCKETS 2
-        PROPERTIES ('replication_num' = '1') 
-        AS ${mv_sql}
-        """
-
-        def job_name = getJobName(db, mv_name);
-        waitingMTMVTaskFinished(job_name)
-        explain {
-            sql("${query_sql}")
-            contains("${mv_name}(${mv_name})")
-        }
-    }
-
-    def check_mv_rewrite_fail = { db, mv_sql, query_sql, mv_name ->
-
-        sql """DROP MATERIALIZED VIEW IF EXISTS ${mv_name}"""
-        sql"""
-        CREATE MATERIALIZED VIEW ${mv_name} 
-        BUILD IMMEDIATE REFRESH COMPLETE ON MANUAL
-        DISTRIBUTED BY RANDOM BUCKETS 2
-        PROPERTIES ('replication_num' = '1') 
-        AS ${mv_sql}
-        """
-
-        def job_name = getJobName(db, mv_name);
-        waitingMTMVTaskFinished(job_name)
-        explain {
-            sql("${query_sql}")
-            notContains("${mv_name}(${mv_name})")
         }
     }
 }

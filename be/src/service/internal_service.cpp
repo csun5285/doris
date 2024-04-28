@@ -37,6 +37,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <vec/exec/vjdbc_connector.h>
 
 #include <algorithm>
 #include <exception>
@@ -637,12 +638,17 @@ void PInternalServiceImpl::fetch_table_schema(google::protobuf::RpcController* c
             std::vector<SlotDescriptor*> file_slots;
             reader = vectorized::AvroJNIReader::create_unique(profile.get(), params, range,
                                                               file_slots);
-            ((vectorized::AvroJNIReader*)(reader.get()))->init_fetch_table_schema_reader();
+            st = ((vectorized::AvroJNIReader*)(reader.get()))->init_fetch_table_schema_reader();
             break;
         }
         default:
             st = Status::InternalError("Not supported file format in fetch table schema: {}",
                                        params.format_type);
+            st.to_protobuf(result->mutable_status());
+            return;
+        }
+        if (!st.ok()) {
+            LOG(WARNING) << "failed to init reader, errmsg=" << st;
             st.to_protobuf(result->mutable_status());
             return;
         }
@@ -694,6 +700,64 @@ void PInternalServiceImpl::tablet_fetch_data(google::protobuf::RpcController* co
     });
     if (!ret) {
         offer_failed(response, done, _light_work_pool);
+        return;
+    }
+}
+
+void PInternalServiceImpl::test_jdbc_connection(google::protobuf::RpcController* controller,
+                                                const PJdbcTestConnectionRequest* request,
+                                                PJdbcTestConnectionResult* result,
+                                                google::protobuf::Closure* done) {
+    bool ret = _heavy_work_pool.try_offer([request, result, done]() {
+        VLOG_RPC << "test jdbc connection";
+        brpc::ClosureGuard closure_guard(done);
+        TTableDescriptor table_desc;
+        vectorized::JdbcConnectorParam jdbc_param;
+        Status st = Status::OK();
+        {
+            const uint8_t* buf = (const uint8_t*)request->jdbc_table().data();
+            uint32_t len = request->jdbc_table().size();
+            st = deserialize_thrift_msg(buf, &len, false, &table_desc);
+            if (!st.ok()) {
+                LOG(WARNING) << "test jdbc connection failed, errmsg=" << st;
+                st.to_protobuf(result->mutable_status());
+                return;
+            }
+        }
+        TJdbcTable jdbc_table = (table_desc.jdbcTable);
+        jdbc_param.catalog_id = jdbc_table.catalog_id;
+        jdbc_param.driver_class = jdbc_table.jdbc_driver_class;
+        jdbc_param.driver_path = jdbc_table.jdbc_driver_url;
+        jdbc_param.driver_checksum = jdbc_table.jdbc_driver_checksum;
+        jdbc_param.jdbc_url = jdbc_table.jdbc_url;
+        jdbc_param.user = jdbc_table.jdbc_user;
+        jdbc_param.passwd = jdbc_table.jdbc_password;
+        jdbc_param.query_string = request->query_str();
+        jdbc_param.table_type = static_cast<TOdbcTableType::type>(request->jdbc_table_type());
+        jdbc_param.connection_pool_min_size = jdbc_table.connection_pool_min_size;
+        jdbc_param.connection_pool_max_size = jdbc_table.connection_pool_max_size;
+        jdbc_param.connection_pool_max_life_time = jdbc_table.connection_pool_max_life_time;
+        jdbc_param.connection_pool_max_wait_time = jdbc_table.connection_pool_max_wait_time;
+        jdbc_param.connection_pool_keep_alive = jdbc_table.connection_pool_keep_alive;
+
+        std::unique_ptr<vectorized::JdbcConnector> jdbc_connector;
+        jdbc_connector.reset(new (std::nothrow) vectorized::JdbcConnector(jdbc_param));
+
+        st = jdbc_connector->test_connection();
+        st.to_protobuf(result->mutable_status());
+
+        Status clean_st = jdbc_connector->clean_datasource();
+        if (!clean_st.ok()) {
+            LOG(WARNING) << "Failed to clean JDBC datasource: " << clean_st.msg();
+        }
+        Status close_st = jdbc_connector->close();
+        if (!close_st.ok()) {
+            LOG(WARNING) << "Failed to close JDBC connector: " << close_st.msg();
+        }
+    });
+
+    if (!ret) {
+        offer_failed(result, done, _heavy_work_pool);
         return;
     }
 }
@@ -801,6 +865,7 @@ void PInternalServiceImpl::get_info(google::protobuf::RpcController* controller,
         // Currently it supports 2 kinds of requests:
         // 1. get all kafka partition ids for given topic
         // 2. get all kafka partition offsets for given topic and timestamp.
+        int timeout_ms = request->has_timeout_secs() ? request->timeout_secs() * 1000 : 5 * 1000;
         if (request->has_kafka_meta_request()) {
             const PKafkaMetaProxyRequest& kafka_request = request->kafka_meta_request();
             if (!kafka_request.partition_id_for_latest_offsets().empty()) {
@@ -808,7 +873,8 @@ void PInternalServiceImpl::get_info(google::protobuf::RpcController* controller,
                 std::vector<PIntegerPair> partition_offsets;
                 Status st = _exec_env->routine_load_task_executor()
                                     ->get_kafka_latest_offsets_for_partitions(
-                                            request->kafka_meta_request(), &partition_offsets);
+                                            request->kafka_meta_request(), &partition_offsets,
+                                            timeout_ms);
                 if (st.ok()) {
                     PKafkaPartitionOffsets* part_offsets = response->mutable_partition_offsets();
                     for (const auto& entry : partition_offsets) {
@@ -824,7 +890,8 @@ void PInternalServiceImpl::get_info(google::protobuf::RpcController* controller,
                 std::vector<PIntegerPair> partition_offsets;
                 Status st = _exec_env->routine_load_task_executor()
                                     ->get_kafka_partition_offsets_for_times(
-                                            request->kafka_meta_request(), &partition_offsets);
+                                            request->kafka_meta_request(), &partition_offsets,
+                                            timeout_ms);
                 if (st.ok()) {
                     PKafkaPartitionOffsets* part_offsets = response->mutable_partition_offsets();
                     for (const auto& entry : partition_offsets) {

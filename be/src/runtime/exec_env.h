@@ -78,6 +78,7 @@ class FrontendServiceClient;
 class FileMetaCache;
 class GroupCommitMgr;
 class WalManager;
+class DNSCache;
 
 // Execution environment for queries/plan fragments.
 // Contains all required global structures, and handles to
@@ -205,6 +206,7 @@ public:
     HeartbeatFlags* heartbeat_flags() { return _heartbeat_flags; }
     doris::vectorized::ScannerScheduler* scanner_scheduler() { return _scanner_scheduler; }
     FileMetaCache* file_meta_cache() { return _file_meta_cache; }
+    DNSCache* dns_cache() { return _dns_cache; }
 
     std::shared_mutex& zone_cache_rw_lock() { return _zone_cache_rw_lock; }
     WalManager* wal_mgr() { return _wal_manager.get(); }
@@ -310,6 +312,7 @@ private:
     std::shared_mutex _zone_cache_rw_lock;
     GroupCommitMgr* _group_commit_mgr = nullptr;
     std::shared_ptr<WalManager> _wal_manager;
+    DNSCache* _dns_cache = nullptr;
 
     RuntimeQueryStatiticsMgr* _runtime_query_statistics_mgr = nullptr;
 };

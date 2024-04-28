@@ -144,6 +144,20 @@ public:
         pb1->set_tablet_schema(_tablet_meta->tablet_schema());
     }
 
+    void init_rs_meta_resource(RowsetMetaSharedPtr& pb1, int64_t start, int64_t end,
+                               bool is_local) {
+        RowsetMetaPB rowset_meta_pb;
+        json2pb::JsonToProtoMessage(_json_rowset_meta, &rowset_meta_pb);
+        rowset_meta_pb.set_start_version(start);
+        rowset_meta_pb.set_end_version(end);
+        rowset_meta_pb.set_creation_time(10000);
+        if (!is_local) {
+            rowset_meta_pb.set_resource_id("100");
+        }
+        pb1->init_from_pb(rowset_meta_pb);
+        pb1->set_tablet_schema(_tablet_meta->tablet_schema());
+    }
+
     void init_all_rs_meta(std::vector<RowsetMetaSharedPtr>* rs_metas) {
         RowsetMetaSharedPtr ptr1(new RowsetMeta());
         init_rs_meta(ptr1, 0, 0);
@@ -394,64 +408,25 @@ TEST_F(TestTablet, cooldown_policy) {
     }
 }
 
-TEST_F(TestTablet, rowset_tree_update) {
-    TTabletSchema tschema;
-    tschema.keys_type = TKeysType::UNIQUE_KEYS;
-    TabletMetaSharedPtr tablet_meta = new_tablet_meta(tschema, true);
-    TabletSharedPtr tablet(new Tablet(tablet_meta, nullptr));
-    RowsetIdUnorderedSet rowset_ids;
-    tablet->init();
+TEST_F(TestTablet, get_local_versions) {
+    // 10 remote rowsets
+    for (int i = 1; i <= 10; i++) {
+        auto ptr = std::make_shared<RowsetMeta>();
+        init_rs_meta_resource(ptr, i, i, false);
+        static_cast<void>(_tablet_meta->add_rs_meta(ptr));
+    }
 
-    RowsetMetaSharedPtr rsm1(new RowsetMeta());
-    init_rs_meta(rsm1, 6, 7, convert_key_bounds({{"100", "200"}, {"300", "400"}}));
-    RowsetId id1;
-    id1.init(10010);
-    RowsetSharedPtr rs_ptr1;
-    MockRowset::create_rowset(tablet->tablet_schema(), "", rsm1, &rs_ptr1, false);
-    tablet->add_inc_rowset(rs_ptr1);
-    rowset_ids.insert(id1);
+    // 20 local rowsets
+    for (int i = 11; i <= 30; i++) {
+        auto ptr = std::make_shared<RowsetMeta>();
+        init_rs_meta_resource(ptr, i, i, true);
+        static_cast<void>(_tablet_meta->add_rs_meta(ptr));
+    }
 
-    RowsetMetaSharedPtr rsm2(new RowsetMeta());
-    init_rs_meta(rsm2, 8, 8, convert_key_bounds({{"500", "999"}}));
-    RowsetId id2;
-    id2.init(10086);
-    rsm2->set_rowset_id(id2);
-    RowsetSharedPtr rs_ptr2;
-    MockRowset::create_rowset(tablet->tablet_schema(), "", rsm2, &rs_ptr2, false);
-    tablet->add_inc_rowset(rs_ptr2);
-    rowset_ids.insert(id2);
-
-    RowsetId id3;
-    id3.init(540081);
-    rowset_ids.insert(id3);
-
-    RowLocation loc;
-    // Key not in range.
-    ASSERT_TRUE(
-            tablet->lookup_row_key("99", true, &rowset_ids, &loc, 7).is<ErrorCode::NOT_FOUND>());
-    // Version too low.
-    ASSERT_TRUE(
-            tablet->lookup_row_key("101", true, &rowset_ids, &loc, 3).is<ErrorCode::NOT_FOUND>());
-    // Hit a segment, but since we don't have real data, return an internal error when loading the
-    // segment.
-    LOG(INFO) << tablet->lookup_row_key("101", true, &rowset_ids, &loc, 7).to_string();
-    ASSERT_TRUE(
-            tablet->lookup_row_key("101", true, &rowset_ids, &loc, 7).is<ErrorCode::IO_ERROR>());
-    // Key not in range.
-    ASSERT_TRUE(
-            tablet->lookup_row_key("201", true, &rowset_ids, &loc, 7).is<ErrorCode::NOT_FOUND>());
-    ASSERT_TRUE(
-            tablet->lookup_row_key("300", true, &rowset_ids, &loc, 7).is<ErrorCode::IO_ERROR>());
-    // Key not in range.
-    ASSERT_TRUE(
-            tablet->lookup_row_key("499", true, &rowset_ids, &loc, 7).is<ErrorCode::NOT_FOUND>());
-    // Version too low.
-    ASSERT_TRUE(
-            tablet->lookup_row_key("500", true, &rowset_ids, &loc, 7).is<ErrorCode::NOT_FOUND>());
-    // Hit a segment, but since we don't have real data, return an internal error when loading the
-    // segment.
-    ASSERT_TRUE(
-            tablet->lookup_row_key("500", true, &rowset_ids, &loc, 8).is<ErrorCode::IO_ERROR>());
+    TabletSharedPtr _tablet(new Tablet(_tablet_meta, nullptr));
+    _tablet->init();
+    const auto& local_versions = _tablet->get_all_local_versions();
+    ASSERT_EQ(local_versions.size(), 20);
 }
 
 } // namespace doris

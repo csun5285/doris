@@ -96,6 +96,8 @@ public:
     void update_null_data();
 
     MutableColumnPtr get_shrinked_column() override;
+    bool could_shrinked_column() override;
+    bool is_variable_length() const override { return nested_column->is_variable_length(); }
 
     const char* get_family_name() const override { return "Nullable"; }
     std::string get_name() const override { return "Nullable(" + nested_column->get_name() + ")"; }

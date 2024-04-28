@@ -42,7 +42,7 @@ if [[ ${build_version_hotfix} -gt 0 ]]; then
 fi
 
 #doris version
-build_base_version="2.0.6"
+build_base_version="2.0.9"
 
 unset LANG
 unset LC_CTYPE

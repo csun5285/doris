@@ -223,12 +223,8 @@ public class StreamLoadPlanner {
         }
         scanTupleDesc.setTable(destTable);
         analyzer.registerTupleDescriptor(scanTupleDesc);
-        if (null != taskInfo.getWhereExpr()) {
-            taskInfo.getWhereExpr().analyze(analyzer);
-        }
         // create scan node
         scanNode = createScanNode(loadId, scanTupleDesc);
-
         scanNode.init(analyzer);
         scanNode.finalize(analyzer);
         descTable.computeStatAndMemLayout();
@@ -417,12 +413,8 @@ public class StreamLoadPlanner {
         }
         scanTupleDesc.setTable(destTable);
         analyzer.registerTupleDescriptor(scanTupleDesc);
-        if (null != taskInfo.getWhereExpr()) {
-            taskInfo.getWhereExpr().analyze(analyzer);
-        }
         // create scan node
         scanNode = createScanNode(loadId, scanTupleDesc);
-
         scanNode.init(analyzer);
         scanNode.finalize(analyzer);
         descTable.computeStatAndMemLayout();
@@ -511,6 +503,12 @@ public class StreamLoadPlanner {
         DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
         dataDescription.analyzeWithoutCheckPriv(db.getFullName());
         BrokerFileGroup fileGroup = new BrokerFileGroup(dataDescription);
+        Expr whereExpr = null;
+        if (null != taskInfo.getWhereExpr()) {
+            whereExpr = taskInfo.getWhereExpr().clone();
+            whereExpr.analyze(analyzer);
+        }
+        fileGroup.setWhereExpr(whereExpr);
         fileGroup.parse(db, dataDescription);
         // 2. create dummy file status
         TBrokerFileStatus fileStatus = new TBrokerFileStatus();

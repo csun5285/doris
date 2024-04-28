@@ -57,8 +57,9 @@ public class JdbcMySQLClient extends JdbcClient {
                 isDoris = versionComment.toLowerCase().contains("doris")
                     || versionComment.toLowerCase().contains("selectdb");
             }
-        } catch (SQLException e) {
-            throw new JdbcClientException("Failed to determine MySQL Version Comment", e);
+        } catch (SQLException | JdbcClientException e) {
+            closeClient();
+            throw new JdbcClientException("Failed to initialize JdbcMySQLClient: %s", e.getMessage());
         } finally {
             close(rs, stmt, conn);
         }

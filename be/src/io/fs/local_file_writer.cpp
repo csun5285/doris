@@ -43,8 +43,7 @@
 #include "io/fs/path.h"
 #include "util/doris_metrics.h"
 
-namespace doris {
-namespace io {
+namespace doris::io {
 namespace {
 
 Status sync_dir(const io::Path& dirname) {
@@ -57,13 +56,12 @@ Status sync_dir(const io::Path& dirname) {
     Defer defer {[fd] { ::close(fd); }};
 #ifdef __APPLE__
     if (fcntl(fd, F_FULLFSYNC) < 0) {
-        return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
-    }
 #else
     if (0 != ::fdatasync(fd)) {
+#endif
         return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
     }
-#endif
+    ::close(fd);
     return Status::OK();
 }
 
@@ -185,13 +183,11 @@ Status LocalFileWriter::_close(bool sync) {
         if (_dirty) {
 #ifdef __APPLE__
             if (fcntl(_fd, F_FULLFSYNC) < 0) [[unlikely]] {
-                return localfs_error(errno, fmt::format("failed to sync {}", _path.native()));
-            }
 #else
             if (0 != ::fdatasync(_fd)) [[unlikely]] {
+#endif
                 return localfs_error(errno, fmt::format("failed to sync {}", _path.native()));
             }
-#endif
             _dirty = false;
         }
         RETURN_IF_ERROR(sync_dir(_path.parent_path()));
@@ -205,5 +201,4 @@ Status LocalFileWriter::_close(bool sync) {
     return Status::OK();
 }
 
-} // namespace io
-} // namespace doris
+} // namespace doris::io

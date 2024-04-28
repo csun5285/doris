@@ -117,9 +117,9 @@ S3FileWriter::~S3FileWriter() {
         // if we don't abort multi part upload, the uploaded part in object
         // store will not automatically reclaim itself, it would cost more money
         _abort();
-        _bytes_written = 0;
+        _bytes_appended = 0;
     }
-    s3_bytes_written_total << _bytes_written;
+    s3_bytes_written_total << _bytes_appended;
     s3_file_being_written << -1;
 }
 
@@ -218,6 +218,33 @@ Status S3FileWriter::close() {
     }
     Defer defer {[&]() { _closed = true; }};
     VLOG_DEBUG << "S3FileWriter::close, path: " << _path.native();
+
+    if (_bytes_appended == 0) {
+        // No data written, but need to create an empty file
+        auto builder = FileBufferBuilder();
+        builder.set_type(BufferType::UPLOAD)
+                .set_upload_callback([this](UploadFileBuffer& buf) { _put_object(buf); })
+                .set_sync_after_complete_task([this](Status s) {
+                    bool ret = false;
+                    if (!s.ok()) [[unlikely]] {
+                        VLOG_NOTICE << "failed at key: " << _key << ", status: " << s.to_string();
+                        std::unique_lock<std::mutex> _lck {_completed_lock};
+                        _failed = true;
+                        ret = true;
+                        this->_st = std::move(s);
+                    }
+                    // After the signal, there is a scenario where the previous invocation of _wait_until_finish
+                    // returns to the caller, and subsequently, the S3 file writer is destructed.
+                    // This means that accessing _failed afterwards would result in a heap use after free vulnerability.
+                    _countdown_event.signal();
+                    return ret;
+                })
+                .set_is_cancelled([this]() { return _failed.load(); });
+        RETURN_IF_ERROR(builder.build(&_pending_buf));
+        auto* buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
+        DCHECK(buf != nullptr);
+    }
+
     if (_pending_buf != nullptr) {
         if (_upload_id.empty()) {
             auto buf = dynamic_cast<UploadFileBuffer*>(_pending_buf.get());
@@ -228,6 +255,7 @@ Status S3FileWriter::close() {
         _pending_buf->submit(std::move(_pending_buf));
         _pending_buf = nullptr;
     }
+
     SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::close", Status());
     RETURN_IF_ERROR(_complete());
 
@@ -371,7 +399,6 @@ void S3FileWriter::_upload_one_part(int64_t part_num, UploadFileBuffer& buf) {
 
     std::unique_lock<std::mutex> lck {_completed_lock};
     _completed_parts.emplace_back(std::move(completed_part));
-    _bytes_written += buf.get_size();
     s3_bytes_uploaded_total << buf.get_size();
 }
 
@@ -489,7 +516,6 @@ void S3FileWriter::_put_object(UploadFileBuffer& buf) {
         buf.set_status(_st);
         return;
     }
-    _bytes_written += buf.get_size();
     s3_bytes_uploaded_total << buf.get_size();
     s3_file_created_total << 1;
 }

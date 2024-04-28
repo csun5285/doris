@@ -205,6 +205,7 @@ public class StatisticsUtil {
         sessionVariable.forbidUnknownColStats = false;
         sessionVariable.enablePushDownMinMaxOnUnique = true;
         sessionVariable.enablePushDownStringMinMax = true;
+        sessionVariable.enableUniqueKeyPartialUpdate = false;
         connectContext.setEnv(Env.getCurrentEnv());
         connectContext.setDatabase(FeConstants.INTERNAL_DB_NAME);
         connectContext.setQualifiedUser(UserIdentity.ROOT.getQualifiedUser());

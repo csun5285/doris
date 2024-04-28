@@ -446,7 +446,7 @@ public class StmtExecutor {
             return logicalPlan instanceof InsertIntoTableCommand;
         }
         return parsedStmt instanceof InsertStmt
-                || parsedStmt instanceof CopyStmt
+                || parsedStmt instanceof CopyStmt || parsedStmt instanceof InsertOverwriteTableStmt
                 || parsedStmt instanceof CreateTableAsSelectStmt;
     }
 

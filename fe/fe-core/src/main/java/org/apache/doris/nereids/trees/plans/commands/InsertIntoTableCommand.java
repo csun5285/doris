@@ -22,7 +22,10 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
+import org.apache.doris.common.ErrorCode;
+import org.apache.doris.common.ErrorReport;
 import org.apache.doris.common.util.ProfileManager.ProfileType;
+import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
@@ -115,6 +118,16 @@ public class InsertIntoTableCommand extends Command implements ForwardWithSync, 
                 .collect(node -> node instanceof PhysicalOlapTableSink)).stream().findAny();
         Preconditions.checkArgument(plan.isPresent(), "insert into command must contain OlapTableSinkNode");
         PhysicalOlapTableSink<?> physicalOlapTableSink = ((PhysicalOlapTableSink) plan.get());
+
+        String dbName = physicalOlapTableSink.getDatabase().getFullName();
+        String tblName = physicalOlapTableSink.getTargetTable().getName();
+        // check auth
+        if (!Env.getCurrentEnv().getAccessManager()
+                .checkTblPriv(ConnectContext.get(), dbName, tblName, PrivPredicate.LOAD)) {
+            ErrorReport.reportAnalysisException(ErrorCode.ERR_TABLEACCESS_DENIED_ERROR, "LOAD",
+                    ConnectContext.get().getQualifiedUser(), ConnectContext.get().getRemoteIP(),
+                    dbName + "." + tblName);
+        }
 
         OlapTableSink sink = ((OlapTableSink) planner.getFragments().get(0).getSink());
 

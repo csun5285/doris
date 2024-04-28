@@ -1076,6 +1076,8 @@ Status VOlapTableSink::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(DataSink::prepare(state));
 
     _state = state;
+    _schema->set_timestamp_ms(_state->timestamp_ms());
+    _schema->set_timezone(_state->timezone());
 
     _sender_id = state->per_fragment_instance_idx();
     _num_senders = state->num_per_fragment_instances();
