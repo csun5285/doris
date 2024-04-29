@@ -202,7 +202,7 @@ private:
     SpinLock _mem_table_tracker_lock;
     std::atomic<uint32_t> _mem_table_num = 1;
 
-    mutable std::mutex _lock;
+    mutable bthread::Mutex _lock;
 
     std::unordered_set<int64_t> _unfinished_slave_node;
     PSuccessSlaveTabletNodeIds _success_slave_node_ids;

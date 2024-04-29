@@ -18,6 +18,7 @@
 #include "olap/delta_writer.h"
 
 #include <brpc/controller.h>
+#include <bthread/mutex.h>
 #include <butil/errno.h>
 #include <fmt/format.h>
 #include <gen_cpp/internal_service.pb.h>
@@ -171,6 +172,7 @@ Status DeltaWriter::init(const std::vector<DeltaWriter*>& writers) {
         if (writer->_is_init || writer->_is_cancelled) continue;
         tasks.push_back([writer] {
             std::lock_guard lock(writer->_lock);
+            static_assert(std::is_same_v<decltype(writer->_lock), bthread::Mutex>);
             if (writer->_is_init || writer->_is_cancelled) return Status::OK();
             return writer->init();
         });
@@ -269,7 +271,7 @@ Status DeltaWriter::init() {
         if (!base_migration_rlock.owns_lock()) {
             return Status::Error<TRY_LOCK_FAILED>("get lock failed");
         }
-        std::lock_guard<std::mutex> push_lock(_tablet->get_push_lock());
+        std::lock_guard push_lock(_tablet->get_push_lock());
         RETURN_IF_ERROR(_storage_engine->txn_manager()->prepare_txn(_req.partition_id, _tablet,
                                                                     _req.txn_id, _req.load_id));
     }
@@ -328,7 +330,7 @@ Status DeltaWriter::write(const vectorized::Block* block, const std::vector<int>
         return Status::OK();
     }
     _lock_watch.start();
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     _lock_watch.stop();
     if (!_is_init && !_is_cancelled) {
         RETURN_IF_ERROR(init());
@@ -406,7 +408,7 @@ Status DeltaWriter::flush_memtable_and_wait(bool need_wait) {
 
 Status DeltaWriter::wait_flush() {
     {
-        std::lock_guard<std::mutex> l(_lock);
+        std::lock_guard l(_lock);
         if (!_is_init) {
             // return OK instead of Status::Error<ALREADY_CANCELLED>() for same reason
             // as described in flush_memtable_and_wait()
@@ -469,7 +471,7 @@ void DeltaWriter::_reset_mem_table() {
 
 Status DeltaWriter::close() {
     _lock_watch.start();
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     _lock_watch.stop();
     if (!_is_init && !_is_cancelled) {
         // if this delta writer is not initialized, but close() is called.
@@ -576,7 +578,7 @@ Status DeltaWriter::cloud_set_txn_related_delete_bitmap() {
 }
 
 Status DeltaWriter::build_rowset() {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     DCHECK(_is_init)
             << "delta writer is supposed be to initialized before build_rowset() being called";
 
@@ -614,7 +616,7 @@ Status DeltaWriter::submit_calc_delete_bitmap_task() {
         return Status::OK();
     }
 
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     // tablet is under alter process. The delete bitmap will be calculated after conversion.
     if (_tablet->tablet_state() == TABLET_NOTREADY) {
         LOG(INFO) << "tablet is under alter process, delete bitmap will be calculated later, "
@@ -649,7 +651,7 @@ Status DeltaWriter::wait_calc_delete_bitmap() {
     if (!_tablet->enable_unique_key_merge_on_write() || _partial_update_info->is_partial_update) {
         return Status::OK();
     }
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     RETURN_IF_ERROR(_calc_delete_bitmap_token->wait());
     LOG(INFO) << "Got result of calc delete bitmap task from executor, tablet_id: "
               << _tablet->tablet_id() << ", txn_id: " << _req.txn_id;
@@ -673,7 +675,7 @@ Status DeltaWriter::commit_txn(const PSlaveTabletNodes& slave_tablet_nodes,
         }
     }
 
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     SCOPED_TIMER(_close_wait_timer);
     Status res = _storage_engine->txn_manager()->commit_txn(_req.partition_id, _tablet, _req.txn_id,
                                                             _req.load_id, _cur_rowset, false);
@@ -729,7 +731,7 @@ Status DeltaWriter::cancel() {
 }
 
 Status DeltaWriter::cancel_with_status(const Status& st) {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     if (_is_cancelled) {
         return Status::OK();
     }
@@ -773,7 +775,7 @@ int64_t DeltaWriter::mem_consumption(MemType mem) {
 }
 
 int64_t DeltaWriter::active_memtable_mem_consumption() {
-    std::lock_guard<std::mutex> l(_lock);
+    std::lock_guard l(_lock);
     return _mem_table != nullptr ? _mem_table->memory_usage() : 0;
 }
 
