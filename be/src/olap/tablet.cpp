@@ -4071,6 +4071,42 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
         _remove_sentinel_mark_from_delete_bitmap(delete_bitmap);
     }
 
+    // flush new segments into rowset
+#ifdef CLOUD_MODE
+    if (txn_info->partial_update_info && txn_info->partial_update_info->is_partial_update &&
+        rowset_writer->num_rows() > 0) {
+        // build rowset writer and merge transient rowset
+        auto status = rowset_writer->flush();
+        if (status != Status::OK()) {
+            LOG(WARNING) << "failed to flush the transient rowset writer. rowset_id="
+                         << rowset->rowset_id() << ", tablet_id=" << tablet_id()
+                         << ", txn_id=" << txn_id << ", status=" << status;
+            return status;
+        }
+
+        RowsetSharedPtr transient_rowset;
+        auto st = rowset_writer->build(transient_rowset);
+        if (!st.ok()) {
+            std::string msg = fmt::format(
+                    "failed to build the transient rowset. rowset_id={}, tablet_id={}, txn_id={}",
+                    rowset->rowset_id().to_string(), tablet_id(), txn_id);
+            LOG(WARNING) << msg << " status=" << st;
+            status = Status::Error<ErrorCode::INTERNAL_ERROR, false>(msg);
+            return status;
+        }
+        rowset->merge_rowset_meta(transient_rowset->rowset_meta());
+        const auto& rowset_meta = rowset->rowset_meta();
+        status = cloud::meta_mgr()->update_tmp_rowset(*rowset_meta);
+        if (!status.ok()) {
+            LOG(WARNING) << "failed to update the committed rowset. rowset_id="
+                         << rowset->rowset_id() << ", tablet_id=" << tablet_id()
+                         << ", txn_id=" << txn_id << ", status=" << status;
+            return status;
+        }
+        // erase segment cache cause we will add a segment to rowset
+        SegmentLoader::instance()->erase_segments(rowset->rowset_id());
+    }
+#else
     if (txn_info->partial_update_info && txn_info->partial_update_info->is_partial_update) {
         DBUG_EXECUTE_IF("Tablet.update_delete_bitmap.partial_update_write_rowset_fail", {
             if (rand() % 100 < (100 * dp->param("percent", 0.5))) {
@@ -4089,7 +4125,9 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
         // erase segment cache cause we will add a segment to rowset
         SegmentLoader::instance()->erase_segments(rowset->rowset_id());
     }
+#endif
 
+    // update delete bitmap
 #ifdef CLOUD_MODE
     DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
     for (auto iter = delete_bitmap->delete_bitmap.begin();
