@@ -3255,8 +3255,8 @@ Status Tablet::fetch_value_through_row_column(RowsetSharedPtr input_rowset,
     CHECK(tablet_schema.store_row_column());
     // create _source column
     std::unique_ptr<segment_v2::ColumnIterator> column_iterator;
-    RETURN_IF_ERROR(segment->new_column_iterator(tablet_schema.column(BeConsts::ROW_STORE_COL),
-                                                 &column_iterator));
+    const auto& column = *DORIS_TRY(tablet_schema.column(BeConsts::ROW_STORE_COL));
+    RETURN_IF_ERROR(segment->new_column_iterator(column, &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     OlapReaderStatistics stats;
     io::IOContext io_ctx;
@@ -3367,8 +3367,8 @@ Status Tablet::lookup_row_data(const Slice& encoded_key, const RowLocation& row_
     CHECK(tablet_schema->store_row_column());
     // create _source column
     std::unique_ptr<segment_v2::ColumnIterator> column_iterator;
-    RETURN_IF_ERROR(segment->new_column_iterator(tablet_schema->column(BeConsts::ROW_STORE_COL),
-                                                 &column_iterator));
+    const auto& column = *DORIS_TRY(tablet_schema->column(BeConsts::ROW_STORE_COL));
+    RETURN_IF_ERROR(segment->new_column_iterator(column, &column_iterator));
     segment_v2::ColumnIteratorOptions opt;
     io::IOContext io_ctx;
     io_ctx.file_cache_stats = &stats.file_cache_stats;

@@ -285,7 +285,8 @@ if (COMPILER_CLANG)
                         -Wunused-template
                         -Wunused-member-function
                         -Wunused-macros)
-    add_compile_options(-Wno-vla-extension)
+    add_compile_options(-Wno-vla-extension
+                        -Wno-gnu-statement-expression)
     if (USE_LIBCPP)
         add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
         if (NOT OS_MACOSX)

@@ -76,12 +76,14 @@ public class PushTask extends AgentTask {
     private TDescriptorTable tDescriptorTable;
 
     // for light schema change
-    private List<TColumn> columnsDesc = null;
+    private int schemaVersion;
+    private List<TColumn> columnsDesc;
 
     public PushTask(TResourceInfo resourceInfo, long backendId, long dbId, long tableId, long partitionId, long indexId,
             long tabletId, long replicaId, int schemaHash, long version, String filePath, long fileSize,
             int timeoutSecond, long loadJobId, TPushType pushType, List<Predicate> conditions, boolean needDecompress,
-            TPriority priority, TTaskType taskType, long transactionId, long signature, List<TColumn> columnsDesc) {
+            TPriority priority, TTaskType taskType, long transactionId, long signature, List<TColumn> columnsDesc,
+            int schemaVersion) {
         super(resourceInfo, backendId, taskType, dbId, tableId, partitionId, indexId, tabletId, signature);
         this.replicaId = replicaId;
         this.schemaHash = schemaHash;
@@ -101,16 +103,17 @@ public class PushTask extends AgentTask {
         this.tBrokerScanRange = null;
         this.tDescriptorTable = null;
         this.columnsDesc = columnsDesc;
+        this.schemaVersion = schemaVersion;
     }
 
     // for load v2 (SparkLoadJob)
     public PushTask(long backendId, long dbId, long tableId, long partitionId, long indexId, long tabletId,
             long replicaId, int schemaHash, int timeoutSecond, long loadJobId, TPushType pushType, TPriority priority,
             long transactionId, long signature, TBrokerScanRange tBrokerScanRange, TDescriptorTable tDescriptorTable,
-            List<TColumn> columnsDesc) {
+            List<TColumn> columnsDesc, int schemaVersion) {
         this(null, backendId, dbId, tableId, partitionId, indexId, tabletId, replicaId, schemaHash, -1, null, 0,
                 timeoutSecond, loadJobId, pushType, null, false, priority, TTaskType.REALTIME_PUSH, transactionId,
-                signature, columnsDesc);
+                signature, columnsDesc, schemaVersion);
         this.tBrokerScanRange = tBrokerScanRange;
         this.tDescriptorTable = tDescriptorTable;
     }
@@ -190,6 +193,7 @@ public class PushTask extends AgentTask {
                 break;
         }
         request.setColumnsDesc(columnsDesc);
+        request.setSchemaVersion(schemaVersion);
 
         return request;
     }

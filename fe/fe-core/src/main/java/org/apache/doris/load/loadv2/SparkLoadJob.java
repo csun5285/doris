@@ -32,6 +32,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FsBroker;
 import org.apache.doris.catalog.MaterializedIndex;
 import org.apache.doris.catalog.MaterializedIndex.IndexExtState;
+import org.apache.doris.catalog.MaterializedIndexMeta;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PrimitiveType;
@@ -57,6 +58,7 @@ import org.apache.doris.common.io.Text;
 import org.apache.doris.common.util.LogBuilder;
 import org.apache.doris.common.util.LogKey;
 import org.apache.doris.common.util.MetaLockUtils;
+import org.apache.doris.common.util.Util;
 import org.apache.doris.load.EtlJobType;
 import org.apache.doris.load.EtlStatus;
 import org.apache.doris.load.FailMsg;
@@ -466,10 +468,13 @@ public class SparkLoadJob extends BulkLoadJob {
                         List<MaterializedIndex> indexes = partition.getMaterializedIndices(IndexExtState.ALL);
                         for (MaterializedIndex index : indexes) {
                             long indexId = index.getId();
-                            int schemaHash = indexToSchemaHash.get(indexId);
+
+                            MaterializedIndexMeta indexMeta = olapTable.getIndexMetaByIndexId(indexId);
+                            int schemaVersion = indexMeta.getSchemaVersion();
+                            int schemaHash = indexMeta.getSchemaHash();
 
                             List<TColumn> columnsDesc = new ArrayList<TColumn>();
-                            for (Column column : olapTable.getSchemaByIndexId(indexId)) {
+                            for (Column column : indexMeta.getSchema(Util.showHiddenColumns())) {
                                 TColumn tColumn = column.toThrift();
                                 tColumn.setColumnName(tColumn.getColumnName().toLowerCase(Locale.ROOT));
                                 columnsDesc.add(tColumn);
@@ -523,7 +528,7 @@ public class SparkLoadJob extends BulkLoadJob {
                                         PushTask pushTask = new PushTask(backendId, dbId, olapTable.getId(),
                                                 partitionId, indexId, tabletId, replicaId, schemaHash, 0, id,
                                                 TPushType.LOAD_V2, TPriority.NORMAL, transactionId, taskSignature,
-                                                tBrokerScanRange, params.tDescriptorTable, columnsDesc);
+                                                tBrokerScanRange, params.tDescriptorTable, columnsDesc, schemaVersion);
                                         if (AgentTaskQueue.addTask(pushTask)) {
                                             batchTask.addTask(pushTask);
                                             if (!tabletToSentReplicaPushTask.containsKey(tabletId)) {

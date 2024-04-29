@@ -273,7 +273,7 @@ Status TabletReader::_init_params(const ReaderParams& read_params) {
     _reader_context.runtime_state = read_params.runtime_state;
 
     RETURN_IF_ERROR(_init_conditions_param(read_params));
-    _init_conditions_param_except_leafnode_of_andnode(read_params);
+    RETURN_IF_ERROR(_init_conditions_param_except_leafnode_of_andnode(read_params));
 
     Status res = _init_delete_condition(read_params);
     if (!res.ok()) {
@@ -474,7 +474,7 @@ Status TabletReader::_init_conditions_param(const ReaderParams& read_params) {
         RETURN_IF_ERROR(_tablet_schema->have_column(tmp_cond.column_name));
         // The "column" parameter might represent a column resulting from the decomposition of a variant column.
         // Instead of using a "unique_id" for identification, we are utilizing a "path" to denote this column.
-        const auto& column = _tablet_schema->column(tmp_cond.column_name);
+        const auto& column = *DORIS_TRY(_tablet_schema->column(tmp_cond.column_name));
         uint32_t index = _tablet_schema->field_index(tmp_cond.column_name);
         ColumnPredicate* predicate =
                 parse_to_predicate(column, index, tmp_cond, _predicate_arena.get());
@@ -546,11 +546,11 @@ Status TabletReader::_init_conditions_param(const ReaderParams& read_params) {
     return Status::OK();
 }
 
-void TabletReader::_init_conditions_param_except_leafnode_of_andnode(
+Status TabletReader::_init_conditions_param_except_leafnode_of_andnode(
         const ReaderParams& read_params) {
     for (const auto& condition : read_params.conditions_except_leafnode_of_andnode) {
         TCondition tmp_cond = condition;
-        const auto& column = _tablet_schema->column(tmp_cond.column_name);
+        const auto& column = *DORIS_TRY(_tablet_schema->column(tmp_cond.column_name));
         uint32_t index = _tablet_schema->field_index(tmp_cond.column_name);
         ColumnPredicate* predicate =
                 parse_to_predicate(column, index, tmp_cond, _predicate_arena.get());
@@ -567,6 +567,8 @@ void TabletReader::_init_conditions_param_except_leafnode_of_andnode(
                 read_params.runtime_state->get_query_ctx()->get_runtime_predicate();
         runtime_predicate.set_tablet_schema(_tablet_schema);
     }
+
+    return Status::OK();
 }
 
 ColumnPredicate* TabletReader::_parse_to_predicate(

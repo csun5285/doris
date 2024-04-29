@@ -58,6 +58,7 @@ import org.apache.doris.common.io.Text;
 import org.apache.doris.common.io.Writable;
 import org.apache.doris.common.util.ListComparator;
 import org.apache.doris.common.util.TimeUtils;
+import org.apache.doris.common.util.Util;
 import org.apache.doris.load.DeleteJob.DeleteState;
 import org.apache.doris.mysql.privilege.PrivPredicate;
 import org.apache.doris.persist.gson.GsonUtils;
@@ -278,13 +279,13 @@ public class DeleteHandler implements Writable {
                 for (Partition partition : partitions) {
                     for (MaterializedIndex index : partition.getMaterializedIndices(IndexExtState.ALL)) {
                         long indexId = index.getId();
-                        int schemaHash = olapTable.getSchemaHashByIndexId(indexId);
-
+                        MaterializedIndexMeta indexMeta = olapTable.getIndexMetaByIndexId(indexId);
+                        int schemaVersion = indexMeta.getSchemaVersion();
                         List<TColumn> columnsDesc = new ArrayList<TColumn>();
-                        // using to update schema of the rowset, so full columns should be included
-                        for (Column column : olapTable.getSchemaByIndexId(indexId, true)) {
+                        for (Column column : indexMeta.getSchema(Util.showHiddenColumns())) {
                             columnsDesc.add(column.toThrift());
                         }
+                        int schemaHash = indexMeta.getSchemaHash();
 
                         for (Tablet tablet : index.getTablets()) {
                             long tabletId = tablet.getId();
@@ -308,7 +309,7 @@ public class DeleteHandler implements Writable {
                                         TTaskType.REALTIME_PUSH,
                                         transactionId,
                                         Env.getCurrentEnv().getNextId(),
-                                        columnsDesc);
+                                        columnsDesc, schemaVersion);
                                 pushTask.setIsSchemaChanging(false);
                                 pushTask.setCountDownLatch(countDownLatch);
 

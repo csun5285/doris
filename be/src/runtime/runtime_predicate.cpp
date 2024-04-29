@@ -159,10 +159,10 @@ Status RuntimePredicate::update(const Field& value, const String& col_name, bool
     if (!_tablet_schema || !_tablet_schema->have_column(col_name)) {
         return Status::OK();
     }
+
     // update _predictate
-    int32_t col_unique_id = _tablet_schema->column(col_name).unique_id();
-    const TabletColumn& column = _tablet_schema->column_by_uid(col_unique_id);
-    uint32_t index = _tablet_schema->field_index(col_unique_id);
+    const auto& column = *DORIS_TRY(_tablet_schema->column(col_name));
+    uint32_t index = _tablet_schema->field_index(column.unique_id());
     auto val = _get_value_fn(_orderby_extrem);
     std::unique_ptr<ColumnPredicate> pred {nullptr};
     if (is_reverse) {

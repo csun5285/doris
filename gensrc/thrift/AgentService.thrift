@@ -252,6 +252,9 @@ struct TPushReq {
     14: optional PlanNodes.TBrokerScanRange broker_scan_range
     15: optional Descriptors.TDescriptorTable desc_tbl
     16: optional list<Descriptors.TColumn> columns_desc
+
+    // Enterprise edition space
+    100: optional i32 schema_version
 }
 
 struct TCloneReq {

@@ -270,10 +270,10 @@ Status DeleteHandler::init(TabletSchemaSPtr tablet_schema,
                 return Status::Error<DELETE_INVALID_PARAMETERS>(
                         "fail to parse condition. condition={}", sub_predicate);
             }
-            int32_t col_unique_id =
-                    delete_pred_related_schema->column(condition.column_name).unique_id();
-            const auto& column = tablet_schema->column_by_uid(col_unique_id);
-            uint32_t index = tablet_schema->field_index(col_unique_id);
+
+            const auto& column =
+                    *DORIS_TRY(delete_pred_related_schema->column(condition.column_name));
+            uint32_t index = tablet_schema->field_index(column.unique_id());
             auto predicate =
                     parse_to_predicate(column, index, condition, _predicate_arena.get(), true);
             if (predicate != nullptr) {
@@ -292,10 +292,10 @@ Status DeleteHandler::init(TabletSchemaSPtr tablet_schema,
             for (const auto& value : in_predicate.values()) {
                 condition.condition_values.push_back(value);
             }
-            int32_t col_unique_id =
-                    delete_pred_related_schema->column(condition.column_name).unique_id();
-            const auto& column = tablet_schema->column_by_uid(col_unique_id);
-            uint32_t index = tablet_schema->field_index(col_unique_id);
+
+            const auto& column =
+                    *DORIS_TRY(delete_pred_related_schema->column(condition.column_name));
+            uint32_t index = tablet_schema->field_index(column.unique_id());
             temp.column_predicate_vec.push_back(
                     parse_to_predicate(column, index, condition, _predicate_arena.get(), true));
         }

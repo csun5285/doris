@@ -622,6 +622,16 @@ using ResultError = unexpected<Status>;
         }                                           \
     } while (false)
 
+#define DORIS_TRY(stmt)                          \
+    ({                                           \
+        auto&& res = (stmt);                     \
+        using T = std::decay_t<decltype(res)>;   \
+        if (!res.has_value()) [[unlikely]] {     \
+            return std::forward<T>(res).error(); \
+        }                                        \
+        std::forward<T>(res).value();            \
+    });
+
 } // namespace doris
 
 // specify formatter for Status
