@@ -93,7 +93,6 @@ class ConfigOptions {
     static Option clusterDirOpt
     static Option kafkaBrokerListOpt
     static Option cloudVersionOpt
-    static Option caseNamePrefixOpt
 
     static CommandLine initCommands(String[] args) {
         helpOption = Option.builder("h")
