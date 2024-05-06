@@ -1101,6 +1101,42 @@ class Suite implements GroovyInterceptable {
     }
 
     void setFeConfig(String key, Object value) {
+        assert key != null
+        assert key != ''
+        for (def cfg : dorisSelectdbDiffCfgNames) {
+            def dorisKey = cfg[0]
+                def selectdbKey = cfg[1]
+                if (key == dorisKey) {
+                    if (!context.config.isDorisEnv) {
+                        key = selectdbKey
+                    }
+                    break
+                }
+
+            if (key == selectdbKey) {
+                if (context.config.isDorisEnv) {
+                    key = dorisKey
+                }
+                break
+            }
+        }
+
+        // TODO: apsaradb_env_enabled will be removed
+        if (key == 'apsaradb_env_enabled') {
+            if (context.config.isDorisEnv) {
+                key = 'security_checker_class_name'
+                    if (value == true || value == 'true') {
+                        value = 'com.aliyun.securitysdk.SecurityUtil'
+                    } else {
+                        value = ''
+                    }
+            }
+        }
+
+        // not support this key
+        if (key == null || key == "") {
+            return
+        }
         sql "ADMIN SET FRONTEND CONFIG ('${key}' = '${value}')"
     }
 
