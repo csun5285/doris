@@ -25,7 +25,7 @@ namespace doris {
 class EngineCalcDeleteBitmapTask;
 class TabletCalcDeleteBitmapTask {
 public:
-    TabletCalcDeleteBitmapTask(EngineCalcDeleteBitmapTask* engine_task, TabletSharedPtr tablet,
+    TabletCalcDeleteBitmapTask(EngineCalcDeleteBitmapTask* engine_task, int64_t tablet_id,
                                int64_t transaction_id, int64_t version);
     ~TabletCalcDeleteBitmapTask() = default;
 
@@ -34,7 +34,7 @@ public:
 private:
     EngineCalcDeleteBitmapTask* _engine_calc_delete_bitmap_task;
 
-    TabletSharedPtr _tablet;
+    int64_t _tablet_id;
     int64_t _transaction_id;
     int64_t _version;
 };

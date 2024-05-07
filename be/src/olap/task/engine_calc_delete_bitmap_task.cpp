@@ -58,43 +58,8 @@ Status EngineCalcDeleteBitmapTask::finish() {
     for (auto& partition : _cal_delete_bitmap_req.partitions) {
         int64_t version = partition.version;
         for (auto tablet_id : partition.tablet_ids) {
-            TabletSharedPtr tablet;
-            cloud::tablet_mgr()->get_tablet(tablet_id, &tablet);
-            if (tablet == nullptr) {
-                LOG(WARNING) << "can't get tablet when calculate delete bitmap. tablet_id="
-                             << tablet_id;
-                _error_tablet_ids->push_back(tablet_id);
-                _res = Status::Error<ErrorCode::PUSH_TABLE_NOT_EXIST>(
-                        "can't get tablet when calculate delete bitmap. tablet_id={}", tablet_id);
-                break;
-            }
-
-            auto st = tablet->cloud_sync_rowsets();
-            if (!st.ok() && !st.is<ErrorCode::INVALID_TABLET_STATE>()) {
-                return st;
-            }
-            if (st.is<ErrorCode::INVALID_TABLET_STATE>()) [[unlikely]] {
-                add_succ_tablet_id(tablet->tablet_id());
-                LOG(INFO)
-                        << "tablet is under alter process, delete bitmap will be calculated later, "
-                           "tablet_id: "
-                        << tablet->tablet_id() << " txn_id: " << transaction_id
-                        << ", request_version=" << version;
-                continue;
-            }
-            int64_t max_version = tablet->max_version().second;
-            if (version != max_version + 1) {
-                _error_tablet_ids->push_back(tablet_id);
-                _res = Status::Error<ErrorCode::DELETE_BITMAP_LOCK_ERROR, false>(
-                        "version not continuous");
-                LOG(WARNING) << "version not continuous, current max version=" << max_version
-                             << ", request_version=" << version
-                             << " tablet_id=" << tablet->tablet_id();
-                break;
-            }
-
             auto tablet_calc_delete_bitmap_ptr = std::make_shared<TabletCalcDeleteBitmapTask>(
-                    this, tablet, transaction_id, version);
+                    this, tablet_id, transaction_id, version);
             auto submit_st = token->submit_func([=]() { tablet_calc_delete_bitmap_ptr->handle(); });
             CHECK(submit_st.ok());
         }
@@ -110,26 +75,65 @@ Status EngineCalcDeleteBitmapTask::finish() {
 }
 
 TabletCalcDeleteBitmapTask::TabletCalcDeleteBitmapTask(EngineCalcDeleteBitmapTask* engine_task,
-                                                       TabletSharedPtr tablet,
-                                                       int64_t transaction_id, int64_t version)
+                                                       int64_t tablet_id, int64_t transaction_id,
+                                                       int64_t version)
         : _engine_calc_delete_bitmap_task(engine_task),
-          _tablet(tablet),
+          _tablet_id(tablet_id),
           _transaction_id(transaction_id),
           _version(version) {}
 
 void TabletCalcDeleteBitmapTask::handle() {
+    TabletSharedPtr tablet;
+    cloud::tablet_mgr()->get_tablet(_tablet_id, &tablet);
+    if (tablet == nullptr) {
+        LOG(WARNING) << "can't get tablet when calculate delete bitmap. tablet_id=" << _tablet_id;
+        auto error_st = Status::Error<ErrorCode::PUSH_TABLE_NOT_EXIST>(
+                "can't get tablet when calculate delete bitmap. tablet_id={}", _tablet_id);
+        _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet_id, error_st);
+        return;
+    }
+    int64_t max_version = tablet->max_version().second;
+    // version is continuous when retry calculating delete bitmap
+    // or calculating bitmap after compaction, so check continuity first to avoid unnecessary sync
+    if (_version != max_version + 1) {
+        auto sync_st = tablet->cloud_sync_rowsets();
+        if (sync_st.is<ErrorCode::INVALID_TABLET_STATE>()) [[unlikely]] {
+            _engine_calc_delete_bitmap_task->add_succ_tablet_id(_tablet_id);
+            LOG(INFO) << "tablet is under alter process, delete bitmap will be calculated "
+                         "later, "
+                         "tablet_id: "
+                      << _tablet_id << " txn_id: " << _transaction_id
+                      << ", request_version=" << _version;
+            return;
+        }
+        if (!sync_st.ok()) {
+            LOG(WARNING) << "failed to sync rowsets. tablet_id=" << _tablet_id
+                         << ", txn_id=" << _transaction_id << ", status=" << sync_st;
+            _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet_id, sync_st);
+            return;
+        }
+    }
+    max_version = tablet->max_version().second;
+    if (_version != max_version + 1) {
+        LOG(WARNING) << "version not continuous, current max version=" << max_version
+                     << ", request_version=" << _version << " tablet_id=" << _tablet_id;
+        auto error_st =
+                Status::Error<ErrorCode::DELETE_BITMAP_LOCK_ERROR, false>("version not continuous");
+        _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet_id, error_st);
+        return;
+    }
     RowsetSharedPtr rowset;
     DeleteBitmapPtr delete_bitmap;
     RowsetIdUnorderedSet rowset_ids;
     std::shared_ptr<PartialUpdateInfo> partial_update_info;
     int64_t txn_expiration;
     Status status = StorageEngine::instance()->delete_bitmap_txn_manager()->get_tablet_txn_info(
-            _transaction_id, _tablet->tablet_id(), &rowset, &delete_bitmap, &rowset_ids,
-            &txn_expiration, &partial_update_info);
+            _transaction_id, _tablet_id, &rowset, &delete_bitmap, &rowset_ids, &txn_expiration,
+            &partial_update_info);
     if (status != Status::OK()) {
-        LOG(WARNING) << "failed to get tablet txn info. tablet_id=" << _tablet->tablet_id()
+        LOG(WARNING) << "failed to get tablet txn info. tablet_id=" << _tablet_id
                      << ", txn_id=" << _transaction_id << ", status=" << status;
-        _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
+        _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet_id, status);
         return;
     }
 
@@ -139,19 +143,19 @@ void TabletCalcDeleteBitmapTask::handle() {
     txn_info.delete_bitmap = delete_bitmap;
     txn_info.rowset_ids = rowset_ids;
     txn_info.partial_update_info = partial_update_info;
-    status = _tablet->update_delete_bitmap(&txn_info, _transaction_id, txn_expiration);
+    status = tablet->update_delete_bitmap(&txn_info, _transaction_id, txn_expiration);
 
     if (status != Status::OK()) {
         LOG(WARNING) << "failed to calculate delete bitmap. rowset_id=" << rowset->rowset_id()
-                     << ", tablet_id=" << _tablet->tablet_id() << ", txn_id=" << _transaction_id
+                     << ", tablet_id=" << _tablet_id << ", txn_id=" << _transaction_id
                      << ", status=" << status;
-        _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet->tablet_id(), status);
+        _engine_calc_delete_bitmap_task->add_error_tablet_id(_tablet_id, status);
         return;
     }
 
-    _engine_calc_delete_bitmap_task->add_succ_tablet_id(_tablet->tablet_id());
+    _engine_calc_delete_bitmap_task->add_succ_tablet_id(_tablet_id);
     LOG(INFO) << "calculate delete bitmap successfully on tablet"
-              << ", table_id=" << _tablet->table_id() << ", tablet=" << _tablet->full_name()
+              << ", table_id=" << _tablet_id << ", tablet=" << tablet->full_name()
               << ", transaction_id=" << _transaction_id << ", num_rows=" << rowset->num_rows()
               << ", res=" << status;
 }
