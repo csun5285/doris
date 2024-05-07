@@ -90,6 +90,7 @@ if (CLOUD_MODE)
         ${CMAKE_CURRENT_SOURCE_DIR}/olap/tablet_mgr_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/util/doris_metrics_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/olap/rowset/unique_rowset_id_generator_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/olap/single_compaction_test.cpp
     )
 else()
     list(REMOVE_ITEM UT_FILES

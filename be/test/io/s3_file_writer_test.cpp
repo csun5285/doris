@@ -900,7 +900,11 @@ TEST_F(S3FileWriterTest, close_error) {
     io::FileWriterPtr s3_file_writer;
     st = s3_fs->create_file("close_error", &s3_file_writer, &state);
     ASSERT_TRUE(st.ok()) << st;
-    Defer defer {[&]() { sp->clear_call_back("s3_file_writer::close"); }};
+    Defer defer {[&]() {
+        sp->clear_call_back("s3_file_writer::close");
+        static_cast<void>(s3_file_writer->close());
+    }};
+
     st = s3_file_writer->close();
     ASSERT_FALSE(st.ok()) << st;
     bool exists = false;
