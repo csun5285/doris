@@ -476,6 +476,9 @@ public class SessionVariable implements Serializable, Writable {
     );
 
     public static final String ENABLE_STATS = "enable_stats";
+
+    public static final String ENABLE_INVERTED_INDEX_COMPOUND_INLIST = "enable_inverted_index_compound_inlist";
+
     /**
      * If set false, user couldn't submit analyze SQL and FE won't allocate any related resources.
      */
@@ -1398,6 +1401,11 @@ public class SessionVariable implements Serializable, Writable {
             description = {"when it's true show processlist statement list all fe's connection",
                     "当变量为true时，show processlist命令展示所有fe的连接"})
     public boolean showAllFeConnection = false;
+
+    @VariableMgr.VarAttr(name = ENABLE_INVERTED_INDEX_COMPOUND_INLIST,
+            description = {"让compound inlist条件可以使用倒排索引",
+                    "Let the compound inlist condition use an inverted index"})
+    public boolean enableInvertedIndexCompoundInlist = false;
 
     public Set<Integer> getIgnoredRuntimeFilterIds() {
         return Arrays.stream(ignoreRuntimeFilterIds.split(",[\\s]*"))
@@ -2660,6 +2668,8 @@ public class SessionVariable implements Serializable, Writable {
         tResult.setFasterFloatConvert(fasterFloatConvert);
 
         tResult.setInvertedIndexSkipThreshold(invertedIndexSkipThreshold);
+
+        tResult.setEnableInvertedIndexCompoundInlist(enableInvertedIndexCompoundInlist);
 
         return tResult;
     }

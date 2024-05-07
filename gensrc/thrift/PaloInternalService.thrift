@@ -256,6 +256,8 @@ struct TQueryOptions {
 
   89: optional i32 inverted_index_skip_threshold = 50;
 
+  90: optional bool enable_inverted_index_compound_inlist = false;
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }
