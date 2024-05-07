@@ -123,6 +123,7 @@ import org.apache.doris.common.Pair;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.io.CountingDataOutputStream;
 import org.apache.doris.common.util.DbUtil;
+import org.apache.doris.common.util.DebugPointUtil;
 import org.apache.doris.common.util.DynamicPartitionUtil;
 import org.apache.doris.common.util.IdGeneratorUtil;
 import org.apache.doris.common.util.MetaLockUtils;
@@ -975,7 +976,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         return true;
     }
 
-    public void replayDropTable(Database db, long tableId, boolean isForceDrop,
+    public void dropTable(Database db, long tableId, boolean isForceDrop,
                                 Long recycleTime) throws MetaNotFoundException {
         Table table = db.getTableOrMetaException(tableId);
         db.writeLock();
@@ -988,6 +989,11 @@ public class InternalCatalog implements CatalogIf<Database> {
             table.writeUnlock();
             db.writeUnlock();
         }
+    }
+
+    public void replayDropTable(Database db, long tableId, boolean isForceDrop,
+                                Long recycleTime) throws MetaNotFoundException {
+        dropTable(db, tableId, isForceDrop, recycleTime);
     }
 
     public void replayEraseTable(long tableId) {
@@ -1458,7 +1464,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             } finally {
                 table.readUnlock();
             }
-            addPartition(db, tableName, clause);
+            addPartition(db, tableName, clause, false, 0, true);
 
         } catch (UserException e) {
             throw new DdlException("Failed to ADD PARTITION " + addPartitionLikeClause.getPartitionName()
@@ -1466,7 +1472,27 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void addPartition(Database db, String tableName, AddPartitionClause addPartitionClause) throws DdlException {
+    public static long checkAndGetBufferSize(long indexNum, long bucketNum,
+                                             long replicaNum, Database db, String tableName) throws DdlException {
+        long totalReplicaNum = indexNum * bucketNum * replicaNum;
+        if (totalReplicaNum >= db.getReplicaQuotaLeftWithLock()) {
+            throw new DdlException("Database " + db.getFullName() + " table " + tableName + " add partition increasing "
+                + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
+        }
+        return 1 + totalReplicaNum + indexNum * bucketNum;
+    }
+
+    public PartitionPersistInfo addPartition(Database db, String tableName,
+                             AddPartitionClause addPartitionClause,
+                             boolean isCreateTable, long generatedPartitionId,
+                             boolean writeEditLog) throws DdlException {
+        // isCreateTable == true, create dynamic partition use, so partitionId must have been generated.
+        // isCreateTable == false, other case, partitionId generate in below, must be set 0
+        if (!FeConstants.runningUnitTest
+                && (isCreateTable && generatedPartitionId == 0) || (!isCreateTable && generatedPartitionId != 0)) {
+            throw new DdlException("not impossible");
+        }
+
         SinglePartitionDesc singlePartitionDesc = addPartitionClause.getSingeRangePartitionDesc();
         DistributionDesc distributionDesc = addPartitionClause.getDistributionDesc();
         boolean isTempPartition = addPartitionClause.isTempPartition();
@@ -1492,7 +1518,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             if (olapTable.checkPartitionNameExist(partitionName)) {
                 if (singlePartitionDesc.isSetIfNotExists()) {
                     LOG.info("add partition[{}] which already exists", partitionName);
-                    return;
+                    return null;
                 } else {
                     ErrorReport.reportDdlException(ErrorCode.ERR_SAME_NAME_PARTITION, partitionName);
                 }
@@ -1640,23 +1666,18 @@ public class InternalCatalog implements CatalogIf<Database> {
         DataProperty dataProperty = singlePartitionDesc.getPartitionDataProperty();
         Preconditions.checkNotNull(dataProperty);
         // check replica quota if this operation done
-        long indexNum = indexIdToMeta.size();
-        long bucketNum = distributionInfo.getBucketNum();
-        long replicaNum = singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum();
-        long totalReplicaNum = indexNum * bucketNum * replicaNum;
-        if (totalReplicaNum >= db.getReplicaQuotaLeftWithLock()) {
-            throw new DdlException("Database " + db.getFullName() + " table " + tableName + " add partition increasing "
-                + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
-        }
-        Set<Long> tabletIdSet = new HashSet<>();
-        long bufferSize = 1 + totalReplicaNum + indexNum * bucketNum;
+        long bufferSize = checkAndGetBufferSize(indexIdToMeta.size(), distributionInfo.getBucketNum(),
+                singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum(), db, tableName);
         IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
+
+        Set<Long> tabletIdSet = new HashSet<>();
         String storagePolicy = olapTable.getStoragePolicy();
         if (!Strings.isNullOrEmpty(dataProperty.getStoragePolicy())) {
             storagePolicy = dataProperty.getStoragePolicy();
         }
         try {
-            long partitionId = idGeneratorBuffer.getNextId();
+            long partitionId = !FeConstants.runningUnitTest && isCreateTable
+                    ? generatedPartitionId : idGeneratorBuffer.getNextId();
             Partition partition;
             if (Config.isNotCloudMode()) {
                 partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
@@ -1678,8 +1699,10 @@ public class InternalCatalog implements CatalogIf<Database> {
             } else {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
-                List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
+                List<Long> indexIds = new ArrayList<>(indexIdToMeta.keySet());
+                if (!isCreateTable) {
+                    prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
+                }
                 partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -1694,6 +1717,9 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                     olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
                     olapTable.getTimeSeriesCompactionLevelThreshold());
+                if (!isCreateTable) {
+                    commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
+                }
             }
 
             // check again
@@ -1705,7 +1731,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 if (olapTable.checkPartitionNameExist(partitionName)) {
                     if (singlePartitionDesc.isSetIfNotExists()) {
                         LOG.info("add partition[{}] which already exists", partitionName);
-                        return;
+                        return null;
                     } else {
                         ErrorReport.reportDdlException(ErrorCode.ERR_SAME_NAME_PARTITION, partitionName);
                     }
@@ -1797,9 +1823,13 @@ public class InternalCatalog implements CatalogIf<Database> {
                     commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
                 }
 
-                Env.getCurrentEnv().getEditLog().logAddPartition(info);
-
-                LOG.info("succeed in creating partition[{}], temp: {}", partitionId, isTempPartition);
+                if (writeEditLog) {
+                    Env.getCurrentEnv().getEditLog().logAddPartition(info);
+                    LOG.info("succeed in creating partition[{}], temp: {}", partitionId, isTempPartition);
+                } else {
+                    LOG.info("postpone creating partition[{}], temp: {}", partitionId, isTempPartition);
+                }
+                return info;
             } finally {
                 olapTable.writeUnlock();
             }
@@ -2806,6 +2836,11 @@ public class InternalCatalog implements CatalogIf<Database> {
             }
 
             Pair<Boolean, Boolean> result = db.createTableWithLock(olapTable, false, stmt.isSetIfNotExists());
+            if (DebugPointUtil.isEnable("FE.createOlapTable.exception")) {
+                LOG.info("debug point FE.createOlapTable.exception, throw e");
+                // not commit, not log edit
+                throw new DdlException("debug point FE.createOlapTable.exception");
+            }
             if (!result.first) {
                 ErrorReport.reportDdlException(ErrorCode.ERR_TABLE_EXISTS_ERROR, tableName);
             }
@@ -2840,12 +2875,18 @@ public class InternalCatalog implements CatalogIf<Database> {
                         TimeUtils.getCurrentFormatTime());
             }
         } catch (DdlException e) {
+            LOG.warn("create table failed {} - {}", tabletIdSet, e.getMessage());
             for (Long tabletId : tabletIdSet) {
                 Env.getCurrentInvertedIndex().deleteTablet(tabletId);
             }
             // only remove from memory, because we have not persist it
             if (Env.getCurrentColocateIndex().isColocateTable(tableId)) {
                 Env.getCurrentColocateIndex().removeTable(tableId);
+            }
+            try {
+                dropTable(db, tableId, true, 0L);
+            } catch (Exception ex) {
+                LOG.warn("drop table", ex);
             }
 
             throw e;
@@ -3900,7 +3941,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    private void sleepSeveralMs() {
+    private static void sleepSeveralMs() {
         // sleep random millis [20, 200] ms, avoid txn conflict
         int randomMillis = 20 + (int) (Math.random() * (200 - 20));
         LOG.debug("randomMillis:{}", randomMillis);
@@ -4011,7 +4052,7 @@ public class InternalCatalog implements CatalogIf<Database> {
     }
 
     // if `expiration` = 0, recycler will delete uncommitted partitions in `retention_seconds`
-    public void prepareCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds,
+    public static void prepareCloudPartition(long dbId, long tableId, List<Long> partitionIds, List<Long> indexIds,
                                       long expiration) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
@@ -4048,7 +4089,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public void commitCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds) throws DdlException {
+    public static void commitCloudPartition(long tableId,
+                                            List<Long> partitionIds, List<Long> indexIds) throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
