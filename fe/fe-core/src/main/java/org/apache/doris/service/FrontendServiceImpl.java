@@ -2057,39 +2057,12 @@ public class FrontendServiceImpl implements FrontendService.Iface {
         List<String> tableNames = request.getTableNames();
 
         if (Config.isCloudMode()) {
-            try {
-                ConnectContext ctx = new ConnectContext();
-                ctx.setThreadLocalInfo();
-                ctx.setQualifiedUser(request.getUser());
-                ctx.setRemoteIP(request.getUserIp());
-                String fullUserName = ClusterNamespace
-                                        .getFullName(SystemInfoService.DEFAULT_CLUSTER, request.getUser());
-                if (fullUserName != null) {
-                    List<UserIdentity> currentUser = Lists.newArrayList();
-                    try {
-                        Env.getCurrentEnv().getAuth().checkPlainPassword(fullUserName,
-                                request.getUserIp(), request.getPasswd(), currentUser);
-                    } catch (AuthenticationException e) {
-                        throw new UserException(e.formatErrMsg());
-                    }
-                    Preconditions.checkState(currentUser.size() == 1);
-                    ctx.setCurrentUserIdentity(currentUser.get(0));
-                }
-                LOG.info("one stream multi table load use cloud cluster {}", request.getCloudCluster());
-                if (Strings.isNullOrEmpty(request.getCloudCluster())) {
-                    ctx.setCloudCluster();
-                } else {
-                    if (Strings.isNullOrEmpty(request.getUser())) {
-                        ctx.setCloudCluster(request.getCloudCluster());
-                    } else {
-                        Env.getCurrentEnv().changeCloudCluster(request.getCloudCluster(), ctx);
-                    }
-                }
-            } catch (UserException e) {
-                LOG.warn("failed to set ConnectContext info: {}", e.getMessage());
-                status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
-                status.addToErrorMsgs(e.getMessage());
-            }
+            ConnectContext ctx = new ConnectContext();
+            ctx.setThreadLocalInfo();
+            ctx.setQualifiedUser(request.getUser());
+            ctx.setRemoteIP(request.getUserIp());
+            ctx.setCloudCluster(request.getCloudCluster());
+            LOG.info("one stream multi table load use cloud cluster {}", request.getCloudCluster());
         }
 
         try {
