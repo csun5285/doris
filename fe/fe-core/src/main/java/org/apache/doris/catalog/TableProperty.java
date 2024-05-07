@@ -27,6 +27,7 @@ import org.apache.doris.persist.OperationType;
 import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.thrift.TCompressionType;
 import org.apache.doris.thrift.TStorageFormat;
+import org.apache.doris.thrift.TStorageMedium;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Maps;
@@ -65,6 +66,8 @@ public class TableProperty implements Writable {
     private Boolean isBeingSynced = null;
     private BinlogConfig binlogConfig;
     private boolean isDynamicSchema = false;
+
+    private TStorageMedium storageMedium = null;
 
     /*
      * the default storage format of this table.
@@ -130,6 +133,7 @@ public class TableProperty implements Writable {
                 break;
             case OperationType.OP_MODIFY_TABLE_PROPERTIES:
                 buildInMemory();
+                buildStorageMedium();
                 buildStoragePolicy();
                 buildIsBeingSynced();
                 buildCompactionPolicy();
@@ -322,6 +326,20 @@ public class TableProperty implements Writable {
 
     public long timeSeriesCompactionLevelThreshold() {
         return timeSeriesCompactionLevelThreshold;
+    }
+
+    public TableProperty buildStorageMedium() {
+        String storageMediumStr = properties.get(PropertyAnalyzer.PROPERTIES_STORAGE_MEDIUM);
+        if (Strings.isNullOrEmpty(storageMediumStr)) {
+            storageMedium = null;
+        } else {
+            storageMedium = TStorageMedium.valueOf(storageMediumStr);
+        }
+        return this;
+    }
+
+    public TStorageMedium getStorageMedium() {
+        return storageMedium;
     }
 
     public TableProperty buildStoragePolicy() {
@@ -571,6 +589,7 @@ public class TableProperty implements Writable {
                 .executeBuildDynamicProperty()
                 .buildInMemory()
                 .buildDynamicSchema()
+                .buildStorageMedium()
                 .buildStorageFormat()
                 .buildDataSortInfo()
                 .buildCompressionType()

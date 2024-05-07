@@ -50,6 +50,7 @@ realDataPath = "${DORIS_HOME}/regression-test/realdata"
 
 // docker image
 image = ""
+dockerCoverageOutputDir = "" // if not empty, will save docker coverage output files
 dockerEndDeleteFiles = false
 dorisComposePath = "${DORIS_HOME}/docker/runtime/doris-compose/doris-compose.py"
 // do run docker test because pipeline not support build image now

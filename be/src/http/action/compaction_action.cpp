@@ -42,6 +42,7 @@
 #include "olap/full_compaction.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
+#include "olap/single_replica_compaction.h"
 #include "olap/tablet_manager.h"
 #include "util/doris_metrics.h"
 #include "util/stopwatch.hpp"
@@ -243,6 +244,80 @@ Status CompactionAction::_handle_run_status_compaction(HttpRequest* req, std::st
         return Status::OK();
     }
 }
+
+#ifndef CLOUD_MODE
+Status CompactionAction::_execute_compaction_callback(TabletSharedPtr tablet,
+                                                      const std::string& compaction_type,
+                                                      bool fetch_from_remote) {
+    MonotonicStopWatch timer;
+    timer.start();
+
+    std::shared_ptr<CumulativeCompactionPolicy> cumulative_compaction_policy =
+            CumulativeCompactionPolicyFactory::create_cumulative_compaction_policy(
+                    tablet->tablet_meta()->compaction_policy());
+    if (tablet->get_cumulative_compaction_policy() == nullptr) {
+        tablet->set_cumulative_compaction_policy(cumulative_compaction_policy);
+    }
+    Status res = Status::OK();
+    if (compaction_type == PARAM_COMPACTION_BASE) {
+        BaseCompaction base_compaction(tablet);
+        res = base_compaction.compact();
+        if (!res) {
+            if (res.is<BE_NO_SUITABLE_VERSION>()) {
+                // Ignore this error code.
+                VLOG_NOTICE << "failed to init base compaction due to no suitable version, tablet="
+                            << tablet->full_name();
+            } else {
+                DorisMetrics::instance()->base_compaction_request_failed->increment(1);
+                LOG(WARNING) << "failed to init base compaction. res=" << res
+                             << ", tablet=" << tablet->full_name();
+            }
+        }
+    } else if (compaction_type == PARAM_COMPACTION_CUMULATIVE) {
+        if (fetch_from_remote) {
+            SingleReplicaCompaction single_compaction(tablet,
+                                                      CompactionType::CUMULATIVE_COMPACTION);
+            res = single_compaction.compact();
+            if (!res) {
+                LOG(WARNING) << "failed to do single compaction. res=" << res
+                             << ", table=" << tablet->tablet_id();
+            }
+        } else {
+            CumulativeCompaction cumulative_compaction(tablet);
+            res = cumulative_compaction.compact();
+            if (!res) {
+                if (res.is<CUMULATIVE_NO_SUITABLE_VERSION>()) {
+                    // Ignore this error code.
+                    VLOG_NOTICE
+                            << "failed to init cumulative compaction due to no suitable version,"
+                            << "tablet=" << tablet->tablet_id();
+                } else {
+                    DorisMetrics::instance()->cumulative_compaction_request_failed->increment(1);
+                    LOG(WARNING) << "failed to do cumulative compaction. res=" << res
+                                 << ", table=" << tablet->tablet_id();
+                }
+            }
+        }
+    } else if (compaction_type == PARAM_COMPACTION_FULL) {
+        FullCompaction full_compaction(tablet);
+        res = full_compaction.compact();
+        if (!res) {
+            if (res.is<FULL_NO_SUITABLE_VERSION>()) {
+                // Ignore this error code.
+                VLOG_NOTICE << "failed to init full compaction due to no suitable version,"
+                            << "tablet=" << tablet->full_name();
+            } else {
+                LOG(WARNING) << "failed to do full compaction. res=" << res
+                             << ", table=" << tablet->full_name();
+            }
+        }
+    }
+    timer.stop();
+    LOG(INFO) << "Manual compaction task finish, status=" << res
+              << ", compaction_use_time=" << timer.elapsed_time() / 1000000 << "ms";
+    return res;
+}
+#endif
 
 void CompactionAction::handle(HttpRequest* req) {
     req->add_output_header(HttpHeaders::CONTENT_TYPE, HEADER_JSON.c_str());

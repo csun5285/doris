@@ -285,6 +285,8 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
         transient_size += 1;
         input_rowsets->push_back(rowset);
     }
+    DBUG_EXECUTE_IF("SizeBaseCumulativeCompactionPolicy.pick_input_rowsets.return_input_rowsets",
+                    { return transient_size; })
 
     // if there is delete version, do compaction directly
     if (last_delete_version->first != -1) {

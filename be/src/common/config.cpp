@@ -448,8 +448,8 @@ DEFINE_mInt32(finished_migration_tasks_size, "10000");
 // If size less than this, the remaining rowsets will be force to complete
 DEFINE_mInt32(migration_remaining_size_threshold_mb, "10");
 // If the task runs longer than this time, the task will be terminated, in seconds.
-// tablet max size / migration min speed * factor = 10GB / 1MBps * 2 = 20480 seconds
-DEFINE_mInt32(migration_task_timeout_secs, "20480");
+// timeout = std::max(migration_task_timeout_secs,  tablet size / 1MB/s)
+DEFINE_mInt32(migration_task_timeout_secs, "300");
 
 // Port to start debug webserver on
 DEFINE_Int32(webserver_port, "8040");
@@ -1326,6 +1326,12 @@ DEFINE_mString(ca_cert_file_paths,
 // Number of open tries, default 1 means only try to open once.
 // Retry the Open num_retries time waiting 100 milliseconds between retries.
 DEFINE_mInt32(thrift_client_open_num_tries, "1");
+
+// consider two high usage disk at the same available level if they do not exceed this diff.
+DEFINE_mDouble(high_disk_avail_level_diff_usages, "0.15");
+
+// create tablet in partition random robin idx lru size, default 10000
+DEFINE_Int32(partition_disk_index_lru_size, "10000");
 
 // clang-format off
 #ifdef BE_TEST

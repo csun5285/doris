@@ -1184,6 +1184,7 @@ public class PropertyAnalyzer {
         allocationVal = allocationVal.replaceAll(" ", "");
         String[] locations = allocationVal.split(",");
         int totalReplicaNum = 0;
+        Map<Tag, Integer> nextIndexs = Maps.newHashMap();
         for (String location : locations) {
             String[] parts = location.split(":");
             if (parts.length != 2) {
@@ -1207,7 +1208,7 @@ public class PropertyAnalyzer {
                 try {
                     SystemInfoService systemInfoService = Env.getCurrentSystemInfo();
                     systemInfoService.selectBackendIdsForReplicaCreation(
-                            replicaAlloc, null, false, true);
+                            replicaAlloc, nextIndexs, null, false, true);
                 } catch (DdlException ddlException) {
                     throw new AnalysisException(ddlException.getMessage());
                 }
