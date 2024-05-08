@@ -229,6 +229,7 @@ Status CloudSchemaChange::_convert_historical_rowsets(const SchemaChangeParams& 
         context.tablet_schema = new_tablet->tablet_schema();
         context.newest_write_timestamp = rs_reader->newest_write_timestamp();
         context.fs = cloud::latest_fs();
+        context.write_type = DataWriteType::TYPE_SCHEMA_CHANGE;
         RETURN_IF_ERROR(new_tablet->create_rowset_writer(context, &rowset_writer));
 
         RowsetMetaSharedPtr existed_rs_meta;

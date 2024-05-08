@@ -212,5 +212,49 @@ suite("test_schema_change_unique_mow", "p0") {
         assertEquals("4", row[3]);
         assertEquals("5", row[4]);
     }
+
+    def tableName4 = "test_all_unique_mow_row_store"
+
+    sql """ DROP TABLE IF EXISTS ${tableName4} """
+
+    sql """
+    CREATE TABLE IF NOT EXISTS ${tableName4} (
+      `plan_id` bigint(20) NOT NULL,
+      `target_id` int(20) NOT NULL,
+      `target_name` varchar(255) NULL
+    ) ENGINE=OLAP
+    unique KEY(`plan_id`)
+    DISTRIBUTED BY HASH(`plan_id`) BUCKETS 1
+    PROPERTIES (
+        "replication_allocation" = "tag.location.default: 1",
+        "enable_unique_key_merge_on_write" = "true",
+        "store_row_column" = "true"
+    );
+    """
+
+    sql """ insert into ${tableName4} values(111,111,'111'); """
+
+    qt_select_1 """ select * from ${tableName4}; """
+
+    sql """ alter table ${tableName4} MODIFY COLUMN target_id BIGINT AFTER target_name; """
+    sleep(5)
+    max_try_num = 60
+        while (max_try_num--) {
+        String res = getJobState(tableName4)
+        if (res == "FINISHED" || res == "CANCELLED") {
+            assertEquals("FINISHED", res)
+            break
+        } else {
+            if (max_try_num < 1) {
+                println "test timeout," + "state:" + res
+                assertEquals("FINISHED",res)
+            }
+            sleep(3000)
+        }
+    }
+
+    sql """ update ${tableName4} set target_name ="test" where plan_id=111; """
+
+    qt_select_2 """ select * from ${tableName4}; """
 }
 
