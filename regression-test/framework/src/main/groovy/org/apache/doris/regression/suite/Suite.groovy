@@ -91,9 +91,6 @@ class Suite implements GroovyInterceptable {
         ['enable_cloud_warm_up_for_rebalance', 'preheating_enabled'],
     ]
 
-    SuiteCluster cluster
-    DebugPoint debugPoint
-
     Suite(String name, String group, SuiteContext context, SuiteCluster cluster) {
         this.name = name
         this.group = group
