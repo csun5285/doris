@@ -124,12 +124,6 @@ DeltaWriter::~DeltaWriter() {
     if (_flush_token != nullptr) {
         // cancel and wait all memtables in flush queue to be finished
         _flush_token->cancel();
-
-        if (_tablet != nullptr) {
-            const FlushStatistic& stat = _flush_token->get_stats();
-            _tablet->flush_bytes->increment(stat.flush_size_bytes);
-            _tablet->flush_finish_count->increment(stat.flush_finish_count);
-        }
     }
 
     if (_calc_delete_bitmap_token != nullptr) {

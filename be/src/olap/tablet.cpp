@@ -166,9 +166,6 @@ bvar::Adder<uint64_t> g_tablet_pk_not_found("doris_pk", "lookup_not_found");
 bvar::PerSecond<bvar::Adder<uint64_t>> g_tablet_pk_not_found_per_second(
         "doris_pk", "lookup_not_found_per_second", &g_tablet_pk_not_found, 60);
 
-DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_bytes, MetricUnit::BYTES);
-DEFINE_COUNTER_METRIC_PROTOTYPE_2ARG(flush_finish_count, MetricUnit::OPERATIONS);
-
 bvar::Adder<uint64_t> exceed_version_limit_counter;
 bvar::Window<bvar::Adder<uint64_t>> exceed_version_limit_counter_minute(
         &exceed_version_limit_counter, 60);
@@ -326,9 +323,6 @@ Tablet::Tablet(TabletMetaSharedPtr tablet_meta, DataDir* data_dir,
                 rowset_meta_with_max_schema_version(_tablet_meta->all_rs_metas())->tablet_schema();
     }
     DCHECK(_max_version_schema);
-
-    INT_COUNTER_METRIC_REGISTER(_metric_entity, flush_bytes);
-    INT_COUNTER_METRIC_REGISTER(_metric_entity, flush_finish_count);
 }
 
 Status Tablet::_init_once_action() {
