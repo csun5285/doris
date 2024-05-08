@@ -5661,24 +5661,27 @@ public class Env {
             return;
         }
 
-        // ATTN: prevent `Automatic Analyzer` daemon threads from pulling up clusters
-        // root ? see StatisticsUtil.buildConnectContext
-        // TODO(dx): it's trick, fix it
-        if (ConnectContext.get() != null && ConnectContext.get().getUserIdentity().isRootUser()) {
-            LOG.warn("auto start daemon thread run in root, not resume cluster");
-            return;
-        }
-
         String clusterStatus = Env.getCurrentSystemInfo().getCloudStatusByName(clusterName);
         if (Strings.isNullOrEmpty(clusterStatus)) {
             // for cluster rename or cluster dropped
             LOG.warn("cant find clusterStatus in fe, clusterName {}", clusterName);
             return;
         }
+
+        if (ClusterStatus.valueOf(clusterStatus) == ClusterStatus.MANUAL_SHUTDOWN) {
+            LOG.warn("auto start cluster {} in manual shutdown status", clusterName);
+            throw new DdlException("cluster " + clusterName + " is in manual shutdown");
+        }
         // nofity ms -> wait for clusterStatus to normal
-        LOG.debug("auto start wait cluster {} status {}-{}", clusterName, clusterStatus,
-                ClusterStatus.valueOf(clusterStatus));
+        LOG.debug("auto start wait cluster {} status {}", clusterName, clusterStatus);
+
         if (ClusterStatus.valueOf(clusterStatus) != ClusterStatus.NORMAL) {
+            // ATTN: prevent `Automatic Analyzer` daemon threads from pulling up clusters
+            // root ? see StatisticsUtil.buildConnectContext
+            if (ConnectContext.get() != null && ConnectContext.get().getUserIdentity().isRootUser()) {
+                LOG.warn("auto start daemon thread run in root, not resume cluster {}-{}", clusterName, clusterStatus);
+                return;
+            }
             SelectdbCloud.AlterClusterRequest.Builder builder = SelectdbCloud.AlterClusterRequest.newBuilder();
             builder.setCloudUniqueId(Config.cloud_unique_id);
             builder.setOp(Operation.SET_CLUSTER_STATUS);
@@ -5700,8 +5703,8 @@ public class Env {
                 throw new DdlException("notify to resume cluster not ok");
             }
         }
-        // wait 15 mins?
-        int retryTimes = 15 * 60;
+        // wait 5 mins
+        int retryTimes = 5 * 60;
         int retryTime = 0;
         StopWatch stopWatch = new StopWatch();
         stopWatch.start();

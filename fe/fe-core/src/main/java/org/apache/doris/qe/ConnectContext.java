@@ -66,6 +66,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.selectdb.cloud.proto.SelectdbCloud;
 import io.opentelemetry.api.trace.Tracer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -952,6 +953,25 @@ public class ConnectContext {
                 + ", comment=" + comment
                 + '}';
         }
+    }
+
+    public static String cloudNoBackendsReason() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(" ");
+        if (ConnectContext.get() != null) {
+            String clusterName = ConnectContext.get().getCloudCluster();
+            String clusterStatus = Env.getCurrentSystemInfo().getCloudStatusByName(clusterName);
+            if (!Strings.isNullOrEmpty(clusterStatus)
+                    && SelectdbCloud.ClusterStatus.valueOf(clusterStatus)
+                        == SelectdbCloud.ClusterStatus.MANUAL_SHUTDOWN) {
+                LOG.warn("auto start cluster {} in manual shutdown status", clusterName);
+                sb.append("cluster ").append(clusterName)
+                    .append(" is shutdown manually, please start it first");
+            } else {
+                sb.append("or you may not have permission to access the current cluster = ").append(clusterName);
+            }
+        }
+        return sb.toString();
     }
 
     // can't get cluster from context, use the following strategy to obtain the cluster name

@@ -143,7 +143,7 @@ public class CloudReplica extends Replica {
             Env.waitForAutoStart(cluster);
         } catch (DdlException e) {
             // this function cant throw exception. so just log it
-            LOG.warn("cant resume cluster {}", cluster);
+            LOG.warn("cant resume cluster {}, exception", cluster, e);
         }
         String clusterId = Env.getCurrentSystemInfo().getCloudClusterIdByName(cluster);
 

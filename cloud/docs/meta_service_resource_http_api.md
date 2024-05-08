@@ -1888,6 +1888,8 @@ curl '127.0.0.1:5008/MetaService/http/set_cluster_status?token=greedisgood9999' 
 2. ClusterStatus::NORMAL -> ClusterStatus::SUSPENDED （云管暂停cluster时候设置）
 3. ClusterStatus::SUSPENDED -> ClusterStatus::TO_RESUME （fe唤起cluster时候设置）
 4. ClusterStatus::TO_RESUME -> ClusterStatus::NORMAL （云管将cluster状态拉起后设置）
+5. ClusterStatus::NORMAL -> ClusterStatus::MANUAL_SHUTDOWN （用户手动关闭cluster，云管设置这个状态到meta service，MANUAL_SHUTDOWN状态下，fe将直接忽略自动启停逻辑，直到状态被改为NORMAL才可导入查询）
+6. ClusterStatus::MANUAL_SHUTDOWN -> ClusterStatus::NORMAL （用户手动拉起cluster，云管设置这个状态到meta service）
 
 若不在上面的状态变化中的修改状态会报错：
 ```
