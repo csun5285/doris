@@ -119,6 +119,7 @@ import org.apache.doris.load.EtlJobType;
 import org.apache.doris.load.LoadJobRowResult;
 import org.apache.doris.load.loadv2.LoadManager;
 import org.apache.doris.load.loadv2.LoadManagerAdapter;
+import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.mysql.MysqlEofPacket;
@@ -738,6 +739,9 @@ public class StmtExecutor {
         try {
             for (int i = 0; i < retryTime; i++) {
                 try {
+                    if ((i == 0) && !parsedStmt.isExplain() && planner.getScanNodes().size() > 0) {
+                        MetricRepo.increaseClusterQueryIncoming(context.cloudCluster);
+                    }
                     //reset query id for each retry
                     if (i > 0) {
                         UUID uuid = UUID.randomUUID();

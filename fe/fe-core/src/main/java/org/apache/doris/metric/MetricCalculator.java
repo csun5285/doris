@@ -38,9 +38,9 @@ public class MetricCalculator extends TimerTask {
     private long lastRequestCounter = -1;
     private long lastQueryErrCounter = -1;
 
-    private Map<String, Long> cloudClusterLastQueryCounter = new HashMap<>();
-    private Map<String, Long> cloudClusterLastRequestCounter = new HashMap<>();
-    private Map<String, Long> cloudClusterLastQueryErrCounter = new HashMap<>();
+    private Map<String, Long> clusterLastRequestCounter = new HashMap<>();
+    private Map<String, Long> clusterLastQueryCounter = new HashMap<>();
+    private Map<String, Long> clusterLastQueryErrCounter = new HashMap<>();
 
     private long lastCopyIntoUploadCounter = -1;
     private long lastCopyIntoUploadErrCounter = -1;
@@ -53,81 +53,6 @@ public class MetricCalculator extends TimerTask {
         update();
     }
 
-    private void updateClusterMetrics(long interval) {
-        MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ALL.forEach((clusterName, metric) -> {
-            long clusterLastQueryCounter = cloudClusterLastQueryCounter.computeIfAbsent(clusterName, key -> {
-                return metric.getValue();
-            });
-            long clusterCurrentQueryCounter = metric.getValue();
-            double clusterQps = (double) (clusterCurrentQueryCounter - clusterLastQueryCounter) / interval;
-            MetricRepo.CLOUD_CLUSTER_GAUGE_QUERY_PER_SECOND.computeIfAbsent(clusterName, key -> {
-                String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(clusterName);
-                GaugeMetricImpl<Double> gaugeQueryPerSecond = new GaugeMetricImpl<>("qps", MetricUnit.NOUNIT,
-                        "query per second");
-                gaugeQueryPerSecond.addLabel(new MetricLabel("cluster_id", clusterId));
-                gaugeQueryPerSecond.addLabel(new MetricLabel("cluster_name", clusterName));
-                gaugeQueryPerSecond.setValue(0.0);
-                MetricRepo.DORIS_METRIC_REGISTER.addMetrics(gaugeQueryPerSecond);
-                return gaugeQueryPerSecond;
-            }).setValue(clusterQps < 0 ? 0.0 : clusterQps);
-            cloudClusterLastQueryCounter.replace(clusterName, clusterCurrentQueryCounter);
-        });
-
-        MetricRepo.CLOUD_CLUSTER_COUNTER_REQUEST_ALL.forEach((clusterName, metric) -> {
-            long clusterLastRequestCounter = cloudClusterLastRequestCounter.computeIfAbsent(clusterName, key -> {
-                return metric.getValue();
-            });
-            long clusterCurrentRequestCounter = metric.getValue();
-            double clusterRps = (double) (clusterCurrentRequestCounter - clusterLastRequestCounter) / interval;
-            MetricRepo.CLOUD_CLUSTER_GAUGE_REQUEST_PER_SECOND.computeIfAbsent(clusterName, key -> {
-                String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(clusterName);
-                GaugeMetricImpl<Double> gaugeRequestPerSecond = new GaugeMetricImpl<>("rps", MetricUnit.NOUNIT,
-                        "request per second");
-                gaugeRequestPerSecond.addLabel(new MetricLabel("cluster_id", clusterId));
-                gaugeRequestPerSecond.addLabel(new MetricLabel("cluster_name", clusterName));
-                gaugeRequestPerSecond.setValue(0.0);
-                MetricRepo.DORIS_METRIC_REGISTER.addMetrics(gaugeRequestPerSecond);
-                return gaugeRequestPerSecond;
-            }).setValue(clusterRps < 0 ? 0.0 : clusterRps);
-            cloudClusterLastRequestCounter.replace(clusterName, clusterCurrentRequestCounter);
-        });
-
-        MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ERR.forEach((clusterName, metric) -> {
-            long clusterLastQueryErrCounter = cloudClusterLastQueryErrCounter.computeIfAbsent(clusterName, key -> {
-                return metric.getValue();
-            });
-            long clusterCurrentQueryErrCounter = metric.getValue();
-            double clusterErrRate = (double) (clusterCurrentQueryErrCounter - clusterLastQueryErrCounter) / interval;
-            MetricRepo.CLOUD_CLUSTER_GAUGE_QUERY_ERR_RATE.computeIfAbsent(clusterName, key -> {
-                String clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(clusterName);
-                GaugeMetricImpl<Double> gaugeQueryErrRate = new GaugeMetricImpl<>("query_err_rate",
-                        MetricUnit.NOUNIT, "query error rate");
-                gaugeQueryErrRate.addLabel(new MetricLabel("cluster_id", clusterId));
-                gaugeQueryErrRate.addLabel(new MetricLabel("cluster_name", clusterName));
-                gaugeQueryErrRate.setValue(0.0);
-                MetricRepo.DORIS_METRIC_REGISTER.addMetrics(gaugeQueryErrRate);
-                return gaugeQueryErrRate;
-            }).setValue(clusterErrRate < 0 ? 0.0 : clusterErrRate);
-            cloudClusterLastQueryErrCounter.replace(clusterName, clusterCurrentQueryErrCounter);
-        });
-
-        lastCopyIntoUploadCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST,
-                MetricRepo.GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND, lastCopyIntoUploadCounter, interval);
-        lastCopyIntoUploadErrCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR,
-            MetricRepo.GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE, lastCopyIntoUploadErrCounter, interval);
-        lastCopyIntoQueryCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST,
-            MetricRepo.GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND, lastCopyIntoQueryCounter, interval);
-        lastCopyIntoQueryErrCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR,
-            MetricRepo.GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE, lastCopyIntoQueryErrCounter, interval);
-    }
-
-    private long updateItem(LongCounterMetric m, GaugeMetricImpl<Double> g, long lastCounter, long interval) {
-        long currentUploadCounter = m.getValue();
-        double qps = (double) (currentUploadCounter - lastCounter) / interval;
-        g.setValue(qps < 0 ? 0.0 : qps);
-        return currentUploadCounter;
-    }
-
     private void update() {
         long currentTs = System.currentTimeMillis();
         if (lastTs == -1) {
@@ -135,21 +60,7 @@ public class MetricCalculator extends TimerTask {
             lastQueryCounter = MetricRepo.COUNTER_QUERY_ALL.getValue();
             lastRequestCounter = MetricRepo.COUNTER_REQUEST_ALL.getValue();
             lastQueryErrCounter = MetricRepo.COUNTER_QUERY_ERR.getValue();
-            if (Config.isCloudMode()) {
-                MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ALL.forEach((clusterName, metric) -> {
-                    cloudClusterLastQueryCounter.put(clusterName, metric.getValue());
-                });
-                MetricRepo.CLOUD_CLUSTER_COUNTER_REQUEST_ALL.forEach((clusterName, metric) -> {
-                    cloudClusterLastRequestCounter.put(clusterName, metric.getValue());
-                });
-                MetricRepo.CLOUD_CLUSTER_COUNTER_QUERY_ERR.forEach((clusterName, metric) -> {
-                    cloudClusterLastQueryErrCounter.put(clusterName, metric.getValue());
-                });
-                lastCopyIntoUploadCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST.getValue();
-                lastCopyIntoUploadErrCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.getValue();
-                lastCopyIntoQueryCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST.getValue();
-                lastCopyIntoQueryErrCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR.getValue();
-            }
+            initCloudMetrics();
             return;
         }
 
@@ -173,9 +84,7 @@ public class MetricCalculator extends TimerTask {
         MetricRepo.GAUGE_QUERY_ERR_RATE.setValue(errRate < 0 ? 0.0 : errRate);
         lastQueryErrCounter = currentErrCounter;
 
-        if (Config.isCloudMode()) {
-            updateClusterMetrics(interval);
-        }
+        updateCloudMetrics(interval);
 
         lastTs = currentTs;
 
@@ -210,5 +119,91 @@ public class MetricCalculator extends TimerTask {
             tabletNum.addLabel(new MetricLabel("backend", be.getHost() + ":" + be.getHeartbeatPort()));
             MetricRepo.DORIS_METRIC_REGISTER.addMetrics(tabletNum);
         }
+    }
+
+    private void initCloudMetrics() {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+        Map<String, LongCounterMetric> requsetAllMetrics = CloudMetrics.CLUSTER_REQUEST_ALL_COUNTER.getMetrics();
+        if (requsetAllMetrics != null) {
+            requsetAllMetrics.forEach((clusterId, metric) -> {
+                clusterLastRequestCounter.put(clusterId, metric.getValue());
+            });
+        }
+
+        Map<String, LongCounterMetric> queryAllMetrics = CloudMetrics.CLUSTER_QUERY_ALL_COUNTER.getMetrics();
+        if (queryAllMetrics != null) {
+            queryAllMetrics.forEach((clusterId, metric) -> {
+                clusterLastQueryCounter.put(clusterId, metric.getValue());
+            });
+        }
+
+        Map<String, LongCounterMetric> queryErrMetrics = CloudMetrics.CLUSTER_QUERY_ERR_COUNTER.getMetrics();
+        if (queryErrMetrics != null) {
+            queryErrMetrics.forEach((clusterId, metric) -> {
+                clusterLastQueryErrCounter.put(clusterId, metric.getValue());
+            });
+        }
+
+        lastCopyIntoUploadCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST.getValue();
+        lastCopyIntoUploadErrCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR.getValue();
+        lastCopyIntoQueryCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST.getValue();
+        lastCopyIntoQueryErrCounter = MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR.getValue();
+    }
+
+    private long updateItem(LongCounterMetric m, GaugeMetricImpl<Double> g, long lastCounter, long interval) {
+        long currentUploadCounter = m.getValue();
+        double qps = (double) (currentUploadCounter - lastCounter) / interval;
+        g.setValue(qps < 0 ? 0.0 : qps);
+        return currentUploadCounter;
+    }
+
+    private void updateCloudMetrics(long interval) {
+        if (!Config.isCloudMode()) {
+            return;
+        }
+
+        Map<String, LongCounterMetric> requsetAllMetrics = CloudMetrics.CLUSTER_REQUEST_ALL_COUNTER.getMetrics();
+        if (requsetAllMetrics != null) {
+            requsetAllMetrics.forEach((clusterId, metric) -> {
+                double rps = (double) (metric.getValue() - clusterLastRequestCounter.getOrDefault(clusterId, 0L))
+                        / interval;
+                rps = Double.max(rps, 0);
+                MetricRepo.updateClusterRequestPerSecond(clusterId, rps,  metric.getLabels());
+                clusterLastRequestCounter.replace(clusterId, metric.getValue());
+            });
+        }
+
+        Map<String, LongCounterMetric> queryAllMetrics = CloudMetrics.CLUSTER_QUERY_ALL_COUNTER.getMetrics();
+        if (queryAllMetrics != null) {
+            queryAllMetrics.forEach((clusterId, metric) -> {
+                double rps = (double) (metric.getValue() - clusterLastQueryCounter.getOrDefault(clusterId, 0L))
+                        / interval;
+                rps = Double.max(rps, 0);
+                MetricRepo.updateClusterQueryPerSecond(clusterId, rps,  metric.getLabels());
+                clusterLastQueryCounter.replace(clusterId, metric.getValue());
+            });
+        }
+
+        Map<String, LongCounterMetric> queryErrMetrics = CloudMetrics.CLUSTER_QUERY_ERR_COUNTER.getMetrics();
+        if (queryErrMetrics != null) {
+            queryErrMetrics.forEach((clusterId, metric) -> {
+                double rps = (double) (metric.getValue() - clusterLastQueryErrCounter.getOrDefault(clusterId, 0L))
+                        / interval;
+                rps = Double.max(rps, 0);
+                MetricRepo.updateClusterQueryErrRate(clusterId, rps, metric.getLabels());
+                clusterLastQueryCounter.replace(clusterId, metric.getValue());
+            });
+        }
+
+        lastCopyIntoUploadCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_REQUEST,
+                MetricRepo.GAUGE_HTTP_COPY_INTO_UPLOAD_PER_SECOND, lastCopyIntoUploadCounter, interval);
+        lastCopyIntoUploadErrCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_UPLOAD_ERR,
+            MetricRepo.GAUGE_HTTP_COPY_INTO_UPLOAD_ERR_RATE, lastCopyIntoUploadErrCounter, interval);
+        lastCopyIntoQueryCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_REQUEST,
+            MetricRepo.GAUGE_HTTP_COPY_INTO_QUERY_PER_SECOND, lastCopyIntoQueryCounter, interval);
+        lastCopyIntoQueryErrCounter = updateItem(MetricRepo.HTTP_COUNTER_COPY_INFO_QUERY_ERR,
+            MetricRepo.GAUGE_HTTP_COPY_INTO_QUERY_ERR_RATE, lastCopyIntoQueryErrCounter, interval);
     }
 }

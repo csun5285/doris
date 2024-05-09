@@ -19,7 +19,6 @@ package org.apache.doris.metric;
 
 import org.apache.doris.catalog.CloudTabletStatMgr;
 import org.apache.doris.catalog.Env;
-import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
 import org.apache.doris.monitor.jvm.JvmStats;
 import org.apache.doris.monitor.jvm.JvmStats.GarbageCollector;
@@ -177,48 +176,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
 
     @Override
     public void visitHistogram(String prefix, String name, Histogram histogram) {
-        // The diff between cloud and branch-1.2-lts
-        // branch-1.2-lts want to format the label, but it don't have another label except 'quantile'
-        // so it is useless
-        // cloud need to know metrics of each cluster, so add the label of cluster message.
-        String fullName = prefix + name.replaceAll("\\.", "_");
-        String clusterName = "UNKNOWN";
-        String clusterId = "UNKNOWN";
-        int idx = fullName.indexOf(MetricRepo.SELECTDB_TAG);
-        if (Config.isCloudMode() && idx != -1) {
-            clusterName = fullName.substring(idx + MetricRepo.SELECTDB_TAG.length() + 1);
-            fullName = fullName.substring(0, idx - 1);
-            clusterId = Env.getCurrentSystemInfo().getCloudClusterNameToId().get(clusterName);
-        }
-        // final String fullTag = String.join(",", tags);
-        sb.append(HELP).append(fullName).append(" ").append("\n");
-        sb.append(TYPE).append(fullName).append(" ").append("summary\n");
-        // String delimiter = tags.isEmpty() ? "" : ",";
-        Snapshot snapshot = histogram.getSnapshot();
-        // SELECTDB_CODE_BEGIN
-        sb.append(fullName).append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\", ")
-                        .append("quantile=\"0.75\"} ").append(snapshot.get75thPercentile()).append("\n");
-        sb.append(fullName).append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\", ")
-                        .append("quantile=\"0.95\"} ").append(snapshot.get95thPercentile()).append("\n");
-        sb.append(fullName).append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\", ")
-                        .append("quantile=\"0.98\"} ").append(snapshot.get98thPercentile()).append("\n");
-        sb.append(fullName).append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\", ")
-                        .append("quantile=\"0.99\"} ").append(snapshot.get99thPercentile()).append("\n");
-        sb.append(fullName).append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\", ")
-                        .append("quantile=\"0.999\"} ").append(snapshot.get999thPercentile()).append("\n");
-        sb.append(fullName).append("_sum").append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\"} ")
-                        .append(histogram.getCount() * snapshot.getMean()).append("\n");
-        sb.append(fullName).append("_count").append("{cluster_id=\"").append(clusterId).append("\", ")
-                        .append("cluster_name=\"").append(clusterName).append("\"} ")
-                        .append(histogram.getCount()).append("\n");
-        // SELECTDB_CODE_END
-
+        // part.part.part.k1=v1.k2=v2
         List<String> names = new ArrayList<>();
         List<String> tags = new ArrayList<>();
         for (String part : name.split("\\.")) {
@@ -229,7 +187,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
                 tags.add(String.format("%s=\"%s\"", kv[0], kv[1]));
             }
         }
-        fullName = prefix + String.join("_", names);
+        final String fullName = prefix + String.join("_", names);
         final String fullTag = String.join(",", tags);
         // we should define metric name only once
         if (!metricNames.contains(fullName)) {
@@ -238,7 +196,7 @@ public class PrometheusMetricVisitor extends MetricVisitor {
             metricNames.add(fullName);
         }
         String delimiter = tags.isEmpty() ? "" : ",";
-        snapshot = histogram.getSnapshot();
+        Snapshot snapshot = histogram.getSnapshot();
         sb.append(fullName).append("{quantile=\"0.75\"").append(delimiter).append(fullTag).append("} ")
             .append(snapshot.get75thPercentile()).append("\n");
         sb.append(fullName).append("{quantile=\"0.95\"").append(delimiter).append(fullTag).append("} ")

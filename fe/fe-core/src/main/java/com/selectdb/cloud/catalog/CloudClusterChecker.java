@@ -82,7 +82,7 @@ public class CloudClusterChecker extends MasterDaemon {
                     // For old versions that do no have status field set
                     ClusterStatus clusterStatus = remoteClusterIdToPB.get(addId).hasClusterStatus()
                             ? remoteClusterIdToPB.get(addId).getClusterStatus() : ClusterStatus.NORMAL;
-                    MetricRepo.registerClusterMetrics(clusterName, clusterId);
+                    MetricRepo.registerCloudMetrics(clusterId, clusterName);
                     //toAdd.forEach(i -> i.setTagMap(newTagMap));
                     List<Backend> toAdd = new ArrayList<>();
                     for (SelectdbCloud.NodeInfoPB node : remoteClusterIdToPB.get(addId).getNodesList()) {
