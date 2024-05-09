@@ -25,6 +25,7 @@ import org.apache.doris.catalog.TableIf.TableType;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
 import org.apache.doris.common.ErrorReport;
+import org.apache.doris.common.InternalErrorCode;
 import org.apache.doris.common.MetaNotFoundException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.DebugUtil;
@@ -148,15 +149,27 @@ public class Transaction {
                 ctx.getState().setOk(loadedRows, filteredRows, null);
                 return;
             }
-
-            if (Env.getCurrentGlobalTransactionMgr().commitAndPublishTransaction(
-                    database, Lists.newArrayList(table),
-                    txnId,
-                    TabletCommitInfo.fromThrift(coordinator.getCommitInfos()),
-                    ctx.getSessionVariable().getInsertVisibleTimeoutMs())) {
-                txnStatus = TransactionStatus.VISIBLE;
-            } else {
-                txnStatus = TransactionStatus.COMMITTED;
+            int retryTimes = 0;
+            while (retryTimes < Config.mow_insert_into_commit_retry_times) {
+                try {
+                    if (Env.getCurrentGlobalTransactionMgr().commitAndPublishTransaction(
+                            database, Lists.newArrayList(table),
+                            txnId,
+                            TabletCommitInfo.fromThrift(coordinator.getCommitInfos()),
+                            ctx.getSessionVariable().getInsertVisibleTimeoutMs())) {
+                        txnStatus = TransactionStatus.VISIBLE;
+                    } else {
+                        txnStatus = TransactionStatus.COMMITTED;
+                    }
+                    break;
+                } catch (UserException e) {
+                    LOG.warn("failed to commit txn " + txnId, e);
+                    if (e.getErrorCode() == InternalErrorCode.DELETE_BITMAP_LOCK_ERR) {
+                        retryTimes++;
+                    } else {
+                        throw e;
+                    }
+                }
             }
 
         } catch (Throwable t) {

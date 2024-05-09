@@ -2708,4 +2708,6 @@ public class Config extends ConfigBase {
     })
     public static boolean enable_proxy_protocol = false;
 
+    @ConfField(mutable = true)
+    public static int mow_insert_into_commit_retry_times = 10;
 }
