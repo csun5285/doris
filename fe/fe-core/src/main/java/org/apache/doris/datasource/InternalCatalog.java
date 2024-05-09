@@ -1124,7 +1124,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         try {
             unprotectUpdateCloudReplica(olapTable, info);
         } catch (Exception e) {
-            LOG.warn("unexpected exception", e);
+            LOG.warn("tableName {}, info {} unexpected exception", olapTable.getName(), info, e);
         } finally {
             olapTable.writeUnlock();
         }
