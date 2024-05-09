@@ -517,7 +517,7 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = true, masterOnly = true, description = {"Stream load 的默认超时时间，单位是秒。",
             "Default timeout for stream load job, in seconds."})
-    public static int stream_load_default_timeout_second = 86400 * 3; // 3days
+    public static int stream_load_default_timeout_second = 14400; // 4 hour
 
     @ConfField(mutable = true, masterOnly = true, description = {"Stream load 的默认预提交超时时间，单位是秒。",
             "Default pre-commit timeout for stream load job, in seconds."})
