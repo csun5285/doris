@@ -24,13 +24,16 @@
 
 #include <algorithm>
 #include <memory>
+#include <thread>
 #include <utility>
 
 #include "cloud/olap/storage_engine.h"
 #include "common/logging.h"
 #include "common/status.h"
+#include "io/cache/block/block_file_cache_factory.h"
 #include "io/fs/file_reader.h"
 #include "io/fs/file_system.h"
+#include "io/fs/file_writer.h"
 #include "io/io_common.h"
 #include "olap/block_column_predicate.h"
 #include "olap/column_predicate.h"
@@ -56,6 +59,7 @@
 #include "util/coding.h"
 #include "util/crc32c.h"
 #include "util/slice.h" // Slice
+#include "util/time.h"
 #include "vec/columns/column.h"
 #include "vec/common/string_ref.h"
 #include "vec/data_types/data_type.h"
@@ -241,6 +245,24 @@ Status Segment::_parse_footer(SegmentFooterPB* footer) {
     io_ctx.read_segment_index = true;
     io_ctx.disable_file_cache = _disable_file_cache;
 
+    auto write_error_file = [&]() -> Status {
+        std::string error_file;
+        error_file.resize(file_size);
+        RETURN_IF_ERROR(_file_reader->read_at(0, Slice(error_file.data(), file_size), &bytes_read,
+                                              &io_ctx));
+        int64_t cur_time = UnixMillis();
+        std::stringstream ss;
+        ss << std::this_thread::get_id();
+        std::string path = io::FileCacheFactory::instance().get_base_paths()[0] + "/error_file_" +
+                           std::to_string(cur_time) + "_" + ss.str();
+        LOG(WARNING) << "writer error file to " << path;
+        std::unique_ptr<io::FileWriter> writer;
+        RETURN_IF_ERROR(io::global_local_filesystem()->create_file(path, &writer));
+        RETURN_IF_ERROR(writer->append(Slice(error_file.data(), file_size)));
+        RETURN_IF_ERROR(writer->finalize());
+        return writer->close();
+    };
+
     RETURN_IF_ERROR(
             _file_reader->read_at(file_size - 12, Slice(fixed_buf, 12), &bytes_read, &io_ctx));
     DCHECK_EQ(bytes_read, 12);
@@ -248,7 +270,8 @@ Status Segment::_parse_footer(SegmentFooterPB* footer) {
     if (memcmp(fixed_buf + 8, k_segment_magic, k_segment_magic_length) != 0) {
         std::string err_msg = fmt::format("Bad segment file {}: magic number not match",
                                           _file_reader->path().native());
-        DCHECK(false) << err_msg;
+        Status st = write_error_file();
+        DCHECK(false) << err_msg << " write error_file result " << st;
         return Status::Corruption(std::move(err_msg));
     }
 
@@ -272,10 +295,11 @@ Status Segment::_parse_footer(SegmentFooterPB* footer) {
     uint32_t expect_checksum = decode_fixed32_le(fixed_buf + 4);
     uint32_t actual_checksum = crc32c::Value(footer_buf.data(), footer_buf.size());
     if (actual_checksum != expect_checksum) {
+        Status st = write_error_file();
         std::string err_msg = fmt::format(
                 "Bad segment file {}: footer checksum not match, actual={} vs expect={}",
                 _file_reader->path().native(), actual_checksum, expect_checksum);
-        DCHECK(false) << err_msg;
+        DCHECK(false) << err_msg << " write error_file result " << st;
         return Status::Corruption(std::move(err_msg));
     }
 
