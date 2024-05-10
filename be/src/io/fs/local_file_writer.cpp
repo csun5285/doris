@@ -61,7 +61,6 @@ Status sync_dir(const io::Path& dirname) {
 #endif
         return localfs_error(errno, fmt::format("failed to sync {}", dirname.native()));
     }
-    ::close(fd);
     return Status::OK();
 }
 
