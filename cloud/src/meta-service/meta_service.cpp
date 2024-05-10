@@ -281,7 +281,12 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
     response->mutable_table_ids()->CopyFrom(request->table_ids());
     response->mutable_partition_ids()->CopyFrom(request->partition_ids());
 
-    while (code == MetaServiceCode::OK &&
+    constexpr size_t BATCH_SIZE = 500;
+    std::vector<std::string> version_keys;
+    std::vector<std::optional<std::string>> version_values;
+    version_keys.reserve(BATCH_SIZE);
+    version_values.reserve(BATCH_SIZE);
+    while ((code == MetaServiceCode::OK || code == MetaServiceCode::KV_TXN_TOO_OLD) &&
            response->versions_size() < response->partition_ids_size()) {
         std::unique_ptr<Transaction> txn;
         TxnErrorCode err = txn_kv_->create_txn(&txn);
@@ -290,38 +295,45 @@ void MetaServiceImpl::batch_get_version(::google::protobuf::RpcController* contr
             code = cast_as<ErrCategory::CREATE>(err);
             break;
         }
-        for (size_t i = response->versions_size(); i < num_acquired; ++i) {
-            int64_t db_id = request->db_ids(i);
-            int64_t table_id = request->table_ids(i);
-            int64_t partition_id = request->partition_ids(i);
-            std::string ver_key = version_key({instance_id, db_id, table_id, partition_id});
+        for (size_t i = response->versions_size(); i < num_acquired; i += BATCH_SIZE) {
+            size_t limit = (i + BATCH_SIZE < num_acquired) ? i + BATCH_SIZE : num_acquired;
+            version_keys.clear();
+            version_values.clear();
+            for (size_t j = i; j < limit; j++) {
+                int64_t db_id = request->db_ids(j);
+                int64_t table_id = request->table_ids(j);
+                int64_t partition_id = request->partition_ids(j);
+                std::string ver_key = version_key({instance_id, db_id, table_id, partition_id});
+                version_keys.push_back(std::move(ver_key));
+            }
 
-            // TODO(walter) support batch get.
-            std::string ver_val;
-            err = txn->get(ver_key, &ver_val, true);
+            err = txn->batch_get(&version_values, version_keys);
             TEST_SYNC_POINT_CALLBACK("batch_get_version_err", &err);
-            VLOG_DEBUG << "xxx get version_key=" << hex(ver_key);
-            if (err == TxnErrorCode::TXN_OK) {
-                VersionPB version_pb;
-                if (!version_pb.ParseFromString(ver_val)) {
-                    code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-                    msg = "malformed version value";
-                    break;
-                }
-                response->add_versions(version_pb.version());
-            } else if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
-                // return -1 if the target version is not exists.
-                response->add_versions(-1);
-            } else if (err == TxnErrorCode::TXN_TOO_OLD) {
+            if (err == TxnErrorCode::TXN_TOO_OLD) {
                 // txn too old, fallback to non-snapshot versions.
                 LOG(WARNING) << "batch_get_version execution time exceeds the txn mvcc window, "
                                 "fallback to acquire non-snapshot versions, partition_ids_size="
                              << request->partition_ids_size() << ", index=" << i;
                 break;
-            } else {
-                msg = fmt::format("failed to get txn, err={}", err);
+            } else if (err != TxnErrorCode::TXN_OK) {
+                msg = fmt::format("failed to batch get versions, index={}, err={}", i, err);
                 code = cast_as<ErrCategory::READ>(err);
                 break;
+            }
+
+            for (auto&& value : version_values) {
+                if (!value.has_value()) {
+                    // return -1 if the target version is not exists.
+                    response->add_versions(-1);
+                } else {
+                    VersionPB version_pb;
+                    if (!version_pb.ParseFromString(*value)) {
+                        code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                        msg = "malformed version value";
+                        break;
+                    }
+                    response->add_versions(version_pb.version());
+                }
             }
         }
     }
