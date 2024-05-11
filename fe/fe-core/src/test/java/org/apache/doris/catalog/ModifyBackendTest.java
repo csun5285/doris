@@ -24,7 +24,6 @@ import org.apache.doris.analysis.CreateTableStmt;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.ExceptionChecker;
-import org.apache.doris.common.FeConstants;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.DdlExecutor;
 import org.apache.doris.resource.Tag;
@@ -49,7 +48,6 @@ public class ModifyBackendTest {
 
     @BeforeClass
     public static void beforeClass() throws Exception {
-        FeConstants.runningUnitTest = true;
         UtFrameUtils.createDorisCluster(runningDir);
         // create connect context
         connectContext = UtFrameUtils.createDefaultCtx();

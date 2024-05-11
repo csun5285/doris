@@ -1668,11 +1668,17 @@ public class InternalCatalog implements CatalogIf<Database> {
         DataProperty dataProperty = singlePartitionDesc.getPartitionDataProperty();
         Preconditions.checkNotNull(dataProperty);
         // check replica quota if this operation done
-        long bufferSize = checkAndGetBufferSize(indexIdToMeta.size(), distributionInfo.getBucketNum(),
-                singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum(), db, tableName);
-        IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
-
+        long indexNum = indexIdToMeta.size();
+        long bucketNum = distributionInfo.getBucketNum();
+        long replicaNum = singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum();
+        long totalReplicaNum = indexNum * bucketNum * replicaNum;
+        if (totalReplicaNum >= db.getReplicaQuotaLeftWithLock()) {
+            throw new DdlException("Database " + db.getFullName() + " table " + tableName + " add partition increasing "
+                + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
+        }
         Set<Long> tabletIdSet = new HashSet<>();
+        long bufferSize = 1 + totalReplicaNum + indexNum * bucketNum;
+        IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
         String storagePolicy = olapTable.getStoragePolicy();
         if (!Strings.isNullOrEmpty(dataProperty.getStoragePolicy())) {
             storagePolicy = dataProperty.getStoragePolicy();
@@ -1683,8 +1689,7 @@ public class InternalCatalog implements CatalogIf<Database> {
             }
         };
         try {
-            long partitionId = !FeConstants.runningUnitTest && isCreateTable
-                    ? generatedPartitionId : idGeneratorBuffer.getNextId();
+            long partitionId = idGeneratorBuffer.getNextId();
             Partition partition;
             if (Config.isNotCloudMode()) {
                 partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
@@ -1706,10 +1711,8 @@ public class InternalCatalog implements CatalogIf<Database> {
             } else {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
-                List<Long> indexIds = new ArrayList<>(indexIdToMeta.keySet());
-                if (!isCreateTable) {
-                    prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
-                }
+                List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
+                prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
                 partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -3945,7 +3948,7 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    private static void sleepSeveralMs() {
+    public static void sleepSeveralMs() {
         // sleep random millis [20, 200] ms, avoid txn conflict
         int randomMillis = 20 + (int) (Math.random() * (200 - 20));
         LOG.debug("randomMillis:{}", randomMillis);
@@ -3981,7 +3984,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     throw new DdlException(e.getMessage());
                 }
             }
-            sleepSeveralMs();
+            InternalCatalog.sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4013,7 +4016,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     throw new DdlException(e.getMessage());
                 }
             }
-            sleepSeveralMs();
+            InternalCatalog.sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4046,7 +4049,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     throw new DdlException(e.getMessage());
                 }
             }
-            sleepSeveralMs();
+            InternalCatalog.sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4084,7 +4087,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     throw new DdlException(e.getMessage());
                 }
             }
-            sleepSeveralMs();
+            InternalCatalog.sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4093,8 +4096,8 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
-    public static void commitCloudPartition(long tableId,
-                                            List<Long> partitionIds, List<Long> indexIds) throws DdlException {
+    public static void commitCloudPartition(long tableId, List<Long> partitionIds, List<Long> indexIds)
+            throws DdlException {
         SelectdbCloud.PartitionRequest.Builder partitionRequestBuilder =
                 SelectdbCloud.PartitionRequest.newBuilder();
         partitionRequestBuilder.setCloudUniqueId(Config.cloud_unique_id);
@@ -4117,7 +4120,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     throw new DdlException(e.getMessage());
                 }
             }
-            sleepSeveralMs();
+            InternalCatalog.sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
@@ -4153,7 +4156,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                     throw new DdlException(e.getMessage());
                 }
             }
-            sleepSeveralMs();
+            InternalCatalog.sleepSeveralMs();
         }
 
         if (response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
