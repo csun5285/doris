@@ -192,7 +192,6 @@ public class OlapScanNode extends ScanNode {
     // TScanRangeLocations.
     public ArrayListMultimap<Integer, TScanRangeLocations> bucketSeq2locations = ArrayListMultimap.create();
 
-    PrepareStmt preparedStatment = null;
     // For point query
     private Map<SlotRef, Expr> pointQueryEqualPredicats;
     private DescriptorTable descTable;
@@ -205,6 +204,7 @@ public class OlapScanNode extends ScanNode {
     // only used in short circuit plan at present
     private final PartitionPruneV2ForShortCircuitPlan cachedPartitionPruner =
                         new PartitionPruneV2ForShortCircuitPlan();
+    PrepareStmt preparedStatment = null;
 
     // Constructs node to scan given data files of table 'tbl'.
     public OlapScanNode(PlanNodeId id, TupleDescriptor desc, String planNodeName) {

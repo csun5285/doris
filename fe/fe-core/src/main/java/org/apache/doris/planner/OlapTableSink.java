@@ -438,8 +438,9 @@ public class OlapTableSink extends DataSink {
                     Multimap<Long, Long> bePathsMap = tablet.getNormalReplicaBackendPathMap();
                     if (bePathsMap.keySet().size() < quorum) {
                         String errMsg = "tablet " + tablet.getId() + " alive replica num " + bePathsMap.keySet().size()
-                                        + " < quorum replica num " + quorum
-                                        + ", alive backends: [" + StringUtils.join(bePathsMap.keySet(), ",") + "]";
+                                + " < quorumreplica num " + quorum
+                                + ", alive backends: [" + StringUtils.join(bePathsMap.keySet(), ",") + "]"
+                                + ", detail: " + tablet.getDetailsStatusForQuery(partition.getVisibleVersion());
                         if (Config.isCloudMode()) {
                             errMsg += ConnectContext.cloudNoBackendsReason();
                         }

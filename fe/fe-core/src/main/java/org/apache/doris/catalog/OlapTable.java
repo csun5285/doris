@@ -2080,6 +2080,12 @@ public class OlapTable extends Table {
         return false;
     }
 
+    public int getBaseSchemaVersion() {
+        MaterializedIndexMeta baseIndexMeta = indexIdToMeta.get(baseIndexId);
+        return baseIndexMeta.getSchemaVersion();
+    }
+
+
     public void setEnableSingleReplicaCompaction(boolean enableSingleReplicaCompaction) {
         if (tableProperty == null) {
             tableProperty = new TableProperty(new HashMap<>());
@@ -2220,11 +2226,6 @@ public class OlapTable extends Table {
             return tableProperty.timeSeriesCompactionLevelThreshold();
         }
         return PropertyAnalyzer.TIME_SERIES_COMPACTION_LEVEL_THRESHOLD_DEFAULT_VALUE;
-    }
-
-    public int getBaseSchemaVersion() {
-        MaterializedIndexMeta baseIndexMeta = indexIdToMeta.get(baseIndexId);
-        return baseIndexMeta.getSchemaVersion();
     }
 
     public int getIndexSchemaVersion(long indexId) {

@@ -1755,6 +1755,8 @@ public class RestoreJob extends AbstractJob {
             releaseSnapshots();
 
             snapshotInfos.clear();
+            fileMapping.clear();
+            jobInfo.releaseSnapshotInfo();
 
             finishedTime = System.currentTimeMillis();
             state = RestoreJobState.FINISHED;
@@ -1947,6 +1949,9 @@ public class RestoreJob extends AbstractJob {
             releaseSnapshots();
 
             snapshotInfos.clear();
+            fileMapping.clear();
+            jobInfo.releaseSnapshotInfo();
+
             RestoreJobState curState = state;
             finishedTime = System.currentTimeMillis();
             state = RestoreJobState.CANCELLED;

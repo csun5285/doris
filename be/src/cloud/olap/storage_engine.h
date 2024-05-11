@@ -85,6 +85,8 @@ public:
     StorageEngine(const EngineOptions& options);
     ~StorageEngine();
 
+    int64_t memory_limitation_bytes_per_thread_for_schema_change() const;
+
     static Status open(const EngineOptions& options, StorageEngine** engine_ptr);
 
     static StorageEngine* instance() { return _s_instance; }
@@ -435,6 +437,8 @@ private:
     std::mutex _running_cooldown_mutex;
     std::unordered_map<DataDir*, int64_t> _running_cooldown_tasks_cnt;
     std::unordered_set<int64_t> _running_cooldown_tablets;
+
+    int64_t _memory_limitation_bytes_for_schema_change;
 
     DISALLOW_COPY_AND_ASSIGN(StorageEngine);
 };

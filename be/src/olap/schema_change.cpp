@@ -53,7 +53,6 @@
 #include "olap/rowset/segment_v2/segment.h"
 #include "olap/schema.h"
 #include "olap/segment_loader.h"
-#include "olap/storage_engine.h"
 #include "olap/tablet.h"
 #include "olap/tablet_manager.h"
 #include "olap/tablet_meta.h"

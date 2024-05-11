@@ -236,27 +236,16 @@ public class ConnectProcessor {
         packetBuf.get();
         // iteration_count always 1,
         packetBuf.getInt();
-        LOG.debug("execute prepared statement {}", stmtId);
         PrepareStmtContext prepareCtx = ctx.getPreparedStmt(String.valueOf(stmtId));
-        if (prepareCtx == null) {
-            LOG.debug("No such statement in context, stmtId:{}", stmtId);
-            ctx.getState().setError(ErrorCode.ERR_UNKNOWN_COM_ERROR,
-                    "msg: Not supported such prepared statement");
-            return;
-        }
-        ctx.setStartTime();
-        if (prepareCtx.stmt.getInnerStmt() instanceof QueryStmt) {
-            ctx.getState().setIsQuery(true);
-        }
-        prepareCtx.stmt.setIsPrepared();
         int paramCount = prepareCtx.stmt.getParmCount();
+        LOG.debug("execute prepared statement {}, paramCount {}", stmtId, paramCount);
         // null bitmap
-        byte[] nullbitmapData = new byte[(paramCount + 7) / 8];
-        packetBuf.get(nullbitmapData);
         String stmtStr = "";
         try {
             List<LiteralExpr> realValueExprs = new ArrayList<>();
             if (paramCount > 0) {
+                byte[] nullbitmapData = new byte[(paramCount + 7) / 8];
+                packetBuf.get(nullbitmapData);
                 // new_params_bind_flag
                 if ((int) packetBuf.get() != 0) {
                     // parse params's types
@@ -636,7 +625,6 @@ public class ConnectProcessor {
         LOG.debug("handle command {}", command);
         ctx.setCommand(command);
         ctx.setStartTime();
-
         switch (command) {
             case COM_INIT_DB:
                 handleInitDb();

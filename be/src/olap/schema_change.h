@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/object_pool.h"
 #include "common/status.h"
@@ -252,7 +253,9 @@ public:
                                                           bool sc_sorting, bool sc_directly) {
         if (sc_sorting) {
             return std::make_unique<VSchemaChangeWithSorting>(
-                    changer, config::memory_limitation_per_thread_for_schema_change_bytes);
+                    changer, ExecEnv::GetInstance()
+                                     ->storage_engine()
+                                     ->memory_limitation_bytes_per_thread_for_schema_change());
         }
 
         if (sc_directly) {

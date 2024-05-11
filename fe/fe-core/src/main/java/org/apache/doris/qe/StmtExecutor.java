@@ -123,6 +123,7 @@ import org.apache.doris.metric.MetricRepo;
 import org.apache.doris.mysql.MysqlChannel;
 import org.apache.doris.mysql.MysqlCommand;
 import org.apache.doris.mysql.MysqlEofPacket;
+import org.apache.doris.mysql.MysqlOkPacket;
 import org.apache.doris.mysql.MysqlSerializer;
 import org.apache.doris.mysql.ProxyMysqlChannel;
 import org.apache.doris.mysql.privilege.PrivPredicate;
@@ -1125,7 +1126,6 @@ public class StmtExecutor {
             if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
                 prepareStmt = new PrepareStmt(parsedStmt,
                         String.valueOf(context.getEnv().getNextStmtId()));
-                context.getMysqlChannel().setUseServerPrepStmts();
             } else {
                 prepareStmt = (PrepareStmt) parsedStmt;
             }
@@ -1371,6 +1371,12 @@ public class StmtExecutor {
                     prepareStmt.analyze(analyzer);
                 }
 
+                if (prepareStmt != null) {
+                    // Re-analyze prepareStmt with a new analyzer
+                    prepareStmt.reset();
+                    prepareStmt.analyze(analyzer);
+                }
+
                 // query re-analyze
                 parsedStmt.reset();
                 analyzer.setReAnalyze(true);
@@ -1593,12 +1599,13 @@ public class StmtExecutor {
         }
 
         // handle selects that fe can do without be, so we can make sql tools happy, especially the setup step.
-        Optional<ResultSet> resultSet = planner.handleQueryInFe(parsedStmt);
-        if (resultSet.isPresent()) {
-            sendResultSet(resultSet.get());
-            return;
+        if (context.getCommand() != MysqlCommand.COM_STMT_EXECUTE) {
+            Optional<ResultSet> resultSet = planner.handleQueryInFe(parsedStmt);
+            if (resultSet.isPresent()) {
+                sendResultSet(resultSet.get());
+                return;
+            }
         }
-
         MysqlChannel channel = context.getMysqlChannel();
         boolean isOutfileQuery = queryStmt.hasOutFileClause();
 
@@ -2389,13 +2396,12 @@ public class StmtExecutor {
 
     private void handlePrepareStmt() throws Exception {
         // register prepareStmt
-        LOG.debug("add prepared statement: {}, statementId : {}, useServerPrepStmts: {}",
-                        prepareStmt.getInnerStmt().toSql(),
-                        prepareStmt.getName(), context.getMysqlChannel().useServerPrepStmts());
+        LOG.debug("add prepared statement {}, isBinaryProtocol {}",
+                        prepareStmt.getName(), context.getCommand() == MysqlCommand.COM_STMT_PREPARE);
         context.addPreparedStmt(prepareStmt.getName(),
                 new PrepareStmtContext(prepareStmt,
                             context, planner, analyzer, prepareStmt.getName()));
-        if (context.getMysqlChannel().useServerPrepStmts()) {
+        if (context.getCommand() == MysqlCommand.COM_STMT_PREPARE) {
             sendStmtPrepareOK();
         }
     }
@@ -2527,13 +2533,18 @@ public class StmtExecutor {
                 serializer.writeField(colNames.get(i), Type.fromPrimitiveType(types.get(i)));
                 context.getMysqlChannel().sendOnePacket(serializer.toByteBuffer());
             }
+            serializer.reset();
+            if (!context.getMysqlChannel().clientDeprecatedEOF()) {
+                MysqlEofPacket eofPacket = new MysqlEofPacket(context.getState());
+                eofPacket.writeTo(serializer);
+            } else {
+                MysqlOkPacket okPacket = new MysqlOkPacket(context.getState());
+                okPacket.writeTo(serializer);
+            }
+            context.getMysqlChannel().sendOnePacket(serializer.toByteBuffer());
         }
-        // send EOF if nessessary
-        if (!context.getMysqlChannel().clientDeprecatedEOF()) {
-            context.getState().setEof();
-        } else {
-            context.getState().setOk();
-        }
+        context.getMysqlChannel().flush();
+        context.getState().setNoop();
     }
 
     private void sendFields(List<String> colNames, List<Type> types) throws IOException {
