@@ -1431,7 +1431,6 @@ int InstanceRecycler::recycle_rowsets() {
         // Try to delete rowset data in background thread
         int ret = worker_pool->submit_with_timeout(
                 [&, resource_id, tablet_id, rowset_id, key]() mutable {
-                    std::cout << "try to delete in bg thread" << std::endl;
                     if (delete_rowset_data(resource_id, tablet_id, rowset_id) != 0) {
                         LOG(WARNING) << "failed to delete rowset data, key=" << hex(key);
                         return;
@@ -1457,7 +1456,6 @@ int InstanceRecycler::recycle_rowsets() {
                 0);
         if (ret == 0) return 0;
         // Submit task failed, delete rowset data in current thread
-        std::cout << "try to delete in current thread" << std::endl;
         if (delete_rowset_data(resource_id, tablet_id, rowset_id) != 0) {
             LOG(WARNING) << "failed to delete rowset data, key=" << hex(key);
             return -1;

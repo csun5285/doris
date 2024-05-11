@@ -258,7 +258,7 @@ TxnErrorCode ValueBuf::get(Transaction* txn, std::string_view key, bool snapshot
     auto [k, _] = it->next();
     if (k.size() == key.size()) { // Old version KV
         DCHECK(k == key) << hex(k) << ' ' << hex(key);
-        DCHECK_EQ(it->size(), 1) << hex(k) << ' ' << hex(key);
+        DCHECK_EQ(it->size(), 1) << hex(k) << ' ' << hex(key) << ' ' << hex(it->next().first);
         ver = 0;
     } else {
         k.remove_prefix(key.size());

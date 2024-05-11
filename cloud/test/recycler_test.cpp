@@ -27,7 +27,6 @@
 #include "recycler/util.h"
 #include "recycler/white_black_list.h"
 
-static const std::string instance_id = "instance_id_recycle_test";
 static int64_t current_time = 0;
 static constexpr int64_t db_id = 1000;
 
@@ -98,7 +97,7 @@ static int create_recycle_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     std::string key;
     std::string val;
 
-    RecycleRowsetKeyInfo key_info {instance_id, rowset.tablet_id(), rowset.rowset_id_v2()};
+    RecycleRowsetKeyInfo key_info {mock_instance, rowset.tablet_id(), rowset.rowset_id_v2()};
     recycle_rowset_key(key_info, &key);
 
     RecycleRowsetPB rowset_pb;
@@ -122,7 +121,7 @@ static int create_recycle_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     txn->put(key, val);
     std::string schema_key, schema_val;
     if (write_schema_kv) {
-        meta_schema_key({instance_id, rowset.index_id(), rowset.schema_version()}, &schema_key);
+        meta_schema_key({mock_instance, rowset.index_id(), rowset.schema_version()}, &schema_key);
         rowset.tablet_schema().SerializeToString(&schema_val);
         txn->put(schema_key, schema_val);
     }
@@ -145,7 +144,7 @@ static int create_recycle_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
 static int create_tmp_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
                              const doris::RowsetMetaPB& rowset, bool write_schema_kv) {
     std::string key, val;
-    meta_rowset_tmp_key({instance_id, rowset.txn_id(), rowset.tablet_id()}, &key);
+    meta_rowset_tmp_key({mock_instance, rowset.txn_id(), rowset.tablet_id()}, &key);
     if (write_schema_kv) {
         auto rowset_copy = rowset;
         rowset_copy.clear_tablet_schema();
@@ -160,7 +159,7 @@ static int create_tmp_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     txn->put(key, val);
     std::string schema_key, schema_val;
     if (write_schema_kv) {
-        meta_schema_key({instance_id, rowset.index_id(), rowset.schema_version()}, &schema_key);
+        meta_schema_key({mock_instance, rowset.index_id(), rowset.schema_version()}, &schema_key);
         rowset.tablet_schema().SerializeToString(&schema_val);
         txn->put(schema_key, schema_val);
     }
@@ -188,7 +187,7 @@ static int create_committed_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     std::string val;
 
     auto rowset_id = next_rowset_id();
-    MetaRowsetKeyInfo key_info {instance_id, tablet_id, version};
+    MetaRowsetKeyInfo key_info {mock_instance, tablet_id, version};
     meta_rowset_key(key_info, &key);
 
     doris::RowsetMetaPB rowset_pb;
@@ -226,27 +225,27 @@ static int create_committed_rowset(TxnKv* txn_kv, ObjStoreAccessor* accessor,
     return 0;
 }
 
-static int create_tablet(TxnKv* txn_kv, int64_t table_id, int64_t index_id, int64_t partition_id,
-                         int64_t tablet_id) {
-    std::unique_ptr<Transaction> txn;
-    if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
-        return -1;
-    }
-    auto key = meta_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
-    doris::TabletMetaPB tablet_meta;
-    tablet_meta.set_tablet_id(tablet_id);
-    auto val = tablet_meta.SerializeAsString();
-    txn->put(key, val);
-    key = meta_tablet_idx_key({instance_id, tablet_id});
-    txn->put(key, val); // val is not necessary
-    key = stats_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
-    txn->put(key, val); // val is not necessary
-    key = job_tablet_key({instance_id, table_id, index_id, partition_id, tablet_id});
-    txn->put(key, val); // val is not necessary
-    if (txn->commit() != TxnErrorCode::TXN_OK) {
-        return -1;
-    }
-    return 0;
+static void create_tablet(MetaService* meta_service, int64_t table_id, int64_t index_id,
+                          int64_t partition_id, int64_t tablet_id) {
+    brpc::Controller cntl;
+    CreateTabletsRequest req;
+    CreateTabletsResponse res;
+    auto tablet = req.add_tablet_metas();
+    tablet->set_tablet_state(doris::TabletStatePB::PB_RUNNING);
+    tablet->set_table_id(table_id);
+    tablet->set_index_id(index_id);
+    tablet->set_partition_id(partition_id);
+    tablet->set_tablet_id(tablet_id);
+    auto schema = tablet->mutable_schema();
+    schema->set_schema_version(0);
+    auto first_rowset = tablet->add_rs_metas();
+    first_rowset->set_rowset_id(0); // required
+    first_rowset->set_rowset_id_v2(next_rowset_id());
+    first_rowset->set_start_version(0);
+    first_rowset->set_end_version(1);
+    first_rowset->mutable_tablet_schema()->CopyFrom(*schema);
+    meta_service->create_tablets(&cntl, &req, &res, nullptr);
+    ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << tablet_id;
 }
 
 static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t partition_id,
@@ -254,7 +253,7 @@ static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t part
     std::string key;
     std::string val;
 
-    RecyclePartKeyInfo key_info {instance_id, partition_id};
+    RecyclePartKeyInfo key_info {mock_instance, partition_id};
     recycle_partition_key(key_info, &key);
 
     RecyclePartitionPB partition_pb;
@@ -279,7 +278,7 @@ static int create_recycle_partiton(TxnKv* txn_kv, int64_t table_id, int64_t part
 }
 
 static int create_version_kv(TxnKv* txn_kv, int64_t table_id, int64_t partition_id) {
-    auto key = version_key({instance_id, db_id, table_id, partition_id});
+    auto key = version_key({mock_instance, db_id, table_id, partition_id});
     VersionPB version;
     version.set_version(1);
     auto val = version.SerializeAsString();
@@ -297,7 +296,7 @@ static int create_version_kv(TxnKv* txn_kv, int64_t table_id, int64_t partition_
 static int create_txn_label_kv(TxnKv* txn_kv, std::string label, int64_t db_id) {
     std::string txn_label_key_;
     std::string txn_label_val;
-    auto keyinfo = TxnLabelKeyInfo({instance_id, db_id, label});
+    auto keyinfo = TxnLabelKeyInfo({mock_instance, db_id, label});
     txn_label_key(keyinfo, &txn_label_key_);
     std::unique_ptr<Transaction> txn;
     if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
@@ -314,7 +313,7 @@ static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_i
     std::string key;
     std::string val;
 
-    RecycleIndexKeyInfo key_info {instance_id, index_id};
+    RecycleIndexKeyInfo key_info {mock_instance, index_id};
     recycle_index_key(key_info, &key);
 
     RecycleIndexPB index_pb;
@@ -335,13 +334,13 @@ static int create_recycle_index(TxnKv* txn_kv, int64_t table_id, int64_t index_i
     return 0;
 }
 
-static int get_txn_info(std::shared_ptr<TxnKv> txn_kv, std::string instance_id, int64_t db_id,
+static int get_txn_info(std::shared_ptr<TxnKv> txn_kv, std::string mock_instance, int64_t db_id,
                         int64_t txn_id, TxnInfoPB& txn_info_pb) {
     std::string txn_inf_key;
     std::string txn_inf_val;
-    TxnInfoKeyInfo txn_inf_key_info {instance_id, db_id, txn_id};
+    TxnInfoKeyInfo txn_inf_key_info {mock_instance, db_id, txn_id};
 
-    LOG(INFO) << instance_id << "|" << db_id << "|" << txn_id;
+    LOG(INFO) << mock_instance << "|" << db_id << "|" << txn_id;
 
     std::unique_ptr<Transaction> txn;
     if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
@@ -368,13 +367,13 @@ static int get_txn_info(std::shared_ptr<TxnKv> txn_kv, std::string instance_id, 
     return 0;
 }
 
-static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string instance_id,
+static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string mock_instance,
                                   int64_t db_id, int64_t txn_id, const std::string& label) {
     std::string txn_inf_key;
     std::string txn_inf_val;
-    TxnInfoKeyInfo txn_inf_key_info {instance_id, db_id, txn_id};
+    TxnInfoKeyInfo txn_inf_key_info {mock_instance, db_id, txn_id};
 
-    LOG(INFO) << instance_id << "|" << db_id << "|" << txn_id;
+    LOG(INFO) << mock_instance << "|" << db_id << "|" << txn_id;
 
     std::unique_ptr<Transaction> txn;
     if (txn_kv->create_txn(&txn) != TxnErrorCode::TXN_OK) {
@@ -387,14 +386,14 @@ static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string ins
     }
 
     std::string label_key, label_val;
-    txn_label_key({instance_id, db_id, label}, &label_key);
+    txn_label_key({mock_instance, db_id, label}, &label_key);
     err = txn->get(label_key, &label_val);
     if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -3;
     }
 
     std::string index_key, index_val;
-    index_key = txn_index_key({instance_id, txn_id});
+    index_key = txn_index_key({mock_instance, txn_id});
     err = txn->get(index_key, &index_val);
     if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
         return -4;
@@ -402,7 +401,7 @@ static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string ins
 
     std::string running_key;
     std::string running_value;
-    TxnRunningKeyInfo running_key_info {instance_id, db_id, txn_id};
+    TxnRunningKeyInfo running_key_info {mock_instance, db_id, txn_id};
     txn_running_key(running_key_info, &running_key);
     err = txn->get(running_key, &running_value);
     if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -411,7 +410,7 @@ static int check_recycle_txn_keys(std::shared_ptr<TxnKv> txn_kv, std::string ins
 
     std::string rec_txn_key;
     std::string rec_txn_val;
-    RecycleTxnKeyInfo recycle_txn_key_info {instance_id, db_id, txn_id};
+    RecycleTxnKeyInfo recycle_txn_key_info {mock_instance, db_id, txn_id};
     recycle_txn_key(recycle_txn_key_info, &rec_txn_key);
     err = txn->get(rec_txn_key, &rec_txn_val);
     if (err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -471,7 +470,7 @@ static int create_instance(const std::string& internal_stage_id,
         instance_info.add_stages()->CopyFrom(external_stage);
     }
 
-    instance_info.set_instance_id(instance_id);
+    instance_info.set_instance_id(mock_instance);
     return 0;
 }
 
@@ -481,7 +480,7 @@ static int create_copy_job(TxnKv* txn_kv, const std::string& stage_id, int64_t t
                            int64_t start_time = 0, int64_t finish_time = 0) {
     std::string key;
     std::string val;
-    CopyJobKeyInfo key_info {instance_id, stage_id, table_id, "copy_id", 0};
+    CopyJobKeyInfo key_info {mock_instance, stage_id, table_id, "copy_id", 0};
     copy_job_key(key_info, &key);
 
     CopyJobPB copy_job;
@@ -508,7 +507,7 @@ static int create_copy_job(TxnKv* txn_kv, const std::string& stage_id, int64_t t
 
     // create job files
     for (const auto& file : object_files) {
-        CopyFileKeyInfo file_info {instance_id, stage_id, table_id, file.relative_path(),
+        CopyFileKeyInfo file_info {mock_instance, stage_id, table_id, file.relative_path(),
                                    file.etag()};
         std::string file_key;
         copy_file_key(file_info, &file_key);
@@ -533,7 +532,7 @@ static int copy_job_exists(TxnKv* txn_kv, const std::string& stage_id, int64_t t
                            bool* exist) {
     std::string key;
     std::string val;
-    CopyJobKeyInfo key_info {instance_id, stage_id, table_id, "copy_id", 0};
+    CopyJobKeyInfo key_info {mock_instance, stage_id, table_id, "copy_id", 0};
     copy_job_key(key_info, &key);
 
     std::unique_ptr<Transaction> txn;
@@ -565,8 +564,8 @@ static int get_copy_file_num(TxnKv* txn_kv, const std::string& stage_id, int64_t
     *file_num = 0;
     std::string key0;
     std::string key1;
-    CopyFileKeyInfo key_info0 {instance_id, stage_id, table_id, "", ""};
-    CopyFileKeyInfo key_info1 {instance_id, stage_id, table_id + 1, "", ""};
+    CopyFileKeyInfo key_info0 {mock_instance, stage_id, table_id, "", ""};
+    CopyFileKeyInfo key_info1 {mock_instance, stage_id, table_id + 1, "", ""};
     copy_file_key(key_info0, &key0);
     copy_file_key(key_info1, &key1);
 
@@ -593,7 +592,7 @@ TEST(RecyclerTest, recycle_empty) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_empty");
     obj_info->set_ak(config::test_s3_ak);
@@ -615,7 +614,7 @@ TEST(RecyclerTest, recycle_rowsets) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_rowsets");
     obj_info->set_ak(config::test_s3_ak);
@@ -672,8 +671,8 @@ TEST(RecyclerTest, recycle_rowsets) {
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
-    auto begin_key = recycle_key_prefix(instance_id);
-    auto end_key = recycle_key_prefix(instance_id + '\xff');
+    auto begin_key = recycle_key_prefix(mock_instance);
+    auto end_key = recycle_key_prefix(mock_instance + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     EXPECT_EQ(it->size(), 0);
     // Check InvertedIndexIdCache
@@ -687,7 +686,7 @@ TEST(RecyclerTest, bench_recycle_rowsets) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_rowsets");
     obj_info->set_ak(config::test_s3_ak);
@@ -747,8 +746,8 @@ TEST(RecyclerTest, bench_recycle_rowsets) {
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
-    auto begin_key = recycle_key_prefix(instance_id);
-    auto end_key = recycle_key_prefix(instance_id + '\xff');
+    auto begin_key = recycle_key_prefix(mock_instance);
+    auto end_key = recycle_key_prefix(mock_instance + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
@@ -759,7 +758,7 @@ TEST(RecyclerTest, recycle_tmp_rowsets) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_tmp_rowsets");
     obj_info->set_ak(config::test_s3_ak);
@@ -814,8 +813,8 @@ TEST(RecyclerTest, recycle_tmp_rowsets) {
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
-    auto begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
-    auto end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
+    auto begin_key = meta_rowset_tmp_key({mock_instance, 0, 0});
+    auto end_key = meta_rowset_tmp_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // Check InvertedIndexIdCache
@@ -826,9 +825,12 @@ TEST(RecyclerTest, recycle_tmp_rowsets) {
 TEST(RecyclerTest, recycle_tablet) {
     auto txn_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(txn_kv->init(), 0);
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_tablet");
     obj_info->set_ak(config::test_s3_ak);
@@ -852,7 +854,7 @@ TEST(RecyclerTest, recycle_tablet) {
 
     constexpr int table_id = 10000, index_id = 10001, partition_id = 10002, tablet_id = 10003;
     auto accessor = recycler.accessor_map_.begin()->second;
-    create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+    create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id);
     for (int i = 0; i < 500; ++i) {
         auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[i % 5]);
         create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
@@ -868,29 +870,29 @@ TEST(RecyclerTest, recycle_tablet) {
     // check rowset does not exist on s3
     std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(tablet_id), &files));
-    ASSERT_TRUE(files.empty());
+    ASSERT_TRUE(files.empty()) << files.size() << ' ' << files[0].path;
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     // meta_tablet_key, meta_tablet_idx_key, meta_rowset_key
-    auto begin_key = meta_key_prefix(instance_id);
-    auto end_key = meta_key_prefix(instance_id + '\xff');
+    auto begin_key = meta_key_prefix(mock_instance);
+    auto end_key = meta_key_prefix(mock_instance + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // job_tablet_key
-    begin_key = job_tablet_key({instance_id, table_id, 0, 0, 0});
-    end_key = job_tablet_key({instance_id, table_id + 1, 0, 0, 0});
+    begin_key = job_tablet_key({mock_instance, table_id, 0, 0, 0});
+    end_key = job_tablet_key({mock_instance, table_id + 1, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // stats_tablet_key
-    begin_key = stats_tablet_key({instance_id, table_id, 0, 0, 0});
-    end_key = stats_tablet_key({instance_id, table_id + 1, 0, 0, 0});
+    begin_key = stats_tablet_key({mock_instance, table_id, 0, 0, 0});
+    end_key = stats_tablet_key({mock_instance, table_id + 1, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // recycle_rowset_key
-    begin_key = recycle_key_prefix(instance_id);
-    end_key = recycle_key_prefix(instance_id + '\xff');
+    begin_key = recycle_key_prefix(mock_instance);
+    end_key = recycle_key_prefix(mock_instance + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
@@ -899,9 +901,12 @@ TEST(RecyclerTest, recycle_indexes) {
     config::retention_seconds = 0;
     auto txn_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(txn_kv->init(), 0);
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_indexes");
     obj_info->set_ak(config::test_s3_ak);
@@ -914,11 +919,13 @@ TEST(RecyclerTest, recycle_indexes) {
     InstanceRecycler recycler(txn_kv, instance, *thread_group.get());
     ASSERT_EQ(recycler.init(), 0);
 
+    // Mock multi version schema in a tablet
     std::vector<doris::TabletSchemaPB> schemas;
-    for (int i = 0; i < 5; ++i) {
+    for (int schema_ver = 1; schema_ver < 6; ++schema_ver) {
         auto& schema = schemas.emplace_back();
-        schema.set_schema_version(i);
-        for (int j = 0; j < i; ++j) {
+        schema.set_schema_version(schema_ver);
+        for (int j = 0; j < schema_ver; ++j) {
+            // Mock inverted index
             schema.add_index()->set_index_id(j);
         }
     }
@@ -929,7 +936,7 @@ TEST(RecyclerTest, recycle_indexes) {
     int64_t txn_id_base = 114115;
     for (int i = 0; i < 100; ++i) {
         int64_t tablet_id = tablet_id_base + i;
-        create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+        create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id);
         for (int j = 0; j < 10; ++j) {
             auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[j % 5]);
             create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
@@ -949,57 +956,57 @@ TEST(RecyclerTest, recycle_indexes) {
     // check rowset does not exist on s3
     std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("data/", &files));
-    ASSERT_TRUE(files.empty());
+    ASSERT_TRUE(files.empty()) << files.size() << ' ' << files[0].path;
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     // meta_rowset_key
-    auto begin_key = meta_rowset_key({instance_id, 0, 0});
-    auto end_key = meta_rowset_key({instance_id, INT64_MAX, 0});
+    auto begin_key = meta_rowset_key({mock_instance, 0, 0});
+    auto end_key = meta_rowset_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_rowset_tmp_key
-    begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
-    end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
+    begin_key = meta_rowset_tmp_key({mock_instance, 0, 0});
+    end_key = meta_rowset_tmp_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 1000);
     // meta_tablet_idx_key
-    begin_key = meta_tablet_idx_key({instance_id, 0});
-    end_key = meta_tablet_idx_key({instance_id, INT64_MAX});
+    begin_key = meta_tablet_idx_key({mock_instance, 0});
+    end_key = meta_tablet_idx_key({mock_instance, INT64_MAX});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_tablet_key
-    begin_key = meta_tablet_key({instance_id, 0, 0, 0, 0});
-    end_key = meta_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
+    begin_key = meta_tablet_key({mock_instance, 0, 0, 0, 0});
+    end_key = meta_tablet_key({mock_instance, INT64_MAX, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_schema_key
-    begin_key = meta_schema_key({instance_id, 0, 0});
-    end_key = meta_schema_key({instance_id, INT64_MAX, 0});
+    begin_key = meta_schema_key({mock_instance, 0, 0});
+    end_key = meta_schema_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // job_tablet_key
-    begin_key = job_tablet_key({instance_id, table_id, 0, 0, 0});
-    end_key = job_tablet_key({instance_id, table_id + 1, 0, 0, 0});
+    begin_key = job_tablet_key({mock_instance, table_id, 0, 0, 0});
+    end_key = job_tablet_key({mock_instance, table_id + 1, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // stats_tablet_key
-    begin_key = stats_tablet_key({instance_id, table_id, 0, 0, 0});
-    end_key = stats_tablet_key({instance_id, table_id + 1, 0, 0, 0});
+    begin_key = stats_tablet_key({mock_instance, table_id, 0, 0, 0});
+    end_key = stats_tablet_key({mock_instance, table_id + 1, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // recycle_rowset_key
-    begin_key = recycle_key_prefix(instance_id);
-    end_key = recycle_key_prefix(instance_id + '\xff');
+    begin_key = recycle_key_prefix(mock_instance);
+    end_key = recycle_key_prefix(mock_instance + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
     // Test recycle tmp rowsets after recycle indexes
     ASSERT_EQ(recycler.recycle_tmp_rowsets(), 0);
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
-    end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
+    begin_key = meta_rowset_tmp_key({mock_instance, 0, 0});
+    end_key = meta_rowset_tmp_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
@@ -1008,9 +1015,12 @@ TEST(RecyclerTest, recycle_partitions) {
     config::retention_seconds = 0;
     auto txn_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(txn_kv->init(), 0);
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_partitions");
     obj_info->set_ak(config::test_s3_ak);
@@ -1023,11 +1033,13 @@ TEST(RecyclerTest, recycle_partitions) {
     InstanceRecycler recycler(txn_kv, instance, *thread_group.get());
     ASSERT_EQ(recycler.init(), 0);
 
+    // Mock multi version schema in a tablet
     std::vector<doris::TabletSchemaPB> schemas;
-    for (int i = 0; i < 5; ++i) {
+    for (int schema_ver = 1; schema_ver < 6; ++schema_ver) {
         auto& schema = schemas.emplace_back();
-        schema.set_schema_version(i);
-        for (int j = 0; j < i; ++j) {
+        schema.set_schema_version(schema_ver);
+        for (int j = 0; j < schema_ver; ++j) {
+            // Mock inverted index
             schema.add_index()->set_index_id(j);
         }
     }
@@ -1040,7 +1052,7 @@ TEST(RecyclerTest, recycle_partitions) {
     for (auto index_id : index_ids) {
         for (int i = 0; i < 20; ++i) {
             int64_t tablet_id = tablet_id_base + i;
-            create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id);
             for (int j = 0; j < 10; ++j) {
                 auto rowset =
                         create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[j % 5]);
@@ -1060,44 +1072,44 @@ TEST(RecyclerTest, recycle_partitions) {
     // check rowset does not exist on s3
     std::vector<ObjectMeta> files;
     ASSERT_EQ(0, accessor->list("data/", &files));
-    ASSERT_TRUE(files.empty());
+    ASSERT_TRUE(files.empty()) << files.size() << ' ' << files[0].path;
     // check all related kv have been deleted
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
     // meta_rowset_key
-    auto begin_key = meta_rowset_key({instance_id, 0, 0});
-    auto end_key = meta_rowset_key({instance_id, INT64_MAX, 0});
+    auto begin_key = meta_rowset_key({mock_instance, 0, 0});
+    auto end_key = meta_rowset_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_rowset_tmp_key
-    begin_key = meta_rowset_tmp_key({instance_id, 0, 0});
-    end_key = meta_rowset_tmp_key({instance_id, INT64_MAX, 0});
+    begin_key = meta_rowset_tmp_key({mock_instance, 0, 0});
+    end_key = meta_rowset_tmp_key({mock_instance, INT64_MAX, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_tablet_idx_key
-    begin_key = meta_tablet_idx_key({instance_id, 0});
-    end_key = meta_tablet_idx_key({instance_id, INT64_MAX});
+    begin_key = meta_tablet_idx_key({mock_instance, 0});
+    end_key = meta_tablet_idx_key({mock_instance, INT64_MAX});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // meta_tablet_key
-    begin_key = meta_tablet_key({instance_id, 0, 0, 0, 0});
-    end_key = meta_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
+    begin_key = meta_tablet_key({mock_instance, 0, 0, 0, 0});
+    end_key = meta_tablet_key({mock_instance, INT64_MAX, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // job_tablet_key
-    begin_key = job_tablet_key({instance_id, table_id, 0, 0, 0});
-    end_key = job_tablet_key({instance_id, table_id + 1, 0, 0, 0});
+    begin_key = job_tablet_key({mock_instance, table_id, 0, 0, 0});
+    end_key = job_tablet_key({mock_instance, table_id + 1, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // stats_tablet_key
-    begin_key = stats_tablet_key({instance_id, table_id, 0, 0, 0});
-    end_key = stats_tablet_key({instance_id, table_id + 1, 0, 0, 0});
+    begin_key = stats_tablet_key({mock_instance, table_id, 0, 0, 0});
+    end_key = stats_tablet_key({mock_instance, table_id + 1, 0, 0, 0});
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
     // recycle_rowset_key
-    begin_key = recycle_key_prefix(instance_id);
-    end_key = recycle_key_prefix(instance_id + '\xff');
+    begin_key = recycle_key_prefix(mock_instance);
+    end_key = recycle_key_prefix(mock_instance + '\xff');
     ASSERT_EQ(txn->get(begin_key, end_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
@@ -1106,15 +1118,18 @@ TEST(RecyclerTest, recycle_versions) {
     config::retention_seconds = 0;
     auto txn_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(txn_kv->init(), 0);
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
 
     std::vector<int64_t> index_ids {20001, 20002, 20003, 20004, 20005};
     std::vector<int64_t> partition_ids {30001, 30002, 30003, 30004, 30005, 30006};
     constexpr int64_t table_id = 10000;
 
-    int64_t tablet_id = 40000;
+    int64_t next_tablet_id = 40000;
     for (auto index_id : index_ids) {
         for (auto partition_id : partition_ids) {
-            create_tablet(txn_kv.get(), table_id, index_id, partition_id, ++tablet_id);
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, ++next_tablet_id);
         }
     }
     for (auto partition_id : partition_ids) {
@@ -1126,7 +1141,7 @@ TEST(RecyclerTest, recycle_versions) {
     }
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     InstanceRecycler recycler(txn_kv, instance, *thread_group.get());
     ASSERT_EQ(recycler.init(), 0);
     // Recycle all partitions in table except 30006
@@ -1135,13 +1150,13 @@ TEST(RecyclerTest, recycle_versions) {
     // All version kvs except version of partition 30006 must have been deleted
     std::unique_ptr<Transaction> txn;
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
-    auto key_begin = version_key({instance_id, db_id, table_id, 0});
-    auto key_end = version_key({instance_id, db_id, table_id, INT64_MAX});
+    auto key_begin = version_key({mock_instance, db_id, table_id, 0});
+    auto key_end = version_key({mock_instance, db_id, table_id, INT64_MAX});
     std::unique_ptr<RangeGetIterator> iter;
     ASSERT_EQ(txn->get(key_begin, key_end, &iter), TxnErrorCode::TXN_OK);
     ASSERT_EQ(iter->size(), 1);
     auto [k, v] = iter->next();
-    EXPECT_EQ(k, version_key({instance_id, db_id, table_id, 30006}));
+    EXPECT_EQ(k, version_key({mock_instance, db_id, table_id, 30006}));
 
     // Drop indexes
     for (auto index_id : index_ids) {
@@ -1408,6 +1423,26 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
         get_txn_info(txn_kv, mock_instance, db_id, txn_id, txn_info_pb);
         ASSERT_EQ(txn_info_pb.status(), TxnStatusPB::TXN_STATUS_PREPARED);
 
+        {
+            int64_t index_id = table_id + 1;
+            int64_t partition_id = table_id + 2;
+            int64_t tablet_id = table_id + 3;
+            create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id);
+            // Write tmp rowset kv to pass commit_txn check
+            doris::TabletSchemaPB schema;
+            schema.set_schema_version(0);
+            auto tmp_rs = create_rowset("1", tablet_id, index_id, 0, schema, txn_id);
+            auto tmp_rs_key =
+                    meta_rowset_tmp_key({mock_instance, tmp_rs.txn_id(), tmp_rs.tablet_id()});
+            auto tmp_rs_val = tmp_rs.SerializeAsString();
+            std::unique_ptr<Transaction> txn;
+            auto err = txn_kv->create_txn(&txn);
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+            txn->put(tmp_rs_key, tmp_rs_val);
+            err = txn->commit();
+            ASSERT_EQ(err, TxnErrorCode::TXN_OK);
+        }
+
         // commit_txn
         {
             brpc::Controller cntl;
@@ -1418,7 +1453,7 @@ TEST(RecyclerTest, recycle_expired_txn_label) {
             CommitTxnResponse res;
             meta_service->commit_txn(reinterpret_cast<::google::protobuf::RpcController*>(&cntl),
                                      &req, &res, nullptr);
-            ASSERT_EQ(res.status().code(), MetaServiceCode::OK);
+            ASSERT_EQ(res.status().code(), MetaServiceCode::OK) << res.status().msg();
         }
         recycler.recycle_expired_txn_label();
         ASSERT_EQ(get_txn_info(txn_kv, mock_instance, db_id, txn_id, txn_info_pb), -2);
@@ -1761,6 +1796,9 @@ TEST(RecyclerTest, recycle_deleted_instance) {
     auto txn_kv = std::dynamic_pointer_cast<TxnKv>(std::make_shared<MemTxnKv>());
     ASSERT_NE(txn_kv.get(), nullptr);
     ASSERT_EQ(txn_kv->init(), 0);
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
     // create internal/external stage
     std::string internal_stage_id = "internal";
     std::string external_stage_id = "external";
@@ -1780,11 +1818,13 @@ TEST(RecyclerTest, recycle_deleted_instance) {
         ASSERT_EQ(0, create_version_kv(txn_kv.get(), i, i + 1));
     }
     // create meta key
+    // Mock multi version schema in a tablet
     std::vector<doris::TabletSchemaPB> schemas;
-    for (int i = 0; i < 5; ++i) {
+    for (int schema_ver = 1; schema_ver < 6; ++schema_ver) {
         auto& schema = schemas.emplace_back();
-        schema.set_schema_version(i);
-        for (int j = 0; j < i; ++j) {
+        schema.set_schema_version(schema_ver);
+        for (int j = 0; j < schema_ver; ++j) {
+            // Mock inverted index
             schema.add_index()->set_index_id(j);
         }
     }
@@ -1796,7 +1836,7 @@ TEST(RecyclerTest, recycle_deleted_instance) {
     for (int i = 0; i < 100; ++i) {
         int64_t tablet_id = tablet_id_base + i;
         // creare stats key
-        create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+        create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id);
         for (int j = 0; j < 10; ++j) {
             auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[j % 5]);
             // create recycle key
@@ -1831,33 +1871,33 @@ TEST(RecyclerTest, recycle_deleted_instance) {
     ASSERT_EQ(txn_kv->create_txn(&txn), TxnErrorCode::TXN_OK);
     std::unique_ptr<RangeGetIterator> it;
 
-    std::string start_txn_key = txn_key_prefix(instance_id);
-    std::string end_txn_key = txn_key_prefix(instance_id + '\x00');
+    std::string start_txn_key = txn_key_prefix(mock_instance);
+    std::string end_txn_key = txn_key_prefix(mock_instance + '\x00');
     ASSERT_EQ(txn->get(start_txn_key, end_txn_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
-    std::string start_version_key = version_key({instance_id, 0, 0, 0});
-    std::string end_version_key = version_key({instance_id, INT64_MAX, 0, 0});
+    std::string start_version_key = version_key({mock_instance, 0, 0, 0});
+    std::string end_version_key = version_key({mock_instance, INT64_MAX, 0, 0});
     ASSERT_EQ(txn->get(start_version_key, end_version_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
-    std::string start_meta_key = meta_key_prefix(instance_id);
-    std::string end_meta_key = meta_key_prefix(instance_id + '\x00');
+    std::string start_meta_key = meta_key_prefix(mock_instance);
+    std::string end_meta_key = meta_key_prefix(mock_instance + '\x00');
     ASSERT_EQ(txn->get(start_meta_key, end_meta_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
-    auto begin_recycle_key = recycle_key_prefix(instance_id);
-    auto end_recycle_key = recycle_key_prefix(instance_id + '\x00');
+    auto begin_recycle_key = recycle_key_prefix(mock_instance);
+    auto end_recycle_key = recycle_key_prefix(mock_instance + '\x00');
     ASSERT_EQ(txn->get(begin_recycle_key, end_recycle_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
-    std::string start_stats_tablet_key = stats_tablet_key({instance_id, 0, 0, 0, 0});
-    std::string end_stats_tablet_key = stats_tablet_key({instance_id, INT64_MAX, 0, 0, 0});
+    std::string start_stats_tablet_key = stats_tablet_key({mock_instance, 0, 0, 0, 0});
+    std::string end_stats_tablet_key = stats_tablet_key({mock_instance, INT64_MAX, 0, 0, 0});
     ASSERT_EQ(txn->get(start_stats_tablet_key, end_stats_tablet_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 
-    std::string start_copy_key = copy_key_prefix(instance_id);
-    std::string end_copy_key = copy_key_prefix(instance_id + '\x00');
+    std::string start_copy_key = copy_key_prefix(mock_instance);
+    std::string end_copy_key = copy_key_prefix(mock_instance + '\x00');
     ASSERT_EQ(txn->get(start_copy_key, end_copy_key, &it), TxnErrorCode::TXN_OK);
     ASSERT_EQ(it->size(), 0);
 }
@@ -1927,7 +1967,7 @@ TEST(RecyclerTest, multi_recycler) {
         ASSERT_TRUE(job_info.ParseFromString(val));
         EXPECT_EQ(JobRecyclePB::IDLE, job_info.status());
         EXPECT_GT(job_info.last_finish_time_ms(), 0);
-        std::cout << "host: " << job_info.ip_port() << " finish recycle job of instance_id: " << i
+        std::cout << "host: " << job_info.ip_port() << " finish recycle job of mock_instance: " << i
                   << std::endl;
     }
     EXPECT_EQ(count, 10);
@@ -1957,7 +1997,7 @@ TEST(CheckerTest, normal_inverted_check) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("1");
     obj_info->set_ak(config::test_s3_ak);
@@ -1977,7 +2017,7 @@ TEST(CheckerTest, normal_inverted_check) {
         SyncPoint::get_instance()->disable_processing();
     });
 
-    InstanceChecker checker(txn_kv, instance_id);
+    InstanceChecker checker(txn_kv, mock_instance);
     ASSERT_EQ(checker.init(instance), 0);
     // Add some visible rowsets along with some rowsets that should be recycled
     // call inverted check after do recycle which would sweep all the rowsets not visible
@@ -2000,9 +2040,12 @@ TEST(CheckerTest, normal_inverted_check) {
 TEST(CheckerTest, DISABLED_abnormal_inverted_check) {
     auto txn_kv = std::make_shared<MemTxnKv>();
     ASSERT_EQ(txn_kv->init(), 0);
+    auto rs = std::make_shared<MockResourceManager>(txn_kv);
+    auto rl = std::make_shared<RateLimiter>();
+    auto meta_service = std::make_unique<MetaServiceImpl>(txn_kv, rs, rl);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("1");
     obj_info->set_ak(config::test_s3_ak);
@@ -2022,7 +2065,7 @@ TEST(CheckerTest, DISABLED_abnormal_inverted_check) {
         SyncPoint::get_instance()->disable_processing();
     });
 
-    InstanceChecker checker(txn_kv, instance_id);
+    InstanceChecker checker(txn_kv, mock_instance);
     ASSERT_EQ(checker.init(instance), 0);
     // Add some visible rowsets along with some rowsets that should be recycled
     // call inverted check after do recycle which would sweep all the rowsets not visible
@@ -2043,7 +2086,7 @@ TEST(CheckerTest, DISABLED_abnormal_inverted_check) {
 
     // Create some rowsets not visible in S3
     constexpr int table_id = 10101, index_id = 10102, partition_id = 10103, tablet_id = 10104;
-    create_tablet(txn_kv.get(), table_id, index_id, partition_id, tablet_id);
+    create_tablet(meta_service.get(), table_id, index_id, partition_id, tablet_id);
     for (int i = 0; i < 500; ++i) {
         auto rowset = create_rowset("recycle_tablet", tablet_id, index_id, 5, schemas[i % 5]);
         create_recycle_rowset(txn_kv.get(), accessor.get(), rowset,
@@ -2058,7 +2101,7 @@ TEST(CheckerTest, normal) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("1");
     obj_info->set_ak(config::test_s3_ak);
@@ -2068,7 +2111,7 @@ TEST(CheckerTest, normal) {
     obj_info->set_bucket(config::test_s3_bucket);
     obj_info->set_prefix("CheckerTest");
 
-    InstanceChecker checker(txn_kv, instance_id);
+    InstanceChecker checker(txn_kv, mock_instance);
     ASSERT_EQ(checker.init(instance), 0);
 
     auto accessor = checker.accessor_map_.begin()->second;
@@ -2090,7 +2133,7 @@ TEST(CheckerTest, abnormal) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("1");
     obj_info->set_ak(config::test_s3_ak);
@@ -2100,7 +2143,7 @@ TEST(CheckerTest, abnormal) {
     obj_info->set_bucket(config::test_s3_bucket);
     obj_info->set_prefix("CheckerTest");
 
-    InstanceChecker checker(txn_kv, instance_id);
+    InstanceChecker checker(txn_kv, mock_instance);
     ASSERT_EQ(checker.init(instance), 0);
 
     auto accessor = checker.accessor_map_.begin()->second;
@@ -2121,11 +2164,11 @@ TEST(CheckerTest, abnormal) {
     std::vector<std::string> deleted_paths;
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(10001 + gen() % 100), &files));
     deleted_paths.push_back(files[gen() % files.size()].path);
-    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back(), "instance_id"));
+    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back(), "mock_instance"));
     files.clear();
     ASSERT_EQ(0, accessor->list(tablet_path_prefix(10101 + gen() % 100), &files));
     deleted_paths.push_back(files[gen() % files.size()].path);
-    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back(), "instance_id"));
+    ASSERT_EQ(0, accessor->delete_object(deleted_paths.back(), "mock_instance"));
 
     std::vector<std::string> lost_paths;
     auto sp = SyncPoint::get_instance();
@@ -2204,7 +2247,7 @@ TEST(CheckerTest, multi_checker) {
         ASSERT_TRUE(job_info.ParseFromString(val));
         EXPECT_EQ(JobRecyclePB::IDLE, job_info.status());
         EXPECT_GT(job_info.last_finish_time_ms(), 0);
-        std::cout << "host: " << job_info.ip_port() << " finish check job of instance_id: " << i
+        std::cout << "host: " << job_info.ip_port() << " finish check job of mock_instance: " << i
                   << std::endl;
     }
     EXPECT_EQ(count, 10);
@@ -2217,7 +2260,7 @@ TEST(CheckerTest, do_inspect) {
         ASSERT_EQ(mem_kv->init(), 0);
 
         InstanceInfoPB instance;
-        instance.set_instance_id(instance_id);
+        instance.set_instance_id(mock_instance);
         instance.set_ctime(11111);
         auto obj_info = instance.add_obj_info();
         obj_info->set_id("1");
@@ -2248,8 +2291,8 @@ TEST(CheckerTest, do_inspect) {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
             JobRecyclePB job_info;
-            job_info.set_instance_id(instance_id);
-            std::string key = job_check_key({instance_id});
+            job_info.set_instance_id(mock_instance);
+            std::string key = job_check_key({mock_instance});
             std::string val = job_info.SerializeAsString();
             txn->put(key, val);
             ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
@@ -2268,7 +2311,7 @@ TEST(CheckerTest, do_inspect) {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
             JobRecyclePB job_info;
-            job_info.set_instance_id(instance_id);
+            job_info.set_instance_id(mock_instance);
             job_info.set_last_ctime_ms(12345);
             auto sp = SyncPoint::get_instance();
             std::unique_ptr<int, std::function<void(int*)>> defer(
@@ -2277,7 +2320,7 @@ TEST(CheckerTest, do_inspect) {
                 ASSERT_TRUE(*reinterpret_cast<int64_t*>(p) == 12345);
             });
             sp->enable_processing();
-            std::string key = job_check_key({instance_id});
+            std::string key = job_check_key({mock_instance});
             std::string val = job_info.SerializeAsString();
             txn->put(key, val);
             ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
@@ -2292,7 +2335,7 @@ TEST(CheckerTest, do_inspect) {
             std::unique_ptr<Transaction> txn;
             ASSERT_EQ(TxnErrorCode::TXN_OK, mem_kv->create_txn(&txn));
             JobRecyclePB job_info;
-            job_info.set_instance_id(instance_id);
+            job_info.set_instance_id(mock_instance);
             job_info.set_last_ctime_ms(now - expiration_ms - 10);
             auto sp = SyncPoint::get_instance();
             std::unique_ptr<int, std::function<void(int*)>> defer(
@@ -2301,7 +2344,7 @@ TEST(CheckerTest, do_inspect) {
             bool alarm = false;
             sp->set_call_back("Checker:do_inspect", [&alarm](void*) { alarm = true; });
             sp->enable_processing();
-            std::string key = job_check_key({instance_id});
+            std::string key = job_check_key({mock_instance});
             std::string val = job_info.SerializeAsString();
             txn->put(key, val);
             ASSERT_EQ(TxnErrorCode::TXN_OK, txn->commit());
@@ -2316,7 +2359,7 @@ TEST(RecyclerTest, delete_rowset_data) {
     ASSERT_EQ(txn_kv->init(), 0);
 
     InstanceInfoPB instance;
-    instance.set_instance_id(instance_id);
+    instance.set_instance_id(mock_instance);
     auto obj_info = instance.add_obj_info();
     obj_info->set_id("recycle_tmp_rowsets");
     obj_info->set_ak(config::test_s3_ak);
@@ -2359,7 +2402,7 @@ TEST(RecyclerTest, delete_rowset_data) {
     {
         InstanceInfoPB tmp_instance;
         std::string resource_id = "recycle_tmp_rowsets";
-        tmp_instance.set_instance_id(instance_id);
+        tmp_instance.set_instance_id(mock_instance);
         auto tmp_obj_info = tmp_instance.add_obj_info();
         tmp_obj_info->set_id(resource_id);
         tmp_obj_info->set_ak(config::test_s3_ak);
