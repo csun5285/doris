@@ -256,8 +256,8 @@ Status S3FileWriter::close() {
         _pending_buf = nullptr;
     }
 
-    SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::close", Status());
     RETURN_IF_ERROR(_complete());
+    SYNC_POINT_RETURN_WITH_VALUE("s3_file_writer::close", Status());
 
     return Status::OK();
 }

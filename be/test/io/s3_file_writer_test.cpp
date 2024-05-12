@@ -897,12 +897,28 @@ TEST_F(S3FileWriterTest, close_error) {
         pairs->first = Status::InternalError("failed to close s3 file writer");
         LOG(INFO) << "return error when closing s3 file writer";
     });
+    sp->set_call_back("S3FileWriter::_put_object", [](auto&& values) {
+        // Deliberately make put object task fail to test if s3 file writer could
+        // handle io error
+        LOG(INFO) << "set put object to error";
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        io::S3FileWriter* writer = try_any_cast<io::S3FileWriter*>(values.at(0));
+        io::UploadFileBuffer* buf = try_any_cast<io::UploadFileBuffer*>(values.at(1));
+        writer->_st = Status::IOError(
+                "failed to put object (bucket={}, key={}, upload_id={}, exception=inject "
+                "error): "
+                "inject error",
+                writer->_bucket, writer->_path.native(), writer->_upload_id);
+        buf->set_status(writer->_st);
+        bool* pred = try_any_cast<bool*>(values.back());
+        *pred = true;
+    });
     io::FileWriterPtr s3_file_writer;
     st = s3_fs->create_file("close_error", &s3_file_writer, &state);
     ASSERT_TRUE(st.ok()) << st;
     Defer defer {[&]() {
         sp->clear_call_back("s3_file_writer::close");
-        static_cast<void>(s3_file_writer->close());
+        sp->clear_call_back("S3FileWriter::_put_object");
     }};
 
     st = s3_file_writer->close();
