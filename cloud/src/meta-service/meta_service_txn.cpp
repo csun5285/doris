@@ -746,19 +746,12 @@ void MetaServiceImpl::commit_txn(::google::protobuf::RpcController* controller,
 
     VLOG_DEBUG << "txn_id=" << txn_id << " tmp_rowsets_meta.size()=" << tmp_rowsets_meta.size();
 
-    if (tmp_rowsets_meta.empty()) {
-        [[unlikely]] code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = fmt::format("empty tmp rowset meta. db_id={} txn_id={} 2pc={}", db_id, txn_id,
-                          request->is_2pc());
-        return;
-    }
-
     // Create a read/write txn for guarantee consistency
     txn.reset();
     err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
         code = cast_as<ErrCategory::CREATE>(err);
-        ss << "failed to create txn, txn_id=" << txn_id << " err=" << err;
+        ss << "filed to create txn, txn_id=" << txn_id << " err=" << err;
         msg = ss.str();
         return;
     }

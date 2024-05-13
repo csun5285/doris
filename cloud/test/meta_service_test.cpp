@@ -1176,11 +1176,6 @@ TEST(MetaServiceTest, CommitTxnTest) {
 
         // doubly commit txn
         {
-            auto tmp_rowset = create_rowset(txn_id, tablet_id_base);
-            CreateRowsetResponse create_rs_res;
-            commit_rowset(meta_service.get(), tmp_rowset, create_rs_res);
-            ASSERT_EQ(create_rs_res.status().code(), MetaServiceCode::OK);
-
             brpc::Controller cntl;
             CommitTxnRequest req;
             auto db_id = 666;
