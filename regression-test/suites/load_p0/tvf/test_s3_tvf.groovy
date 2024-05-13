@@ -397,8 +397,8 @@ suite("test_s3_tvf", "load_p0") {
         try {
             sql """${sqlStr}"""
         } catch (Exception ex) {
-            assertTrue(attribute.expectFiled)
             logger.info("error: ", ex)
+            assertTrue(attribute.expectFiled)
         }
 
         qt_select """ select count(*) from $attribute.tableName """
