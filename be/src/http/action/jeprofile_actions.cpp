@@ -75,7 +75,11 @@ void JeHeapAction::handle(HttpRequest* req) {
 Status JeprofileActions::setup(doris::ExecEnv* exec_env, doris::EvHttpServer* http_server,
                                doris::ObjectPool& pool) {
     if (!config::jeprofile_dir.empty()) {
-        RETURN_IF_ERROR(io::global_local_filesystem()->create_directory(config::jeprofile_dir));
+        auto st = io::global_local_filesystem()->create_directory(config::jeprofile_dir);
+        if (!st.ok()) {
+            LOG(WARNING) << "failed to create dir for jeprofile: " << config::jeprofile_dir;
+            return st;
+        }
     }
     http_server->register_handler(HttpMethod::GET, "/jeheap/dump", pool.add(new JeHeapAction()));
     return Status::OK();
