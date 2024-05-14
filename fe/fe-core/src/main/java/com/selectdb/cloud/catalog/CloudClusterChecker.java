@@ -354,7 +354,7 @@ public class CloudClusterChecker extends MasterDaemon {
             for (Backend backend : bes) {
                 MetricRepo.CLOUD_CLUSTER_BACKEND_ALIVE.computeIfAbsent(backend.getAddress(), key -> {
                     GaugeMetricImpl<Integer> backendAlive = new GaugeMetricImpl<>("backend_alive", MetricUnit.NOUNIT,
-                            "backend alive or not");
+                            "backend alive or not", 0);
                     backendAlive.addLabel(new MetricLabel("cluster_id", entry.getValue()));
                     backendAlive.addLabel(new MetricLabel("cluster_name", entry.getKey()));
                     backendAlive.addLabel(new MetricLabel("address", key));
@@ -367,7 +367,7 @@ public class CloudClusterChecker extends MasterDaemon {
             MetricRepo.CLOUD_CLUSTER_BACKEND_ALIVE_TOTAL.computeIfAbsent(entry.getKey(), key -> {
                 GaugeMetricImpl<Long> backendAliveTotal = new GaugeMetricImpl<>("backend_alive_total",
                         MetricUnit.NOUNIT,
-                        "backend alive num in cluster");
+                        "backend alive num in cluster", 0L);
                 backendAliveTotal.addLabel(new MetricLabel("cluster_id", entry.getValue()));
                 backendAliveTotal.addLabel(new MetricLabel("cluster_name", key));
                 MetricRepo.DORIS_METRIC_REGISTER.addMetrics(backendAliveTotal);
