@@ -29,6 +29,7 @@ suite("smoke_test_index_match", "smoke"){
             useTime = t
             sleep(delta_time)
         }
+        sleep(delta_time)
         assertTrue(useTime <= OpTimeout)
     }
 
