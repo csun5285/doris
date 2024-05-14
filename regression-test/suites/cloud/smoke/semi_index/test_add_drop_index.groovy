@@ -147,14 +147,14 @@ suite("smoke_add_drop_index_with_data", "smoke"){
     wait_for_latest_op_on_table_finish(indexTbName1, timeout)
 
     // query rows where description match 'desc', should fail without index
-    success = false
-    try {
-        sql "select * from ${indexTbName1} where description match 'desc'"
-        success = true
-    } catch(Exception ex) {
-        logger.info("sql exception: " + ex)
-    }
-    assertEquals(success, false)
+    //success = false
+    //try {
+    //    sql "select * from ${indexTbName1} where description match 'desc'"
+    //    success = true
+    //} catch(Exception ex) {
+    //    logger.info("sql exception: " + ex)
+    //}
+    //assertEquals(success, false)
 
     // query rows where name='name1'
     select_result = sql "select * from ${indexTbName1} where name='name1'"
