@@ -400,7 +400,7 @@ DEFINE_mInt64(compaction_promotion_version_count, "1000");
 DEFINE_mInt64(compaction_min_size_mbytes, "64");
 
 // cumulative compaction policy: min and max delta file's number
-DEFINE_mInt64(cumulative_compaction_min_deltas, "20");
+DEFINE_mInt64(cumulative_compaction_min_deltas, "5");
 DEFINE_mInt64(cumulative_compaction_max_deltas, "1000");
 
 // This config can be set to limit thread number in  multiget thread pool.
