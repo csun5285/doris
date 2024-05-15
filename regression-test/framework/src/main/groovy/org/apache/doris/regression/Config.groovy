@@ -800,6 +800,7 @@ class Config {
 
     void fetchServerConfig() {
         try {
+            // Some pipelines use normal users to run cases, but `SHOW` is a privileged query.
             def result = JdbcUtils.executeToMapArray(getRootConnection(), "show frontends")
             isDorisEnv = result.get(0).Version.toString().startsWith("doris")
         } catch (Throwable t) {
@@ -812,6 +813,9 @@ class Config {
     }
 
     Connection getRootConnection() {
+        if (jdbcUser != null && (jdbcUser.equals('admin') || jdbcUser.equals('root'))) {
+            return getConnection();
+        }
         return DriverManager.getConnection(jdbcUrl, 'root', '')
     }
 
