@@ -957,9 +957,13 @@ public class ConnectContext {
 
     public static String cloudNoBackendsReason() {
         StringBuilder sb = new StringBuilder();
-        sb.append(" ");
         if (ConnectContext.get() != null) {
             String clusterName = ConnectContext.get().getCloudCluster();
+            String hits = "or you may not have permission to access the current cluster = ";
+            sb.append(" ");
+            if (Strings.isNullOrEmpty(clusterName)) {
+                return sb.append(hits).append("cluster name empty").toString();
+            }
             String clusterStatus = Env.getCurrentSystemInfo().getCloudStatusByName(clusterName);
             if (!Strings.isNullOrEmpty(clusterStatus)
                     && SelectdbCloud.ClusterStatus.valueOf(clusterStatus)
@@ -968,7 +972,7 @@ public class ConnectContext {
                 sb.append("cluster ").append(clusterName)
                     .append(" is shutdown manually, please start it first");
             } else {
-                sb.append("or you may not have permission to access the current cluster = ").append(clusterName);
+                sb.append(hits).append(clusterName);
             }
         }
         return sb.toString();
