@@ -22,8 +22,8 @@
 # docker build -f docker/runtime/doris-compose/Dockerfile -t <your-image-name>:<version> .
 
 # choose a base image
-# ARG JDK_IMAGE=openjdk:17-jdk-slim
-ARG JDK_IMAGE=openjdk:8u342-jdk
+ARG JDK_IMAGE=openjdk:17-jdk-slim
+#ARG JDK_IMAGE=openjdk:8u342-jdk
 
 #### END ARG ####
 
@@ -55,6 +55,15 @@ RUN apt-get update && \
 RUN curl -f https://repo1.maven.org/maven2/org/jacoco/jacoco/${JACOCO_VERSION}/jacoco-${JACOCO_VERSION}.zip -o jacoco.zip && \
     mkdir /jacoco && \
     unzip jacoco.zip -d /jacoco
+
+# cloud
+COPY cloud/CMakeLists.txt cloud/output* /opt/apache-doris/cloud/
+RUN <<EOF
+    mkdir /opt/apache-doris/fdb
+    if [ -d /opt/apache-doris/cloud/bin ]; then
+        sed -i 's/\<chmod\>/echo/g' /opt/apache-doris/cloud/bin/start.sh
+    fi
+EOF
 
 # fe and be
 COPY output /opt/apache-doris/

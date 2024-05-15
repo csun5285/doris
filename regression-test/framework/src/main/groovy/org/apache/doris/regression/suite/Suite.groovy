@@ -1150,7 +1150,7 @@ class Suite implements GroovyInterceptable {
     }
 
     boolean isCloudMode() {
-        return false
+        return true
     }
 
     String getFeConfig(String key) {
