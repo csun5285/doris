@@ -216,9 +216,20 @@ suite("test_internal_stage_copy_into") {
 
     def endpoint = context.config.feHttpAddress.split(':')
     assertTrue(endpoint.size() == 2)
+
     // get fe metrics
-    def upload_total = get_be_metric(endpoint[0], endpoint[1], "doris_fe_http_copy_into_upload_request_total")
-    logger.info("fe metrics, doris_fe_http_copy_into_upload_request_total: " + result)
-    // at least >= 1
-    assertTrue(upload_total > 0)
+    def count = 0
+    while (true) {
+        def upload_total = get_be_metric(endpoint[0], endpoint[1], "doris_fe_http_copy_into_upload_request_total")
+        logger.info("fe metrics, doris_fe_http_copy_into_upload_request_total: " + upload_total)
+        if (upload_total > 0) {
+            break;
+        }
+        if (count >= 20) {
+            assertTrue(upload_total > 0)
+            break;
+        }
+        count++
+        sleep(1000)
+    }
 }
