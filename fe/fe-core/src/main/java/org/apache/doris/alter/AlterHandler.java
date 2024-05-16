@@ -40,7 +40,6 @@ import org.apache.doris.task.AlterInvertedIndexTask;
 import org.apache.doris.task.AlterReplicaTask;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Maps;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -49,13 +48,14 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class AlterHandler extends MasterDaemon {
     private static final Logger LOG = LogManager.getLogger(AlterHandler.class);
 
     // queue of alter job v2
-    protected ConcurrentMap<Long, AlterJobV2> alterJobsV2 = Maps.newConcurrentMap();
+    protected ConcurrentMap<Long, AlterJobV2> alterJobsV2 = new ConcurrentSkipListMap<Long, AlterJobV2>();
 
     /**
      * lock to perform atomic operations.
@@ -85,6 +85,19 @@ public abstract class AlterHandler extends MasterDaemon {
     protected void addAlterJobV2(AlterJobV2 alterJob) {
         this.alterJobsV2.put(alterJob.getJobId(), alterJob);
         LOG.info("add {} job {}", alterJob.getType(), alterJob.getJobId());
+
+        Iterator<Map.Entry<Long, AlterJobV2>> iterator = alterJobsV2.entrySet().iterator();
+        while (iterator.hasNext() && alterJobsV2.size() > Config.max_finished_alter_job_num) {
+            AlterJobV2 alterJobV2 = iterator.next().getValue();
+            if (alterJobV2.isDone()) {
+                iterator.remove();
+                RemoveAlterJobV2OperationLog log = new RemoveAlterJobV2OperationLog(
+                        alterJobV2.getJobId(), alterJobV2.getType());
+                Env.getCurrentEnv().getEditLog().logRemoveExpiredAlterJobV2(log);
+                LOG.info("remove redundant {} job {}. finish at {}", alterJobV2.getType(),
+                        alterJobV2.getJobId(), TimeUtils.longToTimeString(alterJobV2.getFinishedTimeMs()));
+            }
+        }
     }
 
     public List<AlterJobV2> getUnfinishedAlterJobV2ByTableId(long tblId) {
