@@ -592,6 +592,10 @@ public class CacheAnalyzer {
         OlapTable olapTable = node.getOlapTable();
         cacheTable.partitionNum = node.getSelectedPartitionIds().size();
         cacheTable.table = olapTable;
+
+        Collection<Long> partitionIds = node.getSelectedPartitionIds();
+        olapTable.getVersionInBatchForCloudMode(partitionIds);
+
         for (Long partitionId : node.getSelectedPartitionIds()) {
             Partition partition = olapTable.getPartition(partitionId);
             if (partition.getVisibleVersionTime() >= cacheTable.latestTime) {
