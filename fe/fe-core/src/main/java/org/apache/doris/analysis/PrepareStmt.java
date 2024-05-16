@@ -234,9 +234,6 @@ public class PrepareStmt extends StatementBase {
         if (inner instanceof SelectStmt) {
             return new SelectStmt((SelectStmt) inner);
         }
-        if (inner instanceof NativeInsertStmt) {
-            return new NativeInsertStmt((NativeInsertStmt) inner);
-        }
         // Other statement could reuse the inner statement
         return inner;
     }
