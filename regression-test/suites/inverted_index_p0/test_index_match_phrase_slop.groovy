@@ -119,8 +119,4 @@ suite("test_index_match_phrase_slop", "p0"){
     } finally {
         //try_sql("DROP TABLE IF EXISTS ${testTable}")
     }
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> selectdb-cloud-3.0
