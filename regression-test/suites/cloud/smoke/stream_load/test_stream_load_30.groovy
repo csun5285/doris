@@ -26,7 +26,7 @@ suite("smoke_test_stream_load_30", "smoke") {
 
     sql "show tables"
 
-    def tableName = "test_stream_load_strict"
+    def tableName = "smoke_test_stream_load_strict"
 
     sql """ DROP TABLE IF EXISTS ${tableName} """
     sql """
