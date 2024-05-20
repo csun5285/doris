@@ -119,7 +119,10 @@ fi
 # copy FE audit plugin
 echo "Copy audit log plugin if necessary"
 mkdir -p output/fe/plugins
-if [[ -f output/audit_loader/auditloader.zip ]]; then
-  cp output/audit_loader/auditloader.zip output/fe/plugins/
+audit_plugin_path=output/audit_loader/auditloader.zip
+if [[ -f "${audit_plugin_path}" ]]; then
+  cp "${audit_plugin_path}" output/fe/plugins/
+else
+  echo "audit log plugin not exists: ${audit_plugin_path}"
 fi
 
