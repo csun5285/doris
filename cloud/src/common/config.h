@@ -174,4 +174,6 @@ CONF_mInt64(s3_put_token_limit, "0");
 // The secondary package name of the MetaService.
 CONF_String(secondary_package_name, "");
 
+CONF_Bool(enable_cluster_name_check, "false");
+
 } // namespace selectdb::config

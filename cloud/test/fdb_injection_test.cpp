@@ -240,7 +240,7 @@ static int add_cluster(MetaService* service, const std::string& instance_id) {
         req.set_op(
                 selectdb::AlterClusterRequest_Operation::AlterClusterRequest_Operation_ADD_CLUSTER);
         auto* cluster = req.mutable_cluster();
-        auto name = fmt::format("instance-{}-cluster", instance_id);
+        auto name = fmt::format("instance_{}_cluster", instance_id);
         cluster->set_cluster_id(name);
         cluster->set_cluster_name(name);
         cluster->set_type(selectdb::ClusterPB_Type::ClusterPB_Type_SQL);
@@ -290,7 +290,7 @@ static int drop_cluster(MetaService* service, const std::string& instance_id) {
     req.set_instance_id(instance_id);
     req.set_op(AlterClusterRequest_Operation_DROP_CLUSTER);
     auto cluster = req.mutable_cluster();
-    cluster->set_cluster_id(fmt::format("instance-{}-cluster", instance_id));
+    cluster->set_cluster_id(fmt::format("instance_{}_cluster", instance_id));
 
     brpc::Controller ctrl;
     service->alter_cluster(&ctrl, &req, &resp, nullptr);
