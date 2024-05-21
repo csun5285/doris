@@ -26,6 +26,7 @@ suite("smoke_test_grant_revoke_stage_to_user", "smoke") {
     sql "sync"
 
     def result1 = connect(user=user1, password='Cloud123456', url=context.config.jdbcUrl) {
+        sql "sync"
         def sg = try_sql """show grants"""
         assertEquals(sg.size(), 1)
     }

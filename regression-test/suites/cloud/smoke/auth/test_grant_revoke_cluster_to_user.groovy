@@ -30,13 +30,15 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
 
     // admin role user can grant cluster to use
     result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
     }
 
     // general user can't grant cluster to use
     try {
         result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
+            sql "sync"
+            sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
@@ -48,6 +50,7 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     sql "sync"
 
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
     order_qt_show_user3_grants3 """show grants for '${user2}'"""
@@ -55,6 +58,7 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     // 3. revoke cluster
     // admin role user can revoke cluster
     result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """REVOKE USAGE_PRIV ON CLUSTER '${cluster1}' FROM '${user1}'"""
     }
 
@@ -62,16 +66,18 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     sql """revoke GRANT_PRIV on *.*.* from ${user2}"""
 
     sql "sync"
-    
+
     // general user can't revoke cluster
     try {
         result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """REVOKE USAGE_PRIV ON CLUSTER '${cluster1}' FROM '${user2}'"""
+            sql "sync"
+            sql """REVOKE USAGE_PRIV ON CLUSTER '${cluster1}' FROM '${user2}'"""
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
     }
 
+    sql "sync"
     order_qt_show_user4_grants4 """show grants for '${user1}'"""
 
     order_qt_show_user5_grants5 """show grants for '${user2}'"""

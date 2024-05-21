@@ -51,6 +51,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     // 1. change user
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
+    sql "sync"
     result = sql_return_maparray """show grants for '${user1}'"""
     commonAuth result, "'${user1}'@'%'" as String, "Yes", "admin", "Admin_priv "
     assertNull(result.CloudClusterPrivs[0])
@@ -83,6 +84,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     sql """create user ${user3} identified by 'Cloud12345'"""
     sql """GRANT SELECT_PRIV ON *.*.* TO '${user3}'@'%'"""
     result = connect(user = "${user3}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """SHOW CLUSTERS"""
     }
     // not grant any cluster to user3
@@ -90,6 +92,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     def db = context.dbName
 
     connect(user = "${user3}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         test {
             sql """select * from ${db}.${tbl}"""
             exception "or you may not have permission to access the current cluster"
@@ -104,6 +107,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
 
     // admin role user can grant cluster to use
     result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
     }
 
@@ -113,11 +117,13 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     assertEquals(result.CloudClusterPrivs[0] as String, "${cluster1}: Cluster_Usage_priv " as String)
 
     sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
+    sql "sync"
     result = sql_return_maparray """show grants for '${user1}'"""
     commonAuth result, "'${user1}'@'%'" as String, "Yes", "admin", "Admin_priv "
     assertEquals(result.CloudClusterPrivs[0] as String, "${cluster1}: Cluster_Usage_priv " as String)
 
     connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         test {
             sql """use @${cluster1}"""
             exception "Cluster ${cluster1} not exist"
@@ -129,8 +135,9 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
 
 
     try {
-        result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
+        connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
+            sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user1}'"""
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
@@ -139,6 +146,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     // default cloud cluster
     sql """SET PROPERTY FOR '${user1}' 'default_cloud_cluster' = '${validCluster}'"""
     sql """SET PROPERTY FOR '${user2}' 'default_cloud_cluster' = '${validCluster}'"""
+    sql "sync"
     def show_cluster_1 = getCluster(validCluster)
 
     assertTrue(show_cluster_1[2].contains(user2), "Expect contain users ${user2}")
@@ -147,6 +155,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     assertEquals(result.Value as String, "${validCluster}" as String)
 
     connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         result = sql """use @${validCluster}"""
         assertEquals(result[0][0], 0)
         result = getProperty("default_cloud_cluster", "")
@@ -155,6 +164,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
         // set default_cloud_cluster to ''
     sql """SET PROPERTY FOR '${user2}' 'default_cloud_cluster' = ''"""
     connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         result = getProperty("default_cloud_cluster", "")
         assertEquals(result.Value as String, "" as String) 
     } 
@@ -163,6 +173,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     result = sql """REVOKE USAGE_PRIV ON CLUSTER '${validCluster}' FROM '${user2}'"""
     assertEquals(result[0][0], 0)
     connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         test {
             sql """use @${cluster1}"""
             exception "USAGE denied to user"
@@ -170,6 +181,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     }
 
     connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         test {
             sql """use @${validCluster}"""
             exception "USAGE denied to user"
@@ -187,17 +199,20 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     }
 
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
 
     sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     show_cluster_2 = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             getCluster(validCluster)
     }
 
     assertTrue(show_cluster_2[2].equals(user2), "Expect just only have user ${user2}")
 
     result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """USE @${validCluster}"""
     }
     assertEquals(result[0][0], 0)
@@ -205,6 +220,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     sql """REVOKE USAGE_PRIV ON CLUSTER '${validCluster}' FROM '${user2}'"""
 
     connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        sql "sync"
         test {
             sql """use @${validCluster}"""
             exception "USAGE denied to user"
@@ -218,8 +234,9 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
             exception "NotExistCluster does not exist in role"
         }
     }
-    
+
     sql """REVOKE USAGE_PRIV ON CLUSTER '${validCluster}' FROM '${user2}'"""
+    sql "sync"
     result = sql_return_maparray """show grants for '${user2}'"""
     commonAuth result, "'${user2}'@'%'" as String, "Yes", "", "Grant_priv Select_priv "
     assertEquals(result.CloudClusterPrivs[0] as String, "${cluster1}: Cluster_Usage_priv " as String)
@@ -228,6 +245,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     // 3. revoke cluster
     // admin role user can revoke cluster
     result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """REVOKE USAGE_PRIV ON CLUSTER '${cluster1}' FROM '${user1}'"""
     }
 
@@ -235,16 +253,18 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     sql """revoke GRANT_PRIV on *.*.* from ${user2}"""
 
     sql "sync"
-    
+
     // general user can't revoke cluster
     try {
         result = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """REVOKE USAGE_PRIV ON CLUSTER '${cluster1}' FROM '${user2}'"""
+            sql "sync"
+            sql """REVOKE USAGE_PRIV ON CLUSTER '${cluster1}' FROM '${user2}'"""
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
     }
 
+    sql "sync"
     result = sql_return_maparray """show grants for '${user1}'"""
     commonAuth result, "'${user1}'@'%'" as String, "Yes", "admin", "Admin_priv "
     assertNull(result.CloudClusterPrivs[0])
@@ -255,6 +275,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
 
     // revoke user1 admin role
     sql """REVOKE 'admin' FROM ${user1}"""
+    sql "sync"
     result = sql_return_maparray """show grants for '${user1}'"""
     assertEquals("'${user1}'@'%'" as String, result.UserIdentity[0] as String)
     assertEquals("", result.Roles[0])
@@ -263,7 +284,8 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
 
     // user1 no admin auth, so failed to set other default cloud cluster
     try {
-        result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+        connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
             sql """SET PROPERTY FOR '${user2}' 'default_cloud_cluster' = '${validCluster}'""" 
         }
     } catch (Exception e) {
