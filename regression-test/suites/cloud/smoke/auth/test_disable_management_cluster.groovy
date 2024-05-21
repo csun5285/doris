@@ -9,43 +9,46 @@ suite("test_disable_management_cluster", "smoke") {
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
 
-    sql "sync"
-
     try {
-        result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """
+        connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
+
+            sql """
                 ALTER SYSTEM ADD BACKEND "${host}:${heart_port}"
-             """
+            """
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
     }
 
     try {
-        result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """
+        connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
+            sql """
                 ALTER SYSTEM ADD FOLLOWER "${host}:${edit_log_port}"
-             """
+            """
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
     }
 
     try {
-        result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """
+        connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
+            sql """
                 ALTER SYSTEM DROP BACKEND "${host}:${heart_port}"
-             """
+            """
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
     }
 
     try {
-        result = connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
-             sql """
+        connect(user = "${user1}", password = 'Cloud12345', url = context.config.jdbcUrl) {
+            sql "sync"
+            sql """
                 ALTER SYSTEM DROP FOLLOWER "${host}:${edit_log_port}"
-             """
+            """
         }
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Unsupported operation"), e.getMessage())
