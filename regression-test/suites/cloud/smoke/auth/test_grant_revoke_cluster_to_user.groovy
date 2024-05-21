@@ -14,12 +14,14 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
     // 1. change user
     // ${user1} admin role
     sql """create user ${user1} identified by 'Cloud12345' default role 'admin'"""
+    sql "sync"
     order_qt_show_user1_grants1 """show grants for '${user1}'"""
 
     // ${user2} not admin role
     sql """create user ${user2} identified by 'Cloud12345'"""
     // for use default_cluster:regression_test
     sql """grant select_priv on *.*.* to ${user2}"""
+    sql "sync"
     order_qt_show_user2_grants2 """show grants for '${user2}'"""
 
     sql "sync"
@@ -53,6 +55,7 @@ suite("smoke_test_grant_revoke_cluster_to_user", "smoke") {
             sql "sync"
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
+    sql "sync"
     order_qt_show_user3_grants3 """show grants for '${user2}'"""
 
     // 3. revoke cluster

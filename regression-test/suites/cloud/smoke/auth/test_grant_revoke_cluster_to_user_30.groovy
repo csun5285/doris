@@ -83,6 +83,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
 
     sql """create user ${user3} identified by 'Cloud12345'"""
     sql """GRANT SELECT_PRIV ON *.*.* TO '${user3}'@'%'"""
+    sql "sync"
     result = connect(user = "${user3}", password = 'Cloud12345', url = context.config.jdbcUrl) {
             sql "sync"
             sql """SHOW CLUSTERS"""
@@ -112,6 +113,7 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     }
 
     // case run user(default root), and show grant again, should be same result
+    sql "sync"
     result = sql_return_maparray """show grants for '${user1}'"""
     commonAuth result, "'${user1}'@'%'" as String, "Yes", "admin", "Admin_priv "
     assertEquals(result.CloudClusterPrivs[0] as String, "${cluster1}: Cluster_Usage_priv " as String)
@@ -142,6 +144,8 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
     } catch (Exception e) {
         assertTrue(e.getMessage().contains("Access denied; you need (at least one of) the GRANT/ROVOKE privilege(s) for this operation"), e.getMessage())
     }
+
+    sql "sync"
 
     // default cloud cluster
     sql """SET PROPERTY FOR '${user1}' 'default_cloud_cluster' = '${validCluster}'"""
@@ -188,6 +192,8 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
         }
     }
 
+    sql "sync"
+
     // grant GRANT_PRIV to general user, he can grant cluster to other user.
     sql """grant GRANT_PRIV on *.*.* to ${user2}"""
 
@@ -202,6 +208,8 @@ suite("smoke_test_grant_revoke_cluster_to_user_30", "smoke") {
             sql "sync"
             sql """GRANT USAGE_PRIV ON CLUSTER '${cluster1}' TO '${user2}'"""
     }
+
+    sql "sync"
 
     sql """GRANT USAGE_PRIV ON CLUSTER '${validCluster}' TO '${user2}'"""
     show_cluster_2 = connect(user = "${user2}", password = 'Cloud12345', url = context.config.jdbcUrl) {
