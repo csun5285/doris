@@ -153,7 +153,9 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrInterface 
         }
 
         Database db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
-        InternalDatabaseUtil.checkDatabase(db.getFullName(), ConnectContext.get());
+        if (!coordinator.isFromInternal) {
+            InternalDatabaseUtil.checkDatabase(db.getFullName(), ConnectContext.get());
+        }
 
         switch (sourceType) {
             case BACKEND_STREAMING:
