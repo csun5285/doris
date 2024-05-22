@@ -170,9 +170,32 @@ public class DateTimeV2Literal extends DateTimeLiteral {
      * roundCeiling
      */
     public DateTimeV2Literal roundCeiling(int newScale) {
-        // use roundMicroSecond in constructor
-        return new DateTimeV2Literal(DateTimeV2Type.of(newScale), year, month, day,
-                hour, minute, second, microSecond);
+        long remain = Double.valueOf(microSecond % (Math.pow(10, 6 - newScale))).longValue();
+        long newMicroSecond = microSecond;
+        long newSecond = second;
+        long newMinute = minute;
+        long newHour = hour;
+        long newDay = day;
+        long newMonth = month;
+        long newYear = year;
+        if (remain != 0) {
+            newMicroSecond = Double
+                    .valueOf((microSecond + (int) (Math.pow(10, 6 - newScale)))
+                            / (int) (Math.pow(10, 6 - newScale)) * (Math.pow(10, 6 - newScale)))
+                    .longValue();
+        }
+        if (newMicroSecond > MAX_MICROSECOND) {
+            newMicroSecond %= newMicroSecond;
+            DateTimeV2Literal result = (DateTimeV2Literal) this.plusSeconds(1);
+            newSecond = result.second;
+            newMinute = result.minute;
+            newHour = result.hour;
+            newDay = result.day;
+            newMonth = result.month;
+            newYear = result.year;
+        }
+        return new DateTimeV2Literal(DateTimeV2Type.of(newScale), newYear, newMonth, newDay,
+                newHour, newMinute, newSecond, newMicroSecond);
     }
 
     public DateTimeV2Literal roundFloor(int newScale) {
