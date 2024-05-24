@@ -84,7 +84,7 @@ suite("test_show_data", "p0") {
             if (result.size() > 0) {
                 logger.info(table_name + " show data, detail: " + result[0].toString())
                 def size = result[0][2].replace(" KB", "").toDouble()
-                if (size > origin_size) {
+                if (size != origin_size) {
                     return size
                 }
             }
