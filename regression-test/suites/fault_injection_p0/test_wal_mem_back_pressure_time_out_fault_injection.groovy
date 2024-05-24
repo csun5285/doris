@@ -38,22 +38,16 @@ suite("test_wal_mem_back_pressure_time_out_fault_injection","nonConcurrent") {
             logger.info("frontends: ${fes}")
                 def fe = fes[0]
                 def be = bes[0]
-                    def url = "jdbc:mysql://${fe.Host}:${fe.QueryPort}/"
-                    logger.info("observer url: " + url)
                     StringBuilder sb = new StringBuilder();
-                    sb.append("curl -X POST http://${fe.Host}:${fe.HttpPort}")
-                    sb.append("/rest/v2/manager/node/set_config/be")
-                    sb.append(" -H \"Content-Type: application/json\" -H \"Authorization: Basic cm9vdDo= \"")
-                    sb.append(""" -d \"{\\"group_commit_queue_mem_limit\\": {\\"node\\": [\\"${be.Host}:${be.HttpPort}\\"],\\"value\\": \\"0\\",\\"persist\\": \\"false\\"}}\"""")
+                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                    sb.append("/api/update_config?group_commit_queue_mem_limit=0&persist=false")
                     String command = sb.toString()
                     logger.info(command)
                     def process = command.execute()
 
                     sb = new StringBuilder();
-                    sb.append("curl -X POST http://${fe.Host}:${fe.HttpPort}")
-                    sb.append("/rest/v2/manager/node/set_config/be")
-                    sb.append(" -H \"Content-Type: application/json\" -H \"Authorization: Basic cm9vdDo= \"")
-                    sb.append(""" -d \"{\\"group_commit_memory_rows_for_max_filter_ratio\\": {\\"node\\": [\\"${be.Host}:${be.HttpPort}\\"],\\"value\\": \\"0\\",\\"persist\\": \\"false\\"}}\"""")
+                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                    sb.append("/api/update_config?group_commit_rows_for_max_filter_ratio=0&persist=false")
                     command = sb.toString()
                     logger.info(command)
                     process = command.execute()
@@ -68,22 +62,16 @@ suite("test_wal_mem_back_pressure_time_out_fault_injection","nonConcurrent") {
             logger.info("frontends: ${fes}")
                 def fe = fes[0]
                 def be = bes[0]
-                    def url = "jdbc:mysql://${fe.Host}:${fe.QueryPort}/"
-                    logger.info("observer url: " + url)
                     StringBuilder sb = new StringBuilder();
-                    sb.append("curl -X POST http://${fe.Host}:${fe.HttpPort}")
-                    sb.append("/rest/v2/manager/node/set_config/be")
-                    sb.append(" -H \"Content-Type: application/json\" -H \"Authorization: Basic cm9vdDo= \"")
-                    sb.append(""" -d \"{\\"group_commit_queue_mem_limit\\": {\\"node\\": [\\"${be.Host}:${be.HttpPort}\\"],\\"value\\": \\"67108864\\",\\"persist\\": \\"false\\"}}\"""")
+                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                    sb.append("/api/update_config?group_commit_queue_mem_limit=67108864&persist=false")
                     String command = sb.toString()
                     logger.info(command)
                     def process = command.execute()
 
                     sb = new StringBuilder();
-                    sb.append("curl -X POST http://${fe.Host}:${fe.HttpPort}")
-                    sb.append("/rest/v2/manager/node/set_config/be")
-                    sb.append(" -H \"Content-Type: application/json\" -H \"Authorization: Basic cm9vdDo= \"")
-                    sb.append(""" -d \"{\\"group_commit_memory_rows_for_max_filter_ratio\\": {\\"node\\": [\\"${be.Host}:${be.HttpPort}\\"],\\"value\\": \\"10000\\",\\"persist\\": \\"false\\"}}\"""")
+                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                    sb.append("/api/update_config?group_commit_rows_for_max_filter_ratio=10000&persist=false")
                     command = sb.toString()
                     logger.info(command)
                     process = command.execute()
@@ -97,8 +85,8 @@ suite("test_wal_mem_back_pressure_time_out_fault_injection","nonConcurrent") {
     sql """ set group_commit = async_mode; """
         try {
             GetDebugPoint().enableDebugPointForAllBEs("LoadBlockQueue.add_block.back_pressure_time_out")
-            def out = sql_return_maparray """insert into ${tableName} values(1,1)"""
-            logger.info(out)
+            def out = sql "insert into ${tableName} values(1,1);"
+            logger.info("output is: " + out)
             // make sure there is an exception.
             assertFalse(true)
         } catch (Exception e) {
