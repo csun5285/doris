@@ -2180,15 +2180,15 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static boolean cloud_delete_loaded_internal_stage_files = false;
 
+    @ConfField(mutable = true)
+    public static int meta_service_rpc_retry_times = 200;
+
     public static int metaServiceRpcRetryTimes() {
         if (isCloudMode() && enable_check_compatibility_mode) {
             return 1;
         }
         return meta_service_rpc_retry_times;
     }
-
-    @ConfField(mutable = true)
-    public static int meta_service_rpc_retry_times = 200;
 
     // 0 means no limit
     @ConfField(mutable = true)
@@ -2303,9 +2303,6 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = false)
     public static int cloud_copy_txn_conflict_error_retry_num = 5;
-
-    @ConfField
-    public static int cloud_meta_service_rpc_failed_retry_times = 200;
 
     @ConfField
     public static int cloud_query_failed_retry_times = 50;
