@@ -100,6 +100,8 @@ class TExpr;
 
 namespace stream_load {
 
+bvar::LatencyRecorder load_pressure_sleep_micro_seconds("load_pressure_sleep_micro_seconds");
+
 IndexChannel::~IndexChannel() = default;
 
 Status IndexChannel::init(RuntimeState* state, const std::vector<TTabletWithPartition>& tablets) {
@@ -684,6 +686,7 @@ int VNodeChannel::try_send_and_fetch_status(RuntimeState* state,
     // so we shouldn't use any pthread's blocking sleep function
     if (UNLIKELY(load_pressure_wait_time > 0)) {
         VLOG_DEBUG << "try to sleep due to high load pressure for " << load_pressure_wait_time;
+        load_pressure_sleep_micro_seconds << load_pressure_wait_time;
         bthread_usleep(load_pressure_wait_time);
         _load_pressure_block_ns.fetch_add(load_pressure_wait_time);
         _load_pressure_wait_time = 0;
