@@ -325,7 +325,7 @@ public class CloudClusterChecker extends MasterDaemon {
 
                     // local - remote > 0, drop bes from local
                     checkToDelCluster(remoteClusterIdToPB, localClusterIds, clusterIdToBackend);
-
+                    clusterIdToBackend = Env.getCurrentSystemInfo().getCloudClusterIdToBackend();
                     if (remoteClusterIdToPB.keySet().size() != clusterIdToBackend.keySet().size()) {
                         LOG.warn("impossible cluster id size not match, check it local {}, remote {}",
                                 clusterIdToBackend, remoteClusterIdToPB);
