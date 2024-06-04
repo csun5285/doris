@@ -288,14 +288,6 @@ public class Backend implements Writable {
         return this.backendStatus.lastFragmentUpdateTime;
     }
 
-    public void setfileCacheCapacityBytes(long fileCacheCapactiyBytes) {
-        this.fileCacheCapactiyBytes = fileCacheCapactiyBytes;
-    }
-
-    public long getfileCacheCapactiyBytes() {
-        return fileCacheCapactiyBytes;
-    }
-
     // for test only
     public void updateOnce(int bePort, int httpPort, int beRpcPort) {
         if (this.bePort != bePort) {
