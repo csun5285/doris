@@ -289,6 +289,15 @@ public class SystemInfoService {
     }
 
     public String getClusterNameByClusterId(final String clusterId) {
+        rlock.lock();
+        try {
+            return getClusterNameByClusterIdNoLock(clusterId);
+        } finally {
+            rlock.unlock();
+        }
+    }
+
+    public String getClusterNameByClusterIdNoLock(final String clusterId) {
         String clusterName = "";
         for (Map.Entry<String, String> entry : clusterNameToId.entrySet()) {
             if (entry.getValue().equals(clusterId)) {
