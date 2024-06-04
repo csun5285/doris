@@ -69,12 +69,14 @@ public class LoadAction extends RestBaseController {
     private static final Logger LOG = LogManager.getLogger(LoadAction.class);
 
     public static final String SUB_LABEL_NAME_PARAM = "sub_label";
+    public static final String HEADER_REDIRECT_POLICY = "redirect-policy";
 
     private ExecuteEnv execEnv = ExecuteEnv.getInstance();
 
     @RequestMapping(path = "/api/{" + DB_KEY + "}/{" + TABLE_KEY + "}/_load", method = RequestMethod.PUT)
     public Object load(HttpServletRequest request, HttpServletResponse response,
                        @PathVariable(value = DB_KEY) String db, @PathVariable(value = TABLE_KEY) String table) {
+        LOG.info("load action, db: {}, tbl: {}, headers: {}", db, table,  getAllHeaders(request));
         if (needRedirect(request.getScheme())) {
             return redirectToHttps(request);
         }
@@ -93,6 +95,7 @@ public class LoadAction extends RestBaseController {
     public Object streamLoad(HttpServletRequest request,
                              HttpServletResponse response,
                              @PathVariable(value = DB_KEY) String db, @PathVariable(value = TABLE_KEY) String table) {
+        LOG.info("streamload action, db: {}, tbl: {}, headers: {}", db, table,  getAllHeaders(request));
         boolean groupCommit = false;
         String groupCommitStr = request.getHeader("group_commit");
         if (groupCommitStr != null && groupCommitStr.equalsIgnoreCase("async_mode")) {
@@ -140,6 +143,7 @@ public class LoadAction extends RestBaseController {
     public Object streamLoad2PC(HttpServletRequest request,
                                    HttpServletResponse response,
                                    @PathVariable(value = DB_KEY) String db) {
+        LOG.info("streamload action 2PC, db: {}, headers: {}", db, getAllHeaders(request));
         if (needRedirect(request.getScheme())) {
             return redirectToHttps(request);
         }
@@ -153,6 +157,7 @@ public class LoadAction extends RestBaseController {
                                       HttpServletResponse response,
                                       @PathVariable(value = DB_KEY) String db,
                                       @PathVariable(value = TABLE_KEY) String table) {
+        LOG.info("streamload action 2PC, db: {}, tbl: {}, headers: {}", db, table,  getAllHeaders(request));
         if (needRedirect(request.getScheme())) {
             return redirectToHttps(request);
         }
@@ -222,9 +227,7 @@ public class LoadAction extends RestBaseController {
                         LOG.warn("cluster name is empty in stream load");
                         return new RestBaseResult("No cloud cluster name selected.");
                     }
-                    String reqHostStr = request.getHeader(HttpHeaderNames.HOST.toString());
-                    LOG.info("host header {}", reqHostStr);
-                    redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr, groupCommit);
+                    redirectAddr = selectCloudRedirectBackend(cloudClusterName, request, groupCommit);
                 } else {
                     redirectAddr = selectRedirectBackend(clusterName, groupCommit);
                 }
@@ -269,9 +272,7 @@ public class LoadAction extends RestBaseController {
                     LOG.warn("cluster name is empty in stream load");
                     return new RestBaseResult("No cloud cluster name selected.");
                 }
-                String reqHostStr = request.getHeader(HttpHeaderNames.HOST.toString());
-                LOG.info("host header {}", reqHostStr);
-                redirectAddr = selectCloudRedirectBackend(cloudClusterName, reqHostStr, false);
+                redirectAddr = selectCloudRedirectBackend(cloudClusterName, request, false);
             } else {
                 redirectAddr = selectRedirectBackend(clusterName, false);
             }
@@ -362,7 +363,7 @@ public class LoadAction extends RestBaseController {
         return Pair.of(pair[0], port);
     }
 
-    private TNetworkAddress selectCloudRedirectBackend(String clusterName, String reqHostStr, boolean groupCommit)
+    private TNetworkAddress selectCloudRedirectBackend(String clusterName, HttpServletRequest req, boolean groupCommit)
             throws LoadException {
         List<Backend> clusterBes = Env.getCurrentSystemInfo().getBackendsByClusterName(clusterName);
 
@@ -378,9 +379,17 @@ public class LoadAction extends RestBaseController {
             throw new LoadException(SystemInfoService.NO_BACKEND_LOAD_AVAILABLE_MSG + ", cluster: " + clusterName);
         }
 
+
+        String redirectPolicy = req.getHeader(LoadAction.HEADER_REDIRECT_POLICY);
+
         Random rand = new Random();
         int randomIndex = rand.nextInt(backends.size());
         Backend backend = backends.get(randomIndex);
+
+        // User specified redirect policy
+        if (redirectPolicy != null && redirectPolicy.equalsIgnoreCase("random-be")) {
+            return new TNetworkAddress(backend.getHost(), backend.getHttpPort());
+        }
 
         Pair<String, Integer> publicHostPort = null;
         Pair<String, Integer> privateHostPort = null;
@@ -400,6 +409,7 @@ public class LoadAction extends RestBaseController {
             throw new LoadException(e.getMessage());
         }
 
+        String reqHostStr = req.getHeader(HttpHeaderNames.HOST.toString());
         reqHostStr = reqHostStr.replaceAll("\\s+", "");
         if (reqHostStr.isEmpty()) {
             LOG.info("Invalid header host: {}", reqHostStr);
