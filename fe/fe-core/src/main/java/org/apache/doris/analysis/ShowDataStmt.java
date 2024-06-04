@@ -238,17 +238,11 @@ public class ShowDataStmt extends ShowStmt {
                     }
 
                     OlapTable olapTable = (OlapTable) table;
-                    long tableSize = 0;
-                    long replicaCount = 0;
-                    long remoteSize = 0;
-                    olapTable.readLock();
-                    try {
-                        tableSize = olapTable.getDataSize();
-                        replicaCount = olapTable.getReplicaCount();
-                        remoteSize = olapTable.getRemoteDataSize();
-                    } finally {
-                        olapTable.readUnlock();
-                    }
+
+                    long tableSize = olapTable.getDataSize();
+                    long replicaCount = olapTable.getReplicaCount();
+                    long remoteSize = olapTable.getRemoteDataSize();
+
                     //|TableName|Size|ReplicaCount|RemoteSize
                     List<Object> row = Arrays.asList(table.getName(), tableSize, replicaCount, remoteSize);
                     totalRowsObject.add(row);
