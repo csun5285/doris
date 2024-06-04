@@ -110,6 +110,7 @@ Status NewOlapScanNode::_init_profile() {
     _block_load_counter = ADD_COUNTER(_segment_profile, "BlocksLoad", TUnit::UNIT);
     _block_fetch_timer = ADD_TIMER(_scanner_profile, "BlockFetchTime");
     _delete_bitmap_get_agg_timer = ADD_TIMER(_scanner_profile, "DeleteBitmapGetAggTime");
+    _sync_rowset_timer = ADD_TIMER(_scanner_profile, "SyncRowsetTime");
     _raw_rows_counter = ADD_COUNTER(_segment_profile, "RawRowsRead", TUnit::UNIT);
     _block_convert_timer = ADD_TIMER(_scanner_profile, "BlockConvertTime");
     _block_init_timer = ADD_TIMER(_segment_profile, "BlockInitTime");
@@ -465,15 +466,20 @@ Status NewOlapScanNode::_init_scanners(std::list<VScannerSPtr>* scanners) {
 #ifdef CLOUD_MODE
     std::vector<std::function<Status()>> tasks;
     tasks.reserve(_scan_ranges.size());
-    for (auto& scan_range : _scan_ranges) {
-        auto& tablet = tablets_to_scan.emplace_back();
-        tasks.push_back([range = scan_range.get(), &tablet] {
-            RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(range->tablet_id, &tablet.first));
-            tablet.second = std::atol(range->version.c_str());
-            // Sync rowset metas with version
-            return tablet.first->cloud_sync_rowsets(tablet.second);
-        });
+    int64_t duration_ns = 0;
+    {
+        SCOPED_RAW_TIMER(&duration_ns);
+        for (auto& scan_range : _scan_ranges) {
+            auto& tablet = tablets_to_scan.emplace_back();
+            tasks.push_back([range = scan_range.get(), &tablet] {
+                RETURN_IF_ERROR(cloud::tablet_mgr()->get_tablet(range->tablet_id, &tablet.first));
+                tablet.second = std::atol(range->version.c_str());
+                // Sync rowset metas with version
+                return tablet.first->cloud_sync_rowsets(tablet.second);
+            });
+        }
     }
+    _sync_rowset_timer->update(duration_ns);
     RETURN_IF_ERROR(cloud::bthread_fork_and_join(tasks, 10));
 #else
     for (auto& scan_range : _scan_ranges) {

@@ -4073,13 +4073,9 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
         RETURN_IF_ERROR(token->wait());
     }
     std::stringstream ss;
-    if (watch.get_elapse_time_us() < 1 * 1000 * 1000) {
-        ss << "cost: " << watch.get_elapse_time_us() - t3 << "(us)";
-    } else {
-        ss << "cost(us): (load segments: " << t1 << ", get all rsid: " << t2 - t1
-           << ", get rowsets: " << t3 - t2
-           << ", calc delete bitmap: " << watch.get_elapse_time_us() - t3 << ")";
-    }
+    ss << "cost(us): (load segments: " << t1 << ", get all rsid: " << t2 - t1
+       << ", get rowsets: " << t3 - t2
+       << ", calc delete bitmap: " << watch.get_elapse_time_us() - t3 << ")";
 
     size_t total_rows = std::accumulate(
             segments.begin(), segments.end(), 0,
@@ -4111,6 +4107,7 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
 #ifdef CLOUD_MODE
     if (txn_info->partial_update_info && txn_info->partial_update_info->is_partial_update &&
         rowset_writer->num_rows() > 0) {
+        auto t4 = watch.get_elapse_time_us();
         // build rowset writer and merge transient rowset
         auto status = rowset_writer->flush();
         if (status != Status::OK()) {
@@ -4141,6 +4138,9 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
         }
         // erase segment cache cause we will add a segment to rowset
         SegmentLoader::instance()->erase_segments(rowset->rowset_id());
+        LOG(INFO) << "[Publish] update partial_update rowset tablet: " << tablet_id()
+                  << ", cur version: " << cur_version << ", transaction_id: " << txn_id
+                  << ", cost:" << watch.get_elapse_time_us() - t4 << "(us)";
     }
 #else
     if (txn_info->partial_update_info && txn_info->partial_update_info->is_partial_update) {
@@ -4165,6 +4165,7 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
 
     // update delete bitmap
 #ifdef CLOUD_MODE
+    auto t5 = watch.get_elapse_time_us();
     DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet_id());
     for (auto iter = delete_bitmap->delete_bitmap.begin();
          iter != delete_bitmap->delete_bitmap.end(); ++iter) {
@@ -4174,6 +4175,9 @@ Status Tablet::update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_i
 
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
             this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
+    LOG(INFO) << "[Publish] update delete_bitmap tablet: " << tablet_id()
+              << ", cur version: " << cur_version << ", transaction_id: " << txn_id
+              << ", cost:" << watch.get_elapse_time_us() - t5 << "(us)";
 #else
     // update version without write lock, compaction and publish_txn
     // will update delete bitmap, handle compaction with _rowset_update_lock
