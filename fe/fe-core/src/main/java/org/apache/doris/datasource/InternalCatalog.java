@@ -1082,7 +1082,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 }
             }
         } catch (Exception e) {
-            LOG.warn("unexpected exception", e);
+            LOG.warn("tableName {}, info {} unexpected exception", olapTable.getName(), info, e);
         }
     }
 
