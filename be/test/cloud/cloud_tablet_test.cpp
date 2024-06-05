@@ -81,7 +81,7 @@ TEST(CloudTabletTest, add_rowsets) {
         ASSERT_EQ(tablet._rs_version_map.size(), 4);
         ASSERT_EQ(tablet.tablet_meta()->all_rs_metas().size(), 4);
         Versions versions;
-        tablet.capture_consistent_versions({0, 4}, &versions);
+        tablet.capture_consistent_versions({0, 4}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 2}, {3, 3}, {4, 4}}));
 
         versions.clear();
@@ -89,7 +89,7 @@ TEST(CloudTabletTest, add_rowsets) {
         tablet.cloud_add_rowsets(rowsets, true);
         ASSERT_EQ(tablet._rs_version_map.size(), 4);
         ASSERT_EQ(tablet.tablet_meta()->all_rs_metas().size(), 4);
-        tablet.capture_consistent_versions({0, 4}, &versions);
+        tablet.capture_consistent_versions({0, 4}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 2}, {3, 3}, {4, 4}}));
     }
     {
@@ -104,7 +104,7 @@ TEST(CloudTabletTest, add_rowsets) {
         ASSERT_EQ(tablet._stale_rs_version_map.size(), 0);
         ASSERT_EQ(tablet.tablet_meta()->all_stale_rs_metas().size(), 0);
         Versions versions;
-        tablet.capture_consistent_versions({2, 4}, &versions);
+        tablet.capture_consistent_versions({2, 4}, &versions, false);
         ASSERT_EQ(versions, (Versions {{2, 2}, {3, 3}, {4, 4}}));
 
         std::vector<RowSetSplits> rs_splits;
@@ -124,10 +124,10 @@ TEST(CloudTabletTest, add_rowsets) {
         ASSERT_EQ(tablet._stale_rs_version_map.size(), 2);
         ASSERT_EQ(tablet.tablet_meta()->all_stale_rs_metas().size(), 2);
         Versions versions;
-        tablet.capture_consistent_versions({0, 4}, &versions);
+        tablet.capture_consistent_versions({0, 4}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 2}, {3, 4}}));
         versions.clear();
-        tablet.capture_consistent_versions({0, 3}, &versions);
+        tablet.capture_consistent_versions({0, 3}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 2}, {3, 3}}));
     }
     {
@@ -144,16 +144,16 @@ TEST(CloudTabletTest, add_rowsets) {
         ASSERT_EQ(tablet._stale_rs_version_map.size(), 4);
         ASSERT_EQ(tablet.tablet_meta()->all_stale_rs_metas().size(), 4);
         Versions versions;
-        tablet.capture_consistent_versions({0, 8}, &versions);
+        tablet.capture_consistent_versions({0, 8}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 5}, {6, 6}, {7, 7}, {8, 8}}));
         versions.clear();
-        tablet.capture_consistent_versions({0, 3}, &versions);
+        tablet.capture_consistent_versions({0, 3}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 2}, {3, 3}}));
         versions.clear();
-        tablet.capture_consistent_versions({0, 4}, &versions);
+        tablet.capture_consistent_versions({0, 4}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 2}, {3, 4}}));
         versions.clear();
-        tablet.capture_consistent_versions({0, 5}, &versions);
+        tablet.capture_consistent_versions({0, 5}, &versions, false);
         ASSERT_EQ(versions, (Versions {{0, 1}, {2, 5}}));
     }
 }
