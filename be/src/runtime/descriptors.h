@@ -173,13 +173,13 @@ public:
     ::doris::TTableType::type table_type() const { return _table_type; }
     const std::string& name() const { return _name; }
     const std::string& database() const { return _database; }
-    int32_t table_id() const { return _table_id; }
+    int64_t table_id() const { return _table_id; }
 
 private:
     ::doris::TTableType::type _table_type;
     std::string _name;
     std::string _database;
-    int32_t _table_id;
+    int64_t _table_id;
     int _num_cols;
     int _num_clustering_cols;
 };
@@ -503,10 +503,12 @@ public:
               _has_varlen_slots(desc._has_varlen_slots) {
         _num_materialized_slots = 0;
         _num_null_slots = 0;
+        _num_slots = 0;
         std::vector<TupleDescriptor*>::const_iterator it = desc._tuple_desc_map.begin();
         for (; it != desc._tuple_desc_map.end(); ++it) {
             _num_materialized_slots += (*it)->num_materialized_slots();
             _num_null_slots += (*it)->num_null_slots();
+            _num_slots += (*it)->slots().size();
         }
         _num_null_bytes = (_num_null_slots + 7) / 8;
     }
@@ -528,6 +530,8 @@ public:
     int num_null_slots() const { return _num_null_slots; }
 
     int num_null_bytes() const { return _num_null_bytes; }
+
+    int num_slots() const { return _num_slots; }
 
     static const int INVALID_IDX;
 
@@ -583,6 +587,7 @@ private:
     int _num_materialized_slots;
     int _num_null_slots;
     int _num_null_bytes;
+    int _num_slots;
 };
 
 } // namespace doris

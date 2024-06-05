@@ -224,7 +224,6 @@ Status MultiTablePipe::exec_plans(ExecEnv* exec_env, std::vector<ExecParam> para
                              _unplanned_pipes.size(), _planned_pipes.size(), params.size());
     _unplanned_pipes.clear();
 
-    _inflight_cnt += params.size();
     for (auto& plan : params) {
         if (!plan.__isset.table_name ||
             _planned_pipes.find(plan.table_name) == _planned_pipes.end()) {
@@ -245,6 +244,7 @@ Status MultiTablePipe::exec_plans(ExecEnv* exec_env, std::vector<ExecParam> para
             CHECK(false);
         }
 
+        _inflight_cnt++;
         exec_env->fragment_mgr()->exec_plan_fragment(plan, [this](RuntimeState* state,
                                                                   Status* status) {
             {

@@ -431,16 +431,16 @@ public class CatalogRecycleBin extends MasterDaemon implements Writable {
         LOG.info("before replay erase table[{}]", tableId);
         RecycleTableInfo tableInfo = idToTable.remove(tableId);
         idToRecycleTime.remove(tableId);
-        if (tableInfo == null) {
-            // FIXME(walter): Sometimes `eraseTable` in 'DROP DB ... FORCE' may be executed earlier than
-            // finish drop db, especially in the case of drop db with many tables.
-            return;
+        // ATTN(walter): NPE may occur in some special case so we will take some precautions here.
+        // Sometimes `eraseTable` in 'DROP DB ... FORCE' may be executed earlier than
+        // finish drop db, especially in the case of drop db with many tables.
+        if (tableInfo != null) {
+            Table table = tableInfo.getTable();
+            if (table.getType() == TableType.OLAP && !Env.isCheckpointThread()) {
+                Env.getCurrentEnv().onEraseOlapTable((OlapTable) table, true);
+            }
         }
-        Table table = tableInfo.getTable();
-        if (table.getType() == TableType.OLAP) {
-            Env.getCurrentEnv().onEraseOlapTable((OlapTable) table, true);
-        }
-        LOG.info("replay erase table[{}]", tableId);
+        LOG.info("replay erase table: {}, tableInfo is null: {}", tableId, (tableInfo == null));
     }
 
     private synchronized void erasePartition(long currentTimeMs, int keepNum) {

@@ -58,7 +58,9 @@ import org.apache.doris.analysis.ResourceTypeEnum;
 import org.apache.doris.analysis.SelectStmt;
 import org.apache.doris.analysis.SetOperationStmt;
 import org.apache.doris.analysis.SetStmt;
+import org.apache.doris.analysis.SetType;
 import org.apache.doris.analysis.SetVar;
+import org.apache.doris.analysis.SetVar.SetVarType;
 import org.apache.doris.analysis.ShowStmt;
 import org.apache.doris.analysis.SqlParser;
 import org.apache.doris.analysis.SqlScanner;
@@ -75,6 +77,7 @@ import org.apache.doris.analysis.TransactionRollbackStmt;
 import org.apache.doris.analysis.TransactionStmt;
 import org.apache.doris.analysis.UnifiedLoadStmt;
 import org.apache.doris.analysis.UnlockTablesStmt;
+import org.apache.doris.analysis.UnsetVariableStmt;
 import org.apache.doris.analysis.UnsupportedStmt;
 import org.apache.doris.analysis.UpdateStmt;
 import org.apache.doris.analysis.UseCloudClusterStmt;
@@ -900,6 +903,8 @@ public class StmtExecutor {
                 handleQueryWithRetry(queryId);
             } else if (parsedStmt instanceof SetStmt) {
                 handleSetStmt();
+            } else if (parsedStmt instanceof UnsetVariableStmt) {
+                handleUnsetVariableStmt();
             } else if (parsedStmt instanceof SwitchStmt) {
                 handleSwitchStmt();
             } else if (parsedStmt instanceof UseStmt) {
@@ -1056,6 +1061,19 @@ public class StmtExecutor {
             setStmt.modifySetVarsForExecute();
             for (SetVar var : setStmt.getSetVars()) {
                 VariableMgr.setVarForNonMasterFE(context.getSessionVariable(), var);
+            }
+        } else if (parsedStmt instanceof UnsetVariableStmt) {
+            UnsetVariableStmt unsetStmt = (UnsetVariableStmt) parsedStmt;
+            if (unsetStmt.isApplyToAll()) {
+                VariableMgr.setAllVarsToDefaultValue(context.getSessionVariable(), SetType.SESSION);
+            } else {
+                String defaultValue = VariableMgr.getDefaultValue(unsetStmt.getVariable());
+                if (defaultValue == null) {
+                    ErrorReport.reportDdlException(ErrorCode.ERR_UNKNOWN_SYSTEM_VARIABLE, unsetStmt.getVariable());
+                }
+                SetVar var = new SetVar(SetType.SESSION, unsetStmt.getVariable(),
+                        new StringLiteral(defaultValue), SetVarType.SET_SESSION_VAR);
+                VariableMgr.setVar(context.getSessionVariable(), var);
             }
         }
     }
@@ -1478,6 +1496,30 @@ public class StmtExecutor {
             SetStmt setStmt = (SetStmt) parsedStmt;
             SetExecutor executor = new SetExecutor(context, setStmt);
             executor.execute();
+        } catch (DdlException e) {
+            LOG.warn("", e);
+            // Return error message to client.
+            context.getState().setError(ErrorCode.ERR_LOCAL_VARIABLE, e.getMessage());
+            return;
+        }
+        context.getState().setOk();
+    }
+
+    // Process unset variable statement.
+    private void handleUnsetVariableStmt() {
+        try {
+            UnsetVariableStmt unsetStmt = (UnsetVariableStmt) parsedStmt;
+            if (unsetStmt.isApplyToAll()) {
+                VariableMgr.setAllVarsToDefaultValue(context.getSessionVariable(), unsetStmt.getSetType());
+            } else {
+                String defaultValue = VariableMgr.getDefaultValue(unsetStmt.getVariable());
+                if (defaultValue == null) {
+                    ErrorReport.reportDdlException(ErrorCode.ERR_UNKNOWN_SYSTEM_VARIABLE, unsetStmt.getVariable());
+                }
+                SetVar var = new SetVar(unsetStmt.getSetType(), unsetStmt.getVariable(),
+                        new StringLiteral(defaultValue), SetVarType.SET_SESSION_VAR);
+                VariableMgr.setVar(context.getSessionVariable(), var);
+            }
         } catch (DdlException e) {
             LOG.warn("", e);
             // Return error message to client.
@@ -2149,8 +2191,9 @@ public class StmtExecutor {
                 coord.setLoadZeroTolerance(context.getSessionVariable().getEnableInsertStrict());
                 coord.setQueryType(TQueryType.LOAD);
                 profile.addExecutionProfile(coord.getExecutionProfile());
-
-                QeProcessorImpl.INSTANCE.registerQuery(context.queryId(), coord);
+                QeProcessorImpl.QueryInfo queryInfo =
+                            new QeProcessorImpl.QueryInfo(context, this.getOriginStmtInString(), coord);
+                QeProcessorImpl.INSTANCE.registerQuery(context.queryId(), queryInfo);
 
                 coord.exec();
                 int execTimeout = context.getExecTimeout();
@@ -2753,6 +2796,9 @@ public class StmtExecutor {
             // Maybe our bug
             LOG.warn("CTAS create table error, stmt={}", originStmt.originStmt, e);
             context.getState().setError(ErrorCode.ERR_UNKNOWN_ERROR, "Unexpected exception: " + e.getMessage());
+            return;
+        }
+        if (ctasStmt.isTableHasExists()) {
             return;
         }
         // after success create table insert data

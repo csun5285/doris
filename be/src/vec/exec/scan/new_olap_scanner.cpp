@@ -178,8 +178,8 @@ Status NewOlapScanner::init() {
                 auto st = tablet->cloud_capture_rs_readers(_tablet_reader_params.version,
                                                            &read_source.rs_splits);
 #else
-                auto st = tablet->capture_rs_readers(_tablet_reader_params.version,
-                                                     &read_source.rs_splits);
+                auto st = _tablet->capture_rs_readers(rd_version, &read_source.rs_splits,
+                                                      _state->skip_missing_version());
 #endif
                 if (!st.ok()) {
                     LOG(WARNING) << "fail to init reader. status=" << st;

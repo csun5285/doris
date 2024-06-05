@@ -551,8 +551,7 @@ public final class MetricRepo {
         };
         DORIS_METRIC_REGISTER.addMetrics(txnNum);
         DB_GAUGE_TXN_NUM = addLabeledMetrics("db", () ->
-                new GaugeMetricImpl<>("txn_num", MetricUnit.NOUNIT,
-                "number of running transactions", 0L));
+                new GaugeMetricImpl<>("txn_num", MetricUnit.NOUNIT, "number of running transactions", 0L));
         GaugeMetric<Long> publishTxnNum = new GaugeMetric<Long>("publish_txn_num", MetricUnit.NOUNIT,
                 "number of publish transactions") {
             @Override

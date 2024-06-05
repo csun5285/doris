@@ -150,6 +150,8 @@ OrcReader::OrcReader(RuntimeProfile* profile, RuntimeState* state,
           _is_hive(params.__isset.slot_name_to_schema_pos),
           _io_ctx(io_ctx),
           _enable_lazy_mat(enable_lazy_mat),
+          _enable_filter_by_min_max(
+                  state == nullptr ? true : state->query_options().enable_orc_filter_by_min_max),
           _dict_cols_has_converted(false),
           _unsupported_pushdown_types(unsupported_pushdown_types) {
     TimezoneUtils::find_cctz_time_zone(ctz, _time_zone);
@@ -171,6 +173,7 @@ OrcReader::OrcReader(const TFileScanRangeParams& params, const TFileRangeDesc& r
           _file_system(nullptr),
           _io_ctx(io_ctx),
           _enable_lazy_mat(enable_lazy_mat),
+          _enable_filter_by_min_max(true),
           _dict_cols_has_converted(false) {
     _init_system_properties();
     _init_file_description();
@@ -648,7 +651,7 @@ bool static build_search_argument(std::vector<OrcPredicate>& predicates, int ind
 
 bool OrcReader::_init_search_argument(
         std::unordered_map<std::string, ColumnValueRangeType>* colname_to_value_range) {
-    if (colname_to_value_range->empty()) {
+    if ((!_enable_filter_by_min_max) || colname_to_value_range->empty()) {
         return false;
     }
     std::vector<OrcPredicate> predicates;
@@ -775,6 +778,15 @@ Status OrcReader::set_fill_columns(
         if (iter == predicate_columns.end()) {
             _lazy_read_ctx.missing_columns.emplace(kv.first, kv.second);
         } else {
+            //For check missing column :   missing column == xx, missing column is null,missing column is not null.
+            if (_slot_id_to_filter_conjuncts->find(iter->second.second) !=
+                _slot_id_to_filter_conjuncts->end()) {
+                for (auto& ctx : _slot_id_to_filter_conjuncts->find(iter->second.second)->second) {
+                    _filter_conjuncts.emplace_back(ctx);
+                }
+            }
+
+            // predicate_missing_columns is VLiteral.To fill in default values for missing columns.
             _lazy_read_ctx.predicate_missing_columns.emplace(kv.first, kv.second);
             _lazy_read_ctx.all_predicate_col_ids.emplace_back(iter->second.first);
         }
@@ -1612,6 +1624,7 @@ Status OrcReader::get_next_block(Block* block, size_t* read_rows, bool* eof) {
             }
             RETURN_IF_CATCH_EXCEPTION(
                     Block::filter_block_internal(block, columns_to_filter, result_filter));
+            //_not_single_slot_filter_conjuncts check : missing column1 == missing column2 , missing column == exists column  ...
             if (!_not_single_slot_filter_conjuncts.empty()) {
                 static_cast<void>(_convert_dict_cols_to_string_cols(block, &batch_vec));
                 RETURN_IF_CATCH_EXCEPTION(
@@ -1827,20 +1840,19 @@ bool OrcReader::_can_filter_by_dict(int slot_id) {
         return false;
     }
 
-    // TODO：check expr like 'a > 10 is null', 'a > 10' should can be filter by dict.
     std::function<bool(const VExpr* expr)> visit_function_call = [&](const VExpr* expr) {
+        // TODO: The current implementation of dictionary filtering does not take into account
+        //  the implementation of NULL values because the dictionary itself does not contain
+        //  NULL value encoding. As a result, many NULL-related functions or expressions
+        //  cannot work properly, such as is null, is not null, coalesce, etc.
+        //  Here we first disable dictionary filtering when predicate contains functions.
+        //  Implementation of NULL value dictionary filtering will be carried out later.
         if (expr->node_type() == TExprNodeType::FUNCTION_CALL) {
-            std::string is_null_str;
-            std::string function_name = expr->fn().name.function_name;
-            if (function_name.compare("is_null_pred") == 0 ||
-                function_name.compare("is_not_null_pred") == 0) {
+            return false;
+        }
+        for (auto& child : expr->children()) {
+            if (!visit_function_call(child.get())) {
                 return false;
-            }
-        } else {
-            for (auto& child : expr->children()) {
-                if (!visit_function_call(child.get())) {
-                    return false;
-                }
             }
         }
         return true;

@@ -258,6 +258,12 @@ struct TQueryOptions {
 
   90: optional bool enable_inverted_index_compound_inlist = false;
 
+  // For emergency use, skip missing version when reading rowsets
+  91: optional bool skip_missing_version = false;
+
+  92: optional bool enable_parquet_filter_by_min_max = true
+  93: optional bool enable_orc_filter_by_min_max = true
+
   // to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }
