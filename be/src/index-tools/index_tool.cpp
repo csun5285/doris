@@ -221,7 +221,10 @@ int main(int argc, char** argv) {
                 std::vector<FileInfo> files;
                 bool exists = false;
                 std::filesystem::path root_dir(FLAGS_directory);
-                fs->list(root_dir, true, &files, &exists);
+                bool result = fs->list(root_dir, true, &files, &exists);
+                if (!result) {
+                    std::cout << FLAGS_directory << " list error" << std::endl;
+                }
                 if (!exists) {
                     std::cout << FLAGS_directory << " is not exists" << std::endl;
                     return -1;
@@ -274,11 +277,14 @@ int main(int argc, char** argv) {
                 std::cout << "read file " << file << " failed" << std::endl;
                 return false;
             }
-            file.seekg(0, std::ios::end);
-            size_t sz = file.tellg();
+            ifs.seekg(0, std::ios::end);
+            size_t sz = ifs.tellg();
             output.resize(sz, ' ');
-            file.seekg(0);
-            file.read(&buffer[0], sz);
+            ifs.seekg(0);
+            char* buffer = new char[sz];
+            ifs.read(buffer, sz);
+            output = std::string(buffer, sz);
+            delete[] buffer;
             return true;
         };
 

@@ -35,6 +35,7 @@
 #include <shared_mutex>
 #include <utility>
 
+#include "cloud/io/tmp_file_mgr.h"
 #include "cloud/meta_mgr.h"
 #include "cloud/olap/storage_engine.h"
 #include "cloud/utils.h"
@@ -533,11 +534,14 @@ Status Compaction::do_compaction_impl(int64_t permits) {
 
             // create index_writer to compaction indexes
             auto& fs = _output_rowset->rowset_meta()->fs();
+#ifdef CLOUD_MODE
+            auto tablet_path = _output_rowset->rowset_dir();
+#else
             auto& tablet_path = _tablet->tablet_path();
-
-            // we choose the first destination segment name as the temporary index writer path
-            // Used to distinguish between different index compaction
-            auto index_writer_path = tablet_path + "/" + dest_index_files[0];
+#endif
+            // use tmp file dir to store index files
+            auto tmp_file_dir = io::TmpFileMgr::instance()->get_tmp_file_dir();
+            auto index_tmp_path = tmp_file_dir + "/" + dest_rowset_id.to_string();
             LOG(INFO) << "start index compaction"
                       << ". tablet=" << _tablet->full_name()
                       << ", source index size=" << src_segment_num
@@ -545,7 +549,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
             Status status = Status::OK();
             std::for_each(
                     ctx.skip_inverted_index.cbegin(), ctx.skip_inverted_index.cend(),
-                    [&src_segment_num, &dest_segment_num, &index_writer_path, &src_index_files,
+                    [&src_segment_num, &dest_segment_num, &index_tmp_path, &src_index_files,
                      &dest_index_files, &fs, &tablet_path, &trans_vec, &dest_segment_num_rows,
                      &status, this](int32_t column_uniq_id) {
                         auto error_handler = [this](int64_t index_id, int64_t column_uniq_id) {
@@ -589,7 +593,7 @@ Status Compaction::do_compaction_impl(int64_t permits) {
                         try {
                             auto st = compact_column(index_id, src_segment_num, dest_segment_num,
                                                      src_index_files, dest_index_files, fs,
-                                                     index_writer_path, tablet_path, trans_vec,
+                                                     index_tmp_path, tablet_path, trans_vec,
                                                      dest_segment_num_rows);
                             if (!st.ok()) {
                                 error_handler(index_id, column_uniq_id);

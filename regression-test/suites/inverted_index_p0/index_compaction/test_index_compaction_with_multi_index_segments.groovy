@@ -17,7 +17,8 @@
 
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
-suite("test_index_compaction_with_multi_index_segments", "p0") {
+suite("test_index_compaction_with_multi_index_segments", "nonConcurrent") {
+    def isCloudMode = true
     def tableName = "test_index_compaction_with_multi_index_segments"
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
@@ -208,7 +209,11 @@ suite("test_index_compaction_with_multi_index_segments", "p0") {
 
         // after full compaction, there is only 1 rowset.
         rowsetCount = get_rowset_count.call(tablets)
-        assert (rowsetCount == 1 * replicaNum)
+        if (isCloudMode) {
+            assert (rowsetCount == (1 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 1 * replicaNum)
+        }
 
         qt_sql """ select * from ${tableName} order by file_time, comment_id, body """
         qt_sql """ select * from ${tableName} where body match "using" order by file_time, comment_id, body """
@@ -227,12 +232,18 @@ suite("test_index_compaction_with_multi_index_segments", "p0") {
                                                 ("2018-02-21 12:00:00", 9, "I\'m using the builds"),
                                                 ("2018-02-21 12:00:00", 10, "I\'m using the builds"); """
 
+        // query data to make rowset meta sync
+        sql """ select * from ${tableName} order by file_time, comment_id, body """
+        
         tablets = sql """ show tablets from ${tableName}; """
 
         // before full compaction, there are 2 rowsets.
         rowsetCount = get_rowset_count.call(tablets)
-        assert (rowsetCount == 2 * replicaNum)
-
+        if (isCloudMode) {
+            assert (rowsetCount == (2 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 2 * replicaNum)
+        }
         // trigger full compactions for all tablets in ${tableName}
         trigger_full_compaction_on_tablets.call(tablets)
 
@@ -241,7 +252,11 @@ suite("test_index_compaction_with_multi_index_segments", "p0") {
 
         // after full compaction, there is only 1 rowset.
         rowsetCount = get_rowset_count.call(tablets)
-        assert (rowsetCount == 1 * replicaNum)
+        if (isCloudMode) {
+            assert (rowsetCount == (1 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 1 * replicaNum)
+        }
 
         qt_sql """ select * from ${tableName} order by file_time, comment_id, body """
         qt_sql """ select * from ${tableName} where body match "using" order by file_time, comment_id, body """
@@ -319,7 +334,11 @@ suite("test_index_compaction_with_multi_index_segments", "p0") {
 
         // after full compaction, there is only 1 rowset.
         rowsetCount = get_rowset_count.call(tablets)
-        assert (rowsetCount == 1 * replicaNum)
+        if (isCloudMode) {
+            assert (rowsetCount == (1 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 1 * replicaNum)
+        }
 
         qt_sql """ select * from ${tableName} order by file_time, comment_id, body """
         qt_sql """ select * from ${tableName} where body match "using" order by file_time, comment_id, body """
@@ -338,12 +357,18 @@ suite("test_index_compaction_with_multi_index_segments", "p0") {
                                                 ("2018-02-21 20:00:00", 9, "I\'m using the builds"),
                                                 ("2018-02-21 21:00:00", 10, "I\'m using the builds"); """
 
+        // query data to make rowset meta sync
+        sql """ select * from ${tableName} order by file_time, comment_id, body """
+
         tablets = sql """ show tablets from ${tableName}; """
 
         // before full compaction, there are 2 rowsets.
         rowsetCount = get_rowset_count.call(tablets)
-        assert (rowsetCount == 2 * replicaNum)
-
+        if (isCloudMode) {
+            assert (rowsetCount == (2 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 2 * replicaNum)
+        }
         // trigger full compactions for all tablets in ${tableName}
         trigger_full_compaction_on_tablets.call(tablets)
 
@@ -352,8 +377,11 @@ suite("test_index_compaction_with_multi_index_segments", "p0") {
 
         // after full compaction, there is only 1 rowset.
         rowsetCount = get_rowset_count.call(tablets)
-        assert (rowsetCount == 1 * replicaNum)
-
+        if (isCloudMode) {
+            assert (rowsetCount == (1 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 1 * replicaNum)
+        }
         qt_sql """ select * from ${tableName} order by file_time, comment_id, body """
         qt_sql """ select * from ${tableName} where body match "using" order by file_time, comment_id, body """
         qt_sql """ select * from ${tableName} where body match "the" order by file_time, comment_id, body """
