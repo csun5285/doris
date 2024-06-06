@@ -38,7 +38,7 @@ public class CloudInstanceStatusChecker extends MasterDaemon {
             SelectdbCloud.GetInstanceResponse response =
                     Env.getCurrentSystemInfo().getCloudInstance();
             LOG.debug("get from ms response {}", response);
-            if (!response.hasStatus() || !response.getStatus().hasCode()
+            if (response == null || !response.hasStatus() || !response.getStatus().hasCode()
                     || response.getStatus().getCode() != SelectdbCloud.MetaServiceCode.OK) {
                 LOG.warn("failed to get cloud instance due to incomplete response, "
                         + "cloud_unique_id={}, response={}", Config.cloud_unique_id, response);
