@@ -135,8 +135,8 @@ public class TabletStatMgr extends MasterDaemon {
                                     }
                                     if (replica.getDataSize() > tabletDataSize) {
                                         tabletDataSize = replica.getDataSize();
-                                        tableTotalReplicaDataSize += replica.getDataSize();
                                     }
+                                    tableTotalReplicaDataSize += replica.getDataSize();
 
                                     if (replica.getRemoteDataSize() > tabletRemoteDataSize) {
                                         tabletRemoteDataSize = replica.getRemoteDataSize();

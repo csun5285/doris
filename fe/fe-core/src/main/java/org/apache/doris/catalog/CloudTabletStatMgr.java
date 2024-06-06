@@ -173,8 +173,8 @@ public class CloudTabletStatMgr extends MasterDaemon {
                                 for (Replica replica : tablet.getReplicas()) {
                                     if (replica.getDataSize() > tabletDataSize) {
                                         tabletDataSize = replica.getDataSize();
-                                        tableTotalReplicaDataSize += replica.getDataSize();
                                     }
+                                    tableTotalReplicaDataSize += replica.getDataSize();
 
                                     if (replica.getRowCount() > tabletRowCount) {
                                         tabletRowCount = replica.getRowCount();
