@@ -36,21 +36,22 @@ suite("test_wal_mem_back_pressure_time_out_fault_injection","nonConcurrent") {
             def fes = sql_return_maparray "show frontends"
             def bes = sql_return_maparray "show backends"
             logger.info("frontends: ${fes}")
-                def fe = fes[0]
-                def be = bes[0]
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
-                    sb.append("/api/update_config?group_commit_queue_mem_limit=0&persist=false")
-                    String command = sb.toString()
-                    logger.info(command)
-                    def process = command.execute()
+            logger.info("backends: ${bes}")
+            for (be in bes){
+                StringBuilder sb = new StringBuilder();
+                sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                sb.append("/api/update_config?group_commit_queue_mem_limit=0&persist=false")
+                String command = sb.toString()
+                logger.info(command)
+                def process = command.execute()
 
-                    sb = new StringBuilder();
-                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
-                    sb.append("/api/update_config?group_commit_rows_for_max_filter_ratio=0&persist=false")
-                    command = sb.toString()
-                    logger.info(command)
-                    process = command.execute()
+                sb = new StringBuilder();
+                sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                sb.append("/api/update_config?group_commit_rows_for_max_filter_ratio=0&persist=false")
+                command = sb.toString()
+                logger.info(command)
+                process = command.execute()
+            }
         } finally {
         }
     }
@@ -60,21 +61,22 @@ suite("test_wal_mem_back_pressure_time_out_fault_injection","nonConcurrent") {
             def fes = sql_return_maparray "show frontends"
             def bes = sql_return_maparray "show backends"
             logger.info("frontends: ${fes}")
-                def fe = fes[0]
-                def be = bes[0]
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
-                    sb.append("/api/update_config?group_commit_queue_mem_limit=67108864&persist=false")
-                    String command = sb.toString()
-                    logger.info(command)
-                    def process = command.execute()
+            logger.info("backends: ${bes}")
+            for (be in bes){
+                StringBuilder sb = new StringBuilder();
+                sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                sb.append("/api/update_config?group_commit_queue_mem_limit=67108864&persist=false")
+                String command = sb.toString()
+                logger.info(command)
+                def process = command.execute()
 
-                    sb = new StringBuilder();
-                    sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
-                    sb.append("/api/update_config?group_commit_rows_for_max_filter_ratio=10000&persist=false")
-                    command = sb.toString()
-                    logger.info(command)
-                    process = command.execute()
+                sb = new StringBuilder();
+                sb.append("curl -X POST http://${be.Host}:${be.HttpPort}")
+                sb.append("/api/update_config?group_commit_rows_for_max_filter_ratio=10000&persist=false")
+                command = sb.toString()
+                logger.info(command)
+                process = command.execute()
+            }
         } finally {
         }
     }
