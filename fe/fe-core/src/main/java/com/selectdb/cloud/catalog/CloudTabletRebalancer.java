@@ -354,6 +354,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             for (long beId : beList) {
                 tabletNum = beToTabletsGlobal.get(beId) == null ? 0 : beToTabletsGlobal.get(beId).size();
                 Backend backend = Env.getCurrentSystemInfo().getBackend(beId);
+                if (backend == null) {
+                    LOG.info("backend {} not found", beId);
+                    continue;
+                }
                 if ((backend.isDecommissioned() && tabletNum == 0 && !backend.isActive())
                         || (backend.isDecommissioned() && beList.size() == 1)) {
                     LOG.info("check decommission be {} state {} tabletNum {} isActive {} beList {}",
