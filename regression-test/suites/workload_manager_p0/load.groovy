@@ -37,4 +37,11 @@ suite("test_create_upgrade_wg") {
             "    'memory_limit'='0.3%', " +
             "    'enable_memory_overcommit'='true' " +
             ");"
+
+    // alter
+    sql "alter workload group normal properties ('cpu_share' = '20')"
+    // drop
+    sql "drop workload group upgrade_g1"
+    sql "drop workload group upgrade_g2"
 }
+
