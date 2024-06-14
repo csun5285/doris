@@ -2561,19 +2561,19 @@ public class Config extends ConfigBase {
     })
     public static long analyze_record_limit = 20000;
 
-    @ConfField(mutable = true, description = {
+    @ConfField(mutable = true, masterOnly = true, description = {
             "Auto Buckets中最小的buckets数目",
             "min buckets of auto bucket"
     })
     public static int autobucket_min_buckets = 1;
 
-    @ConfField(mutable = true, description = {
+    @ConfField(mutable = true, masterOnly = true, description = {
             "Auto Buckets中最大的buckets数目",
             "max buckets of auto bucket"
     })
     public static int autobucket_max_buckets = 128;
 
-    @ConfField(mutable = true, description = {
+    @ConfField(mutable = true, masterOnly = true, description = {
             "Cloud Auto Buckets中最大的buckets数目",
             "cloud max buckets of auto bucket"
     })
