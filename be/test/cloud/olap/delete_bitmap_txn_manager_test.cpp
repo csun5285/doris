@@ -83,9 +83,10 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     RowsetIdUnorderedSet out_rowset_ids;
     int64_t out_txn_expiration;
     std::shared_ptr<PartialUpdateInfo> out_partial_update_info;
+    std::shared_ptr<PublishStatus> publish_status;
     st = txn_manager.get_tablet_txn_info(txn_id1, tablet_id1, &out_rowset, &out_delete_bitmap,
                                          &out_rowset_ids, &out_txn_expiration,
-                                         &out_partial_update_info);
+                                         &out_partial_update_info, &publish_status);
     EXPECT_EQ(st, Status::OK());
     EXPECT_EQ(out_rowset.get(), input_rowset.get());
     EXPECT_EQ(out_delete_bitmap.get(), input_delete_bitmap.get());
@@ -93,28 +94,31 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     EXPECT_EQ(out_delete_bitmap->cardinality(), 1);
     EXPECT_EQ(out_partial_update_info.get(), input_partial_update_info.get());
     EXPECT_EQ(out_txn_expiration, txn_expiration1);
+    EXPECT_EQ(*publish_status, PublishStatus::INIT);
 
     // get txn_id2
     st = txn_manager.get_tablet_txn_info(txn_id2, tablet_id2, &out_rowset, &out_delete_bitmap,
                                          &out_rowset_ids, &out_txn_expiration,
-                                         &out_partial_update_info);
+                                         &out_partial_update_info, &publish_status);
     EXPECT_EQ(st, Status::OK());
     EXPECT_EQ(out_rowset.get(), input_rowset.get());
     EXPECT_EQ(out_delete_bitmap.get(), input_delete_bitmap.get());
     EXPECT_TRUE(out_delete_bitmap->contains({rowset_id, 1, 2}, 10));
     EXPECT_EQ(out_delete_bitmap->cardinality(), 1);
     EXPECT_EQ(out_partial_update_info.get(), input_partial_update_info.get());
+    EXPECT_EQ(*publish_status, PublishStatus::INIT);
 
     // update txn_id1
     RowsetId rowset_id2;
     rowset_id2.init(2);
     input_delete_bitmap->add({rowset_id2, 1, 2}, 11);
     input_rowset_ids.emplace(rowset_id2);
-    txn_manager.update_tablet_txn_info(txn_id1, tablet_id1, input_delete_bitmap, input_rowset_ids);
+    txn_manager.update_tablet_txn_info(txn_id1, tablet_id1, input_delete_bitmap, input_rowset_ids,
+                                       PublishStatus::SUCCEED);
 
     st = txn_manager.get_tablet_txn_info(txn_id1, tablet_id1, &out_rowset, &out_delete_bitmap,
                                          &out_rowset_ids, &out_txn_expiration,
-                                         &out_partial_update_info);
+                                         &out_partial_update_info, &publish_status);
     EXPECT_EQ(st, Status::OK());
     EXPECT_EQ(out_rowset.get(), input_rowset.get());
     EXPECT_TRUE(out_delete_bitmap->contains({rowset_id, 1, 2}, 10));
@@ -122,6 +126,7 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
     EXPECT_EQ(out_delete_bitmap->cardinality(), 2);
     EXPECT_EQ(out_partial_update_info.get(), input_partial_update_info.get());
     EXPECT_EQ(out_txn_expiration, txn_expiration1);
+    EXPECT_EQ(*publish_status, PublishStatus::SUCCEED);
 
     sp->set_call_back("DeleteBitmapTxnManager::remove_expired_tablet_txn_info", [](auto&& args) {
         bool* pred = try_any_cast<bool*>(args.at(0));
@@ -132,12 +137,12 @@ TEST(DeleteBitmapTxnManagerTest, normal) {
 
     st = txn_manager.get_tablet_txn_info(txn_id1, tablet_id1, &out_rowset, &out_delete_bitmap,
                                          &out_rowset_ids, &out_txn_expiration,
-                                         &out_partial_update_info);
+                                         &out_partial_update_info, &publish_status);
     EXPECT_TRUE(st.is<ErrorCode::NOT_FOUND>());
 
     st = txn_manager.get_tablet_txn_info(txn_id2, tablet_id2, &out_rowset, &out_delete_bitmap,
                                          &out_rowset_ids, &out_txn_expiration,
-                                         &out_partial_update_info);
+                                         &out_partial_update_info, &publish_status);
     EXPECT_EQ(st, Status::OK());
 }
 
@@ -180,13 +185,15 @@ TEST(DeleteBitmapTxnManagerTest, cache_miss) {
     RowsetIdUnorderedSet out_rowset_ids;
     int64_t out_txn_expiration;
     std::shared_ptr<PartialUpdateInfo> out_partial_update_info;
+    std::shared_ptr<PublishStatus> publish_status;
     st = txn_manager.get_tablet_txn_info(txn_id1, tablet_id1, &out_rowset, &out_delete_bitmap,
                                          &out_rowset_ids, &out_txn_expiration,
-                                         &out_partial_update_info);
+                                         &out_partial_update_info, &publish_status);
     EXPECT_EQ(st, Status::OK());
     EXPECT_EQ(out_rowset.get(), input_rowset.get());
     EXPECT_NE(out_delete_bitmap.get(), input_delete_bitmap.get());
     EXPECT_EQ(out_delete_bitmap->cardinality(), 0);
+    EXPECT_EQ(*publish_status, PublishStatus::INIT);
 }
 
 } // namespace doris::cloud

@@ -4106,7 +4106,7 @@ Status Tablet::update_delete_bitmap(TabletTxnInfo* txn_info, int64_t txn_id,
 #ifdef CLOUD_MODE
     // update delete bitmap info, in order to avoid recalculation when trying again
     StorageEngine::instance()->delete_bitmap_txn_manager()->update_tablet_txn_info(
-            txn_id, tablet_id(), delete_bitmap, cur_rowset_ids);
+            txn_id, tablet_id(), delete_bitmap, cur_rowset_ids, PublishStatus::PREPARE);
 #endif
 
     if (config::enable_merge_on_write_correctness_check && rowset->num_rows() != 0) {
@@ -4195,6 +4195,8 @@ Status Tablet::update_delete_bitmap(TabletTxnInfo* txn_info, int64_t txn_id,
 
     RETURN_IF_ERROR(cloud::meta_mgr()->update_delete_bitmap(
             this, txn_id, COMPACTION_DELETE_BITMAP_LOCK_ID, new_delete_bitmap.get()));
+    StorageEngine::instance()->delete_bitmap_txn_manager()->update_tablet_txn_info(
+            txn_id, tablet_id(), new_delete_bitmap, cur_rowset_ids, PublishStatus::SUCCEED);
     LOG(INFO) << "[Publish] update delete_bitmap tablet: " << tablet_id()
               << ", cur version: " << cur_version << ", transaction_id: " << txn_id
               << ", cost:" << watch.get_elapse_time_us() - t5 << "(us)";

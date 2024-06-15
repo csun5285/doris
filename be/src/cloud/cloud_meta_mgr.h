@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ranges>
+
 #include "cloud/meta_mgr.h"
 #include "olap/rowset/rowset_meta.h"
 
@@ -50,6 +52,10 @@ public:
 
     Status get_delete_bitmap_update_lock(const Tablet* tablet, int64_t lock_id,
                                          int64_t initiator) override;
+
+    bool sync_tablet_delete_bitmap_by_cache(Tablet* tablet, int64_t old_max_version,
+                                            std::ranges::range auto&& rs_metas,
+                                            DeleteBitmap* delete_bitmap);
 
 private:
     Status sync_tablet_delete_bitmap(
