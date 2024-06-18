@@ -2741,5 +2741,5 @@ public class Config extends ConfigBase {
     public static int max_finished_alter_job_num = 10000;
 
     @ConfField(mutable = true, masterOnly = true)
-    public static boolean enable_create_bitmap_index_as_inverted_index = true;
+    public static boolean enable_create_bitmap_index_as_inverted_index = false;
 }
