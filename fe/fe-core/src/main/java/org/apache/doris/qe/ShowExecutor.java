@@ -394,6 +394,10 @@ public class ShowExecutor {
         } else if (stmt instanceof ShowRolesStmt) {
             handleShowRoles();
         } else if (stmt instanceof ShowTrashStmt) {
+            if (Config.isCloudMode()) {
+                LOG.info("stmt={}, not supported in cloud mode", stmt.toString());
+                throw new AnalysisException("Unsupported operation");
+            }
             handleShowTrash();
         } else if (stmt instanceof ShowTrashDiskStmt) {
             handleShowTrashDisk();
