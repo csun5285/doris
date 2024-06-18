@@ -1668,17 +1668,10 @@ public class InternalCatalog implements CatalogIf<Database> {
         DataProperty dataProperty = singlePartitionDesc.getPartitionDataProperty();
         Preconditions.checkNotNull(dataProperty);
         // check replica quota if this operation done
-        long indexNum = indexIdToMeta.size();
-        long bucketNum = distributionInfo.getBucketNum();
-        long replicaNum = singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum();
-        long totalReplicaNum = indexNum * bucketNum * replicaNum;
-        if (totalReplicaNum >= db.getReplicaQuotaLeftWithLock()) {
-            throw new DdlException("Database " + db.getFullName() + " table " + tableName + " add partition increasing "
-                + totalReplicaNum + " of replica exceeds quota[" + db.getReplicaQuota() + "]");
-        }
-        Set<Long> tabletIdSet = new HashSet<>();
-        long bufferSize = 1 + totalReplicaNum + indexNum * bucketNum;
+        long bufferSize = checkAndGetBufferSize(indexIdToMeta.size(), distributionInfo.getBucketNum(),
+                singlePartitionDesc.getReplicaAlloc().getTotalReplicaNum(), db, tableName);
         IdGeneratorBuffer idGeneratorBuffer = Env.getCurrentEnv().getIdGeneratorBuffer(bufferSize);
+        Set<Long> tabletIdSet = new HashSet<>();
         String storagePolicy = olapTable.getStoragePolicy();
         if (!Strings.isNullOrEmpty(dataProperty.getStoragePolicy())) {
             storagePolicy = dataProperty.getStoragePolicy();
@@ -1689,7 +1682,8 @@ public class InternalCatalog implements CatalogIf<Database> {
             }
         };
         try {
-            long partitionId = idGeneratorBuffer.getNextId();
+            long partitionId = !FeConstants.runningUnitTest && isCreateTable
+                    ? generatedPartitionId : idGeneratorBuffer.getNextId();
             Partition partition;
             if (Config.isNotCloudMode()) {
                 partition = createPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
@@ -1711,8 +1705,10 @@ public class InternalCatalog implements CatalogIf<Database> {
             } else {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
-                List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
+                List<Long> indexIds = new ArrayList<>(indexIdToMeta.keySet());
+                if (!isCreateTable) {
+                    prepareCloudPartition(db.getId(), olapTable.getId(), partitionIds, indexIds, 0);
+                }
                 partition = createCloudPartitionWithIndices(db.getClusterName(), db.getId(), olapTable.getId(),
                     olapTable.getBaseIndexId(), partitionId, partitionName, indexIdToMeta, distributionInfo,
                     dataProperty.getStorageMedium(), singlePartitionDesc.getReplicaAlloc(),
@@ -1727,9 +1723,6 @@ public class InternalCatalog implements CatalogIf<Database> {
                     olapTable.getTimeSeriesCompactionTimeThresholdSeconds(),
                     olapTable.getTimeSeriesCompactionEmptyRowsetsThreshold(),
                     olapTable.getTimeSeriesCompactionLevelThreshold());
-                if (!isCreateTable) {
-                    commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
-                }
             }
 
             // check again
@@ -1828,7 +1821,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
                 List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                if (Config.isCloudMode()) {
+                if (!isCreateTable) {
                     commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
                 }
 
