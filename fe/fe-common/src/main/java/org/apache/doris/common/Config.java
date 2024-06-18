@@ -2731,7 +2731,7 @@ public class Config extends ConfigBase {
             "Whether to advance the ID generator after becoming Master to ensure that the id "
                     + "generator will not be rolled back even when metadata is rolled back."
     })
-    public static boolean enable_advance_next_id = false;
+    public static boolean enable_advance_next_id = true;
 
     @ConfField(description = {"Stream_Load 导入时，label 被限制的最大长度",
             "Stream_Load When importing, the maximum length of label is limited"})
