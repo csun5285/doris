@@ -37,7 +37,7 @@ struct FileWriterOptions {
     bool is_cold_data = false;
     bool sync_file_data = true;        // Whether flush data into storage system
     int64_t file_cache_expiration = 0; // Absolute time
-    bool create_empty_file = 0;
+    bool create_empty_file = false;
 };
 
 class FileWriter {

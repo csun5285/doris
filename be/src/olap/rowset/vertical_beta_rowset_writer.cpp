@@ -186,7 +186,11 @@ Status VerticalBetaRowsetWriter::_create_segment_writer(
         return Status::Error<INIT_FAILED>("get fs failed");
     }
     io::FileWriterPtr file_writer;
-    io::FileWriterOptions opts {.create_empty_file = false};
+    io::FileWriterOptions opts;
+    opts.file_cache_expiration =
+            _context.ttl_seconds == 0 ? 0 : _context.newest_write_timestamp + _context.ttl_seconds;
+    opts.is_cold_data = !_context.is_hot_data;
+    opts.write_file_cache = _context.write_file_cache;
     Status st = fs->create_file(path, &file_writer, &opts);
     if (!st.ok()) {
         LOG(WARNING) << "failed to create writable file. path=" << path << ", err: " << st;
