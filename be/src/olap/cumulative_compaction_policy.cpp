@@ -304,7 +304,7 @@ int SizeBasedCumulativeCompactionPolicy::pick_input_rowsets(
 
     auto rs_begin = input_rowsets->begin();
     size_t new_compaction_score = *compaction_score;
-    while (rs_begin != input_rowsets->end()) {
+    while (rs_begin != input_rowsets->end() - 1) {
         auto& rs_meta = (*rs_begin)->rowset_meta();
         int current_level = _level_size(rs_meta->total_disk_size());
         int remain_level = _level_size(total_size - rs_meta->total_disk_size());
