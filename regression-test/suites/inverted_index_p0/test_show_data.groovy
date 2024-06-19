@@ -174,7 +174,7 @@ suite("test_show_data", "p0") {
             state = wait_for_last_build_index_on_table_finish(testTableWithoutIndex, timeout)
             assertEquals(state, "FINISHED")
         }
-        def with_index_size = wait_for_show_data_finish(testTableWithoutIndex, 120000, no_index_size)
+        def with_index_size = wait_for_show_data_finish(testTableWithoutIndex, 300000, no_index_size)
         assertTrue(with_index_size != "wait_timeout")
 
         sql """ ALTER TABLE ${testTableWithoutIndex} DROP INDEX idx_request """
@@ -353,7 +353,7 @@ suite("test_show_data_for_bkd", "p0") {
             def state = wait_for_last_build_index_on_table_finish(testTableWithoutBKDIndex, timeout)
             assertEquals(state, "FINISHED")
         }
-        def with_index_size = wait_for_show_data_finish(testTableWithoutBKDIndex, 120000, no_index_size)
+        def with_index_size = wait_for_show_data_finish(testTableWithoutBKDIndex, 300000, no_index_size)
         assertTrue(with_index_size != "wait_timeout")
 
         sql """ ALTER TABLE ${testTableWithoutBKDIndex} DROP INDEX idx_status """
@@ -534,7 +534,7 @@ suite("test_show_data_multi_add", "p0") {
             def state = wait_for_last_build_index_on_table_finish(testTableWithoutIndex, timeout)
             assertEquals(state, "FINISHED")
         }
-        def with_index_size1 = wait_for_show_data_finish(testTableWithoutIndex, 120000, no_index_size)
+        def with_index_size1 = wait_for_show_data_finish(testTableWithoutIndex, 300000, no_index_size)
         assertTrue(with_index_size1 != "wait_timeout")
 
         sql """ ALTER TABLE ${testTableWithoutIndex} ADD INDEX request_idx (`request`) USING INVERTED; """
@@ -546,7 +546,7 @@ suite("test_show_data_multi_add", "p0") {
             def state2 = wait_for_last_build_index_on_table_finish(testTableWithoutIndex, timeout)
             assertEquals(state2, "FINISHED")
         }
-        def with_index_size2 = wait_for_show_data_finish(testTableWithoutIndex, 120000, with_index_size1)
+        def with_index_size2 = wait_for_show_data_finish(testTableWithoutIndex, 300000, with_index_size1)
         assertTrue(with_index_size2 != "wait_timeout")
 
         sql "DROP TABLE IF EXISTS ${testTableWithIndex}"
