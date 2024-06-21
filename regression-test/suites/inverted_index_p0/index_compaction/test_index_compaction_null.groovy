@@ -234,9 +234,11 @@ suite("test_index_compaction_null", "nonConcurrent") {
             }
         }
         set_be_config.call("inverted_index_compaction_enable", "true")
+        set_be_config.call("disable_auto_compaction", "true")
         has_update_be_config = true
         // check updated config
         check_config.call("inverted_index_compaction_enable", "true");
+        check_config.call("disable_auto_compaction", "true");
 
 
         /**
@@ -307,6 +309,7 @@ suite("test_index_compaction_null", "nonConcurrent") {
     } finally {
         if (has_update_be_config) {
             set_be_config.call("inverted_index_compaction_enable", invertedIndexCompactionEnable.toString())
+            set_be_config.call("disable_auto_compaction", disableAutoCompaction.toString())
         }
     }
 }

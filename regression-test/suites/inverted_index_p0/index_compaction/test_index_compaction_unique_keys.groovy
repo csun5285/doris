@@ -130,9 +130,11 @@ suite("test_index_compaction_unique_keys", "nonConcurrent") {
             }
         }
         set_be_config.call("inverted_index_compaction_enable", "true")
+        set_be_config.call("disable_auto_compaction", "true")
         has_update_be_config = true
         // check updated config
         check_config.call("inverted_index_compaction_enable", "true");
+        check_config.call("disable_auto_compaction", "true");
 
         sql """ DROP TABLE IF EXISTS ${tableName}; """
         sql """
@@ -236,6 +238,7 @@ suite("test_index_compaction_unique_keys", "nonConcurrent") {
     } finally {
         if (has_update_be_config) {
             set_be_config.call("inverted_index_compaction_enable", invertedIndexCompactionEnable.toString())
+            set_be_config.call("disable_auto_compaction", disableAutoCompaction.toString())
         }
     }
 }

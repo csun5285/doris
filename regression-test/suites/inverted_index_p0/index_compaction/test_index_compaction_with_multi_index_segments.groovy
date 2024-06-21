@@ -129,14 +129,20 @@ suite("test_index_compaction_with_multi_index_segments", "nonConcurrent") {
                 invertedIndexMaxBufferedDocs = Integer.parseInt(((List<String>) ele)[2])
                 logger.info("inverted_index_max_buffered_docs: ${((List<String>) ele)[2]}")
             }
+            if (((List<String>) ele)[0] == "disable_auto_compaction") {
+                disableAutoCompaction = Boolean.parseBoolean(((List<String>) ele)[2])
+                logger.info("disable_auto_compaction: ${((List<String>) ele)[2]}")
+            }
         }
         set_be_config.call("inverted_index_compaction_enable", "true")
         set_be_config.call("inverted_index_max_buffered_docs", "5")
+        set_be_config.call("disable_auto_compaction", "true")
         has_update_be_config = true
 
         // check config
         check_config.call("inverted_index_compaction_enable", "true")
         check_config.call("inverted_index_max_buffered_docs", "5")
+        check_config.call("disable_auto_compaction", "true")
 
         /**
         * test duplicated tables
@@ -391,6 +397,7 @@ suite("test_index_compaction_with_multi_index_segments", "nonConcurrent") {
         if (has_update_be_config) {
             set_be_config.call("inverted_index_compaction_enable", invertedIndexCompactionEnable.toString())
             set_be_config.call("inverted_index_max_buffered_docs", invertedIndexMaxBufferedDocs.toString())
+            set_be_config.call("disable_auto_compaction", disableAutoCompaction.toString())
         }
     }
 }
