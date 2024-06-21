@@ -1048,6 +1048,7 @@ TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
         EXPECT_EQ(tablet->fetch_add_approximate_num_rowsets(0), 3);
     }
     {
+        //sleep(30);
         // Simulate executing commit job and update tablet cache, suppose this BE is BE1:
         //  BE1 prepare full -> BE2 commit cumu -> BE1 commit full -> BE1 full update cache
         prepare_tablet(10013);
@@ -1070,7 +1071,9 @@ TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
         stats.set_base_compaction_cnt(2);
 
         // - BE1 cumu update tablet cache
-        commit_job_stats = stats;
+        auto base_stats = stats;
+        base_stats.set_cumulative_point(31);
+        commit_job_stats = base_stats;
         full.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
