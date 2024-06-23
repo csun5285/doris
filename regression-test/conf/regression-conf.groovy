@@ -40,6 +40,8 @@ cloudUniqueId = ""
 metaServiceHttpAddress = "127.0.0.1:5000"
 recycleServiceHttpAddress = "127.0.0.1:5100"
 feCloudHttpAddress = "127.0.0.1:8904"
+metaServiceToken = "greedisgood9999"
+multiClusterInstance = "selectdb-cloud-dev-asan"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
