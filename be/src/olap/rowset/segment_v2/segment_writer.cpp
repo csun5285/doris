@@ -972,9 +972,6 @@ Status SegmentWriter::finalize_columns_data() {
 }
 
 Status SegmentWriter::finalize_columns_index(uint64_t* index_size) {
-    if (auto s3_writer = dynamic_cast<io::S3FileWriter*>(_file_writer); s3_writer) {
-        s3_writer->mark_index_offset();
-    }
     uint64_t index_start = _file_writer->bytes_appended();
     RETURN_IF_ERROR(_write_ordinal_index());
     RETURN_IF_ERROR(_write_zone_map());
@@ -999,6 +996,9 @@ Status SegmentWriter::finalize_columns_index(uint64_t* index_size) {
 }
 
 Status SegmentWriter::finalize_footer(uint64_t* segment_file_size) {
+    if (auto s3_writer = dynamic_cast<io::S3FileWriter*>(_file_writer); s3_writer) {
+        s3_writer->mark_index_offset();
+    }
     RETURN_IF_ERROR(_write_footer());
     // finish
     RETURN_IF_ERROR(_file_writer->finalize());
