@@ -151,6 +151,7 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonArray;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonContains;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonExtract;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonInsert;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonKeys;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonLength;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonObject;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.JsonQuote;
@@ -518,6 +519,7 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(JsonbType.class, "jsonb_type"),
             scalar(JsonLength.class, "json_length"),
             scalar(JsonContains.class, "json_contains"),
+            scalar(JsonKeys.class, "json_keys"),
             scalar(LastDay.class, "last_day"),
             scalar(Least.class, "least"),
             scalar(Left.class, "left"),
