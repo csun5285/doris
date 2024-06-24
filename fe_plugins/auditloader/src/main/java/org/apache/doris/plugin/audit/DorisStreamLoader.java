@@ -74,6 +74,7 @@ public class DorisStreamLoader {
         conn.addRequestProperty("columns", "query_id, `time`, client_ip, user, db, state, error_code, error_message, " +
                 "query_time, scan_bytes, scan_rows, return_rows, stmt_id, is_query, frontend_ip, cpu_time_ms, sql_hash, " +
                 "sql_digest, peak_memory_bytes, stmt");
+        conn.addRequestProperty("redirect-policy", "random-be");
 
         conn.setDoOutput(true);
         conn.setDoInput(true);

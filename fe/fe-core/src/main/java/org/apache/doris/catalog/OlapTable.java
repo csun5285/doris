@@ -50,6 +50,7 @@ import org.apache.doris.common.util.Util;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.OriginStatement;
 import org.apache.doris.resource.Tag;
+import org.apache.doris.rpc.RpcException;
 import org.apache.doris.statistics.AnalysisInfo;
 import org.apache.doris.statistics.AnalysisInfo.AnalysisType;
 import org.apache.doris.statistics.BaseAnalysisTask;
@@ -79,6 +80,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Range;
 import com.google.common.collect.Sets;
 import com.selectdb.cloud.catalog.CloudPartition;
+import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -157,6 +159,8 @@ public class OlapTable extends Table {
     private long baseIndexId = -1;
 
     private TableProperty tableProperty;
+
+    private volatile Statistics statistics = new Statistics();
 
     public OlapTable() {
         // for persist
@@ -1034,6 +1038,21 @@ public class OlapTable extends Table {
         return partition;
     }
 
+    public void getVersionInBatchForCloudMode(Collection<Long> partitionIds) {
+        if (Config.isCloudMode()) { // do nothing for non-cloud mode
+            List<CloudPartition> partitions = partitionIds.stream()
+                    .sorted()
+                    .map(this::getPartition)
+                    .map(partition -> (CloudPartition) partition)
+                    .collect(Collectors.toList());
+            try {
+                CloudPartition.getSnapshotVisibleVersion(partitions);
+            } catch (RpcException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
     // select the non-empty partition ids belonging to this table.
     //
     // ATTN: partitions not belonging to this table will be filtered.
@@ -1720,30 +1739,6 @@ public class OlapTable extends Table {
         }
 
         return oldPartition;
-    }
-
-    public long getDataSize() {
-        long dataSize = 0;
-        for (Partition partition : getAllPartitions()) {
-            dataSize += partition.getDataSize(false);
-        }
-        return dataSize;
-    }
-
-    public long getRemoteDataSize() {
-        long remoteDataSize = 0;
-        for (Partition partition : getAllPartitions()) {
-            remoteDataSize += partition.getRemoteDataSize();
-        }
-        return remoteDataSize;
-    }
-
-    public long getReplicaCount() {
-        long replicaCount = 0;
-        for (Partition partition : getAllPartitions()) {
-            replicaCount += partition.getReplicaCount();
-        }
-        return replicaCount;
     }
 
     public void checkNormalStateForAlter() throws DdlException {
@@ -2564,14 +2559,6 @@ public class OlapTable extends Table {
         }
     }
 
-    public long getDataSize(boolean singleReplica) {
-        long dataSize = 0;
-        for (Partition partition : getAllPartitions()) {
-            dataSize += partition.getDataSize(singleReplica);
-        }
-        return dataSize;
-    }
-
     public boolean isDistributionColumn(String columnName) {
         Set<String> distributeColumns = getDistributionColumnNames()
                 .stream().map(String::toLowerCase).collect(Collectors.toSet());
@@ -2597,5 +2584,93 @@ public class OlapTable extends Table {
     @Override
     public boolean needReadLockWhenPlan() {
         return true;
+    }
+
+    public void setStatistics(Statistics statistics) {
+        this.statistics = statistics;
+    }
+
+    public static class Statistics {
+        @Getter
+        private String dbName;
+        @Getter
+        private String tableName;
+
+        @Getter
+        private Long dataSize; // single replica data size
+        @Getter
+        private Long totalReplicaDataSize;
+
+        @Getter
+        private Long remoteDataSize; // single replica remote data size
+
+        @Getter
+        private Long replicaCount;
+
+        @Getter
+        private Long rowCount;
+
+        @Getter
+        private Long rowsetCount;
+
+        @Getter
+        private Long segmentCount;
+
+        public Statistics() {
+            this.dbName = null;
+            this.tableName = null;
+
+            this.dataSize = 0L;
+            this.totalReplicaDataSize = 0L;
+
+            this.remoteDataSize = 0L;
+
+            this.replicaCount = 0L;
+
+            this.rowCount = 0L;
+            this.rowsetCount = 0L;
+            this.segmentCount = 0L;
+
+        }
+
+        public Statistics(String dbName, String tableName,
+                Long dataSize, Long totalReplicaDataSize,
+                Long remoteDataSize, Long replicaCount, Long rowCount,
+                Long rowsetCount, Long segmentCount) {
+
+            this.dbName = dbName;
+            this.tableName = tableName;
+
+            this.dataSize = dataSize;
+            this.totalReplicaDataSize = totalReplicaDataSize;
+
+            this.remoteDataSize = remoteDataSize;
+
+            this.replicaCount = replicaCount;
+
+            this.rowCount = rowCount;
+            this.rowsetCount = rowsetCount;
+            this.segmentCount = segmentCount;
+        }
+    }
+
+    public long getDataSize() {
+        return getDataSize(false);
+    }
+
+    public long getDataSize(boolean singleReplica) {
+        if (singleReplica) {
+            statistics.getDataSize();
+        }
+
+        return statistics.getTotalReplicaDataSize();
+    }
+
+    public long getRemoteDataSize() {
+        return statistics.getRemoteDataSize();
+    }
+
+    public long getReplicaCount() {
+        return statistics.getReplicaCount();
     }
 }

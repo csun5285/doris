@@ -122,6 +122,19 @@ TEST(TestSizeBasedCumulativeCompactionPolicy, pick_input_rowsets) {
         EXPECT_EQ(compaction_score, 2);
     }
     {
+        // [2-2] score=3 size=100
+        Tablet tablet(std::make_shared<TabletMeta>(), nullptr);
+        std::vector<RowsetSharedPtr> rowsets;
+        rowsets.push_back(create_rowset({2, 2}, 3, true, 100 * MB));
+        tablet.cloud_add_rowsets(rowsets, false);
+        std::vector<RowsetSharedPtr> input_rowsets;
+        policy.pick_input_rowsets(&tablet, rowsets, max_compaction_score, min_compaction_score,
+                                  &input_rowsets, &last_delete_version, &compaction_score);
+        ASSERT_EQ(input_rowsets.size(), 1);
+        EXPECT_EQ(input_rowsets[0]->end_version(), 2);
+        EXPECT_EQ(compaction_score, 3);
+    }
+    {
         // [2-2] score=100 size=100, [3-3] score=1 size=1, [4-4] score=1 size=1
         Tablet tablet(std::make_shared<TabletMeta>(), nullptr);
         std::vector<RowsetSharedPtr> rowsets;

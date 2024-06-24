@@ -198,6 +198,7 @@ public class SessionVariable implements Serializable, Writable {
     public static final String MAX_JOIN_NUMBER_OF_REORDER = "max_join_number_of_reorder";
 
     public static final String ENABLE_NEREIDS_DML = "enable_nereids_dml";
+    public static final String ENABLE_NEREIDS_DML_WITH_PIPELINE = "enable_nereids_dml_with_pipeline";
     public static final String ENABLE_STRICT_CONSISTENCY_DML = "enable_strict_consistency_dml";
 
     public static final String ENABLE_BUSHY_TREE = "enable_bushy_tree";
@@ -305,6 +306,8 @@ public class SessionVariable implements Serializable, Writable {
 
     public static final String SKIP_DELETE_BITMAP = "skip_delete_bitmap";
 
+    public static final String SKIP_MISSING_VERSION = "skip_missing_version";
+
     public static final String ENABLE_NEW_SHUFFLE_HASH_METHOD = "enable_new_shuffle_hash_method";
 
     public static final String ENABLE_PUSH_DOWN_NO_GROUP_AGG = "enable_push_down_no_group_agg";
@@ -387,6 +390,10 @@ public class SessionVariable implements Serializable, Writable {
     public static final String ENABLE_PARQUET_LAZY_MAT = "enable_parquet_lazy_materialization";
 
     public static final String ENABLE_ORC_LAZY_MAT = "enable_orc_lazy_materialization";
+
+    public static final String ENABLE_PARQUET_FILTER_BY_MIN_MAX = "enable_parquet_filter_by_min_max";
+
+    public static final String ENABLE_ORC_FILTER_BY_MIN_MAX = "enable_orc_filter_by_min_max";
 
     public static final String INLINE_CTE_REFERENCED_THRESHOLD = "inline_cte_referenced_threshold";
 
@@ -746,8 +753,6 @@ public class SessionVariable implements Serializable, Writable {
     public String defaultStorageEngine = "olap";
     @VariableMgr.VarAttr(name = DEFAULT_TMP_STORAGE_ENGINE)
     public String defaultTmpStorageEngine = "olap";
-    @VariableMgr.VarAttr(name = DIV_PRECISION_INCREMENT)
-    public int divPrecisionIncrement = 4;
 
     // SELECTDB_CODE_BEGIN
     @VariableMgr.VarAttr(name = CLOUD_CLUSTER)
@@ -778,6 +783,10 @@ public class SessionVariable implements Serializable, Writable {
 
     @VariableMgr.VarAttr(name = ENABLE_NEREIDS_DML, needForward = true)
     public boolean enableNereidsDML = false;
+
+    @VariableMgr.VarAttr(name = ENABLE_NEREIDS_DML_WITH_PIPELINE, needForward = true,
+            description = {"在新优化器中，使用pipeline引擎执行DML", "execute DML with pipeline engine in Nereids"})
+    public boolean enableNereidsDmlWithPipeline = false;
 
     @VariableMgr.VarAttr(name = ENABLE_STRICT_CONSISTENCY_DML, needForward = true)
     public boolean enableStrictConsistencyDml = false;
@@ -1020,6 +1029,19 @@ public class SessionVariable implements Serializable, Writable {
     @VariableMgr.VarAttr(name = SKIP_DELETE_BITMAP)
     public boolean skipDeleteBitmap = false;
 
+    // This variable replace the original FE config `recover_with_skip_missing_version`.
+    // In some scenarios, all replicas of tablet are having missing versions, and the tablet is unable to recover.
+    // This config can control the behavior of query. When it is set to `true`, the query will ignore the
+    // visible version recorded in FE partition, use the replica version. If the replica on BE has missing versions,
+    // the query will directly skip this missing version, and only return the data of the existing versions.
+    // Besides, the query will always try to select the one with the highest lastSuccessVersion among all surviving
+    // BE replicas, so as to recover as much data as possible.
+    // You should only open it in the emergency scenarios mentioned above, only used for temporary recovery queries.
+    // This variable conflicts with the use_fix_replica variable, when the use_fix_replica variable is not -1,
+    // this variable will not work.
+    @VariableMgr.VarAttr(name = SKIP_MISSING_VERSION)
+    public boolean skipMissingVersion = false;
+
     // This variable is used to avoid FE fallback to the original parser. When we execute SQL in regression tests
     // for nereids, fallback will cause the Doris return the correct result although the syntax is unsupported
     // in nereids for some mistaken modification. You should set it on the
@@ -1233,6 +1255,24 @@ public class SessionVariable implements Serializable, Writable {
                             + "The default value is true."},
             needForward = true)
     public boolean enableOrcLazyMat = true;
+
+
+    @VariableMgr.VarAttr(
+            name = ENABLE_PARQUET_FILTER_BY_MIN_MAX,
+            description = {"控制 parquet reader 是否启用 min-max 值过滤。默认为 true。",
+                    "Controls whether to filter by min-max values in parquet reader. "
+                            + "The default value is true."},
+            needForward = true)
+    public boolean enableParquetFilterByMinMax = true;
+
+
+    @VariableMgr.VarAttr(
+            name = ENABLE_ORC_FILTER_BY_MIN_MAX,
+            description = {"控制 orc reader 是否启用 min-max 值过滤。默认为 true。",
+                    "Controls whether to filter by min-max values in orc reader. "
+                            + "The default value is true."},
+            needForward = true)
+    public boolean enableOrcFilterByMinMax = true;
 
     @VariableMgr.VarAttr(
             name = EXTERNAL_TABLE_ANALYZE_PART_NUM,
@@ -2019,10 +2059,6 @@ public class SessionVariable implements Serializable, Writable {
         this.storageEngine = storageEngine;
     }
 
-    public int getDivPrecisionIncrement() {
-        return divPrecisionIncrement;
-    }
-
     public int getMaxScanKeyNum() {
         return maxScanKeyNum;
     }
@@ -2225,6 +2261,21 @@ public class SessionVariable implements Serializable, Writable {
         this.enableOrcLazyMat = enableOrcLazyMat;
     }
 
+    public boolean isEnableParquetFilterByMinMax() {
+        return enableParquetFilterByMinMax;
+    }
+
+    public void setEnableParquetFilterByMinMax(boolean enableParquetFilterByMinMax) {
+        this.enableParquetFilterByMinMax = enableParquetFilterByMinMax;
+    }
+
+    public boolean isEnableOrcFilterByMinMax() {
+        return enableOrcFilterByMinMax;
+    }
+
+    public void setEnableOrcFilterByMinMax(boolean enableOrcFilterByMinMax) {
+        this.enableOrcFilterByMinMax = enableOrcFilterByMinMax;
+    }
 
     /**
      * getInsertVisibleTimeoutMs.
@@ -2673,6 +2724,8 @@ public class SessionVariable implements Serializable, Writable {
 
         tResult.setEnableParquetLazyMat(enableParquetLazyMat);
         tResult.setEnableOrcLazyMat(enableOrcLazyMat);
+        tResult.setEnableParquetFilterByMinMax(enableParquetFilterByMinMax);
+        tResult.setEnableOrcFilterByMinMax(enableOrcFilterByMinMax);
 
         tResult.setTruncateCharOrVarcharColumns(truncateCharOrVarcharColumns);
 
@@ -2686,6 +2739,8 @@ public class SessionVariable implements Serializable, Writable {
         tResult.setInvertedIndexSkipThreshold(invertedIndexSkipThreshold);
 
         tResult.setEnableInvertedIndexCompoundInlist(enableInvertedIndexCompoundInlist);
+
+        tResult.setSkipMissingVersion(skipMissingVersion);
 
         return tResult;
     }

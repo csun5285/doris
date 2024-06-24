@@ -178,8 +178,8 @@ Status NewOlapScanner::init() {
                 auto st = tablet->cloud_capture_rs_readers(_tablet_reader_params.version,
                                                            &read_source.rs_splits);
 #else
-                auto st = tablet->capture_rs_readers(_tablet_reader_params.version,
-                                                     &read_source.rs_splits);
+                auto st = _tablet->capture_rs_readers(rd_version, &read_source.rs_splits,
+                                                      _state->skip_missing_version());
 #endif
                 if (!st.ok()) {
                     LOG(WARNING) << "fail to init reader. status=" << st;
@@ -594,6 +594,10 @@ void NewOlapScanner::_update_counters_before_close() {
                    stats.inverted_index_searcher_open_timer);
     COUNTER_UPDATE(olap_parent->_inverted_index_searcher_search_timer,
                    stats.inverted_index_searcher_search_timer);
+    COUNTER_UPDATE(olap_parent->_inverted_index_searcher_cache_hit_counter,
+                   stats.inverted_index_searcher_cache_hit);
+    COUNTER_UPDATE(olap_parent->_inverted_index_searcher_cache_miss_counter,
+                   stats.inverted_index_searcher_cache_miss);
 
     if (config::enable_file_cache) {
         io::FileCacheProfileReporter cache_profile(olap_parent->_segment_profile.get());

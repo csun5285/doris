@@ -137,7 +137,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             return snapshotTablets;
         }
 
-        beToTabletsGlobal.get(beId).forEach(tablet -> snapshotTablets.add(tablet.getId()));
+        List<Tablet> tablets = beToTabletsGlobal.get(beId);
+        synchronized (tablets) {
+            tablets.forEach(tablet -> snapshotTablets.add(tablet.getId()));
+        }
         return snapshotTablets;
     }
 
@@ -354,6 +357,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             for (long beId : beList) {
                 tabletNum = beToTabletsGlobal.get(beId) == null ? 0 : beToTabletsGlobal.get(beId).size();
                 Backend backend = Env.getCurrentSystemInfo().getBackend(beId);
+                if (backend == null) {
+                    LOG.info("backend {} not found", beId);
+                    continue;
+                }
                 if ((backend.isDecommissioned() && tabletNum == 0 && !backend.isActive())
                         || (backend.isDecommissioned() && beList.size() == 1)) {
                     LOG.info("check decommission be {} state {} tabletNum {} isActive {} beList {}",
@@ -447,7 +454,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
             Map<Long, Map<Long, Map<Long, List<Tablet>>>> partToTablets) {
         // global
         globalBeToTablets.putIfAbsent(be, new ArrayList<Tablet>());
-        globalBeToTablets.get(be).add(tablet);
+        List<Tablet> tablets = globalBeToTablets.get(be);
+        synchronized (tablets) {
+            tablets.add(tablet);
+        }
 
         // table
         beToTabletsInTable.putIfAbsent(tableId, new HashMap<Long, List<Tablet>>());
@@ -624,7 +634,10 @@ public class CloudTabletRebalancer extends MasterDaemon {
         long partId = replica.getPartitionId();
         long indexId = replica.getIndexId();
 
-        globalBeToTablets.get(srcBe).remove(pickedTablet);
+        List<Tablet> tablets = globalBeToTablets.get(tableId);
+        synchronized (tablets) {
+            tablets.remove(pickedTablet);
+        }
         beToTabletsInTable.get(tableId).get(srcBe).remove(pickedTablet);
         partToTablets.get(partId).get(indexId).get(srcBe).remove(pickedTablet);
 

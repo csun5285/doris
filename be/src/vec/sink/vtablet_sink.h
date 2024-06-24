@@ -560,8 +560,7 @@ private:
                        bool& stop_processing, bool& is_continue, std::vector<char>& filter_bitmap);
 
     Status _cancel_channel_and_check_intolerable_failure(Status status, const std::string& err_msg,
-                                                         const std::shared_ptr<IndexChannel> ich,
-                                                         const std::shared_ptr<VNodeChannel> nch);
+                                                         IndexChannel& ich, VNodeChannel& nch);
 
     void _cancel_all_channel(Status status);
 

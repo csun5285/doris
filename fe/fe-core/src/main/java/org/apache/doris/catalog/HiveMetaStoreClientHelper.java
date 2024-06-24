@@ -857,6 +857,13 @@ public class HiveMetaStoreClientHelper {
                 output.append("ROW FORMAT SERDE\n")
                         .append(String.format("  '%s'\n", descriptor.getSerdeInfo().getSerializationLib()));
             }
+            if (descriptor.getSerdeInfo().isSetParameters()) {
+                output.append("WITH SERDEPROPERTIES (\n")
+                        .append(descriptor.getSerdeInfo().getParameters().entrySet().stream()
+                        .map(entry -> String.format("  '%s' = '%s'", entry.getKey(), entry.getValue()))
+                        .collect(Collectors.joining(",\n")))
+                        .append(")\n");
+            }
             if (descriptor.isSetInputFormat()) {
                 output.append("STORED AS INPUTFORMAT\n")
                         .append(String.format("  '%s'\n", descriptor.getInputFormat()));
@@ -909,7 +916,8 @@ public class HiveMetaStoreClientHelper {
         UserGroupInformation ugi = null;
         String authentication = conf.get(HdfsResource.HADOOP_SECURITY_AUTHENTICATION, null);
         if (AuthType.KERBEROS.getDesc().equals(authentication)) {
-            conf.set("hadoop.security.authorization", "true");
+            conf.set(HdfsResource.HADOOP_KERBEROS_AUTHORIZATION, "true");
+            conf.set(HdfsResource.HADOOP_KERBEROS_KEYTAB_LOGIN_AUTORENEWAL_ENABLED, "true");
             UserGroupInformation.setConfiguration(conf);
             String principal = conf.get(HdfsResource.HADOOP_KERBEROS_PRINCIPAL);
             String keytab = conf.get(HdfsResource.HADOOP_KERBEROS_KEYTAB);
@@ -921,9 +929,12 @@ public class HiveMetaStoreClientHelper {
             }
         } else {
             String hadoopUserName = conf.get(HdfsResource.HADOOP_USER_NAME);
-            if (hadoopUserName != null) {
-                ugi = UserGroupInformation.createRemoteUser(hadoopUserName);
+            if (hadoopUserName == null) {
+                hadoopUserName = "hadoop";
+                LOG.debug(HdfsResource.HADOOP_USER_NAME + " is unset, use default user: hadoop");
             }
+            ugi = UserGroupInformation.createRemoteUser(hadoopUserName);
+            UserGroupInformation.setLoginUser(ugi);
         }
         return ugi;
     }

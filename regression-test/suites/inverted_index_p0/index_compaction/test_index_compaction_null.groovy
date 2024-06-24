@@ -18,6 +18,7 @@
 import org.codehaus.groovy.runtime.IOGroovyMethods
 
 suite("test_index_compaction_null", "nonConcurrent") {
+    def isCloudMode = true
     def tableName = "test_index_compaction_null_dups"
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
@@ -172,7 +173,11 @@ suite("test_index_compaction_null", "nonConcurrent") {
 
         // after full compaction, there is only 1 rowset.
         rowsetCount = get_rowset_count.call(tablets);
-        assert (rowsetCount == 1 * replicaNum)
+        if (isCloudMode) {
+            assert (rowsetCount == (1 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 1 * replicaNum)
+        }
 
         run_sql.call()
 
@@ -182,7 +187,11 @@ suite("test_index_compaction_null", "nonConcurrent") {
         run_sql.call()
 
         rowsetCount = get_rowset_count.call(tablets);
-        assert (rowsetCount == 2 * replicaNum)
+        if (isCloudMode) {
+            assert (rowsetCount == (2 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 2 * replicaNum)
+        }
 
         // tigger full compaction for all tablets
         trigger_full_compaction_on_tablets.call(tablets)
@@ -192,7 +201,11 @@ suite("test_index_compaction_null", "nonConcurrent") {
 
         // after full compaction, there is only 1 rowset.
         rowsetCount = get_rowset_count.call(tablets);
-        assert (rowsetCount == 1 * replicaNum)
+        if (isCloudMode) {
+            assert (rowsetCount == (1 + 1) * replicaNum)
+        } else {
+            assert (rowsetCount == 1 * replicaNum)
+        }
 
         run_sql.call()
     }
@@ -221,9 +234,11 @@ suite("test_index_compaction_null", "nonConcurrent") {
             }
         }
         set_be_config.call("inverted_index_compaction_enable", "true")
+        set_be_config.call("disable_auto_compaction", "true")
         has_update_be_config = true
         // check updated config
         check_config.call("inverted_index_compaction_enable", "true");
+        check_config.call("disable_auto_compaction", "true");
 
 
         /**
@@ -294,6 +309,7 @@ suite("test_index_compaction_null", "nonConcurrent") {
     } finally {
         if (has_update_be_config) {
             set_be_config.call("inverted_index_compaction_enable", invertedIndexCompactionEnable.toString())
+            set_be_config.call("disable_auto_compaction", disableAutoCompaction.toString())
         }
     }
 }

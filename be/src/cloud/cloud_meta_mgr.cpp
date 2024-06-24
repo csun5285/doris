@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "cloud/olap/storage_engine.h"
 #include "common/config.h"
 #include "common/logging.h"
 #include "common/status.h"
@@ -444,6 +445,35 @@ LABEL_TRY_AGAIN:
     return Status::OK();
 }
 
+bool CloudMetaMgr::sync_tablet_delete_bitmap_by_cache(Tablet* tablet, int64_t old_max_version,
+                                                      std::ranges::range auto&& rs_metas,
+                                                      DeleteBitmap* delete_bitmap) {
+    std::set<int64_t> txn_processed;
+    for (auto& rs_meta : rs_metas) {
+        auto txn_id = rs_meta.txn_id();
+        if (txn_processed.find(txn_id) != txn_processed.end()) {
+            continue;
+        }
+        txn_processed.insert(txn_id);
+        DeleteBitmapPtr tmp_delete_bitmap;
+        RowsetIdUnorderedSet tmp_rowset_ids;
+        std::shared_ptr<PublishStatus> publish_status =
+                std::make_shared<PublishStatus>(PublishStatus::INIT);
+        Status status = StorageEngine::instance()->delete_bitmap_txn_manager()->get_delete_bitmap(
+                txn_id, tablet->tablet_id(), &tmp_delete_bitmap, &tmp_rowset_ids, &publish_status);
+        if (status.ok() && *(publish_status.get()) == PublishStatus::SUCCEED) {
+            delete_bitmap->merge(*tmp_delete_bitmap);
+            StorageEngine::instance()->delete_bitmap_txn_manager()->remove_unused_tablet_txn_info(
+                    txn_id, tablet->tablet_id());
+        } else {
+            LOG(WARNING) << "failed to get tablet txn info. tablet_id=" << tablet->tablet_id()
+                         << ", txn_id=" << txn_id << ", status=" << status;
+            return false;
+        }
+    }
+    return true;
+}
+
 Status CloudMetaMgr::sync_tablet_delete_bitmap(
         Tablet* tablet, int64_t old_max_version,
         const google::protobuf::RepeatedPtrField<RowsetMetaPB>& rs_metas,
@@ -451,6 +481,14 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
         DeleteBitmap* delete_bitmap) {
     if (rs_metas.empty()) {
         return Status::OK();
+    }
+    if (sync_tablet_delete_bitmap_by_cache(tablet, old_max_version, rs_metas, delete_bitmap)) {
+        return Status::OK();
+    } else {
+        LOG(WARNING) << "failed to sync delete bitmap by txn info. tablet_id="
+                     << tablet->tablet_id();
+        DeleteBitmapPtr new_delete_bitmap = std::make_shared<DeleteBitmap>(tablet->tablet_id());
+        *delete_bitmap = *new_delete_bitmap;
     }
 
     std::shared_ptr<selectdb::MetaService_Stub> stub;
@@ -493,6 +531,7 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
 
     VLOG_DEBUG << "send GetDeleteBimapRequest: " << req.ShortDebugString();
     stub->get_delete_bitmap(&cntl, &req, &res, nullptr);
+    int64_t latency = cntl.latency_us();
     if (cntl.Failed()) {
         return Status::RpcError("failed to get delete bitmap: {}", cntl.ErrorText());
     }
@@ -536,6 +575,16 @@ Status CloudMetaMgr::sync_tablet_delete_bitmap(
         rst_id.init(rowset_ids[i]);
         delete_bitmap->merge({rst_id, segment_ids[i], vers[i]},
                              roaring::Roaring::read(delete_bitmaps[i].data()));
+    }
+    if (latency > 100 * 1000) { // 100ms
+        LOG(INFO) << "finish get_delete_bitmap rpc. rowset_ids.size()=" << rowset_ids.size()
+                  << ", delete_bitmaps.size()=" << delete_bitmaps.size() << ", latency=" << latency
+                  << "us";
+    } else {
+        LOG_EVERY_N(INFO, 100) << "finish get_delete_bitmap rpc. rowset_ids.size()="
+                               << rowset_ids.size()
+                               << ", delete_bitmaps.size()=" << delete_bitmaps.size()
+                               << ", latency=" << latency << "us";
     }
     return Status::OK();
 }

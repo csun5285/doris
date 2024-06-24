@@ -293,6 +293,8 @@ message PTabletKeyLookupRequest {
     optional bool is_binary_row = 6;
     // version to read
     optional int64 version = 7;
+
+    optional bytes query_options = 8;
 }
 
 message PTabletKeyLookupResponse {

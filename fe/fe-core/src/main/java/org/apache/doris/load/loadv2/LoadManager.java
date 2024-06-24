@@ -611,9 +611,10 @@ public class LoadManager implements Writable {
                     }
                     Iterator<LoadJob> iter = jobs.iterator();
                     while (iter.hasNext()) {
-                        LoadJob job = iter.next();
+                        CopyJob job = (CopyJob) iter.next();
                         iter.remove();
                         idToLoadJob.remove(job.getId());
+                        job.recycleProgress();
                     }
                     if (jobs.isEmpty()) {
                         labelToJob.remove(label);

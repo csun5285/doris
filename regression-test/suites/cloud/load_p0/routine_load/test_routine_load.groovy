@@ -132,7 +132,13 @@ suite("test_routine_load", "external,external_docker") {
     sleep(40000);
     order_qt_q2 "select * from ${tableName}"
 
-    sql """RESUME ROUTINE LOAD FOR ${job_name} """
+    sql """ ALTER ROUTINE LOAD FOR ${job_name} PROPERTIES ("max_error_number" = "1") """
+    sleep(2);
+
+    sql """ ALTER ROUTINE LOAD FOR ${job_name} PROPERTIES ("max_error_number" = "0") """
+    sleep(2);
+
+    sql """ RESUME ROUTINE LOAD FOR ${job_name} """
     sleep(20000);
 
     while (!pool.isTerminated()){}

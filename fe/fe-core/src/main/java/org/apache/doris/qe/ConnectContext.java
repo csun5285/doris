@@ -854,7 +854,7 @@ public class ConnectContext {
             if (connId == connectionId) {
                 row.add("Yes");
             } else {
-                row.add("");
+                row.add("No");
             }
             row.add("" + connectionId);
             row.add(ClusterNamespace.getNameFromFullName(qualifiedUser));

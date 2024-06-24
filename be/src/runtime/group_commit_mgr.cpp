@@ -327,13 +327,26 @@ Status GroupCommitTable::_finish_group_commit_load(int64_t db_id, int64_t table_
         }
         TLoadTxnCommitResult result;
         TNetworkAddress master_addr = _exec_env->master_info()->network_address;
-        st = ThriftRpcHelper::rpc<FrontendServiceClient>(
-                master_addr.hostname, master_addr.port,
-                [&request, &result](FrontendServiceConnection& client) {
-                    client->loadTxnCommit(result, request);
-                },
-                10000L);
-        result_status = Status::create(result.status);
+        int retry_times = 0;
+        while (retry_times < config::mow_stream_load_commit_retry_times) {
+            st = ThriftRpcHelper::rpc<FrontendServiceClient>(
+                    master_addr.hostname, master_addr.port,
+                    [&request, &result](FrontendServiceConnection& client) {
+                        client->loadTxnCommit(result, request);
+                    },
+                    10000L);
+            result_status = Status::create(result.status);
+            // DELETE_BITMAP_LOCK_ERROR will be retried
+            if (result_status.ok() || !result_status.is<ErrorCode::DELETE_BITMAP_LOCK_ERROR>()) {
+                break;
+            }
+            LOG_WARNING("Failed to commit txn on group commit")
+                    .tag("label", label)
+                    .tag("txn_id", txn_id)
+                    .tag("retry_times", retry_times)
+                    .error(result_status);
+            retry_times++;
+        }
     } else {
         // abort txn
         TLoadTxnRollbackRequest request;
@@ -404,10 +417,12 @@ Status GroupCommitTable::_finish_group_commit_load(int64_t db_id, int64_t table_
     }
     LOG(INFO) << ss.str();
     DBUG_EXECUTE_IF("LoadBlockQueue._finish_group_commit_load.get_wal_back_pressure_msg", {
-        std ::string msg = _exec_env->wal_mgr()->get_wal_dirs_info_string();
-        LOG(INFO) << "debug promise set: " << msg;
-        ExecEnv::GetInstance()->group_commit_mgr()->debug_promise.set_value(
-                Status ::InternalError(msg));
+        if (dp->param<int64_t>("table_id", -1) == table_id) {
+            std::string msg = _exec_env->wal_mgr()->get_wal_dirs_info_string();
+            LOG(INFO) << "table_id" << std::to_string(table_id) << " set debug promise: " << msg;
+            ExecEnv::GetInstance()->group_commit_mgr()->debug_promise.set_value(
+                    Status::InternalError(msg));
+        }
     };);
     return st;
 }

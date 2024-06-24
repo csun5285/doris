@@ -530,7 +530,6 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
     }
 #endif
 
-    auto tablet_load_infos = response->mutable_tablet_load_rowset_num_infos();
     for (auto& tablet : request.tablets()) {
         WriteRequest wrequest;
         wrequest.index_id = request.index_id();
@@ -559,17 +558,6 @@ Status TabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& request
         {
             std::lock_guard<SpinLock> l(_tablet_writers_lock);
             _tablet_writers.emplace(tablet.tablet_id(), writer);
-        }
-        TabletSharedPtr tabletsptr = nullptr;
-        cloud::tablet_mgr()->get_tablet(tablet.tablet_id(), &tabletsptr);
-        if (tabletsptr == nullptr) [[unlikely]] {
-            continue;
-        }
-        if (auto version_cnt = tabletsptr->fetch_add_approximate_num_rowsets(0);
-            UNLIKELY(version_cnt > (config::max_tablet_version_num / 2))) {
-            auto load_info = tablet_load_infos->Add();
-            load_info->set_current_rowset_nums(version_cnt);
-            load_info->set_max_config_rowset_nums(config::max_tablet_version_num);
         }
     }
 

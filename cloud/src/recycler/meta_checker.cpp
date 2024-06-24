@@ -184,7 +184,8 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
                 partition_info.db_id = atoll(row[4]);
                 partition_info.table_id = atoll(row[5]);
                 partition_info.partition_id = atoll(row[6]);
-                partitions.insert({partition_info.partition_id, std::move(partition_info)});
+                int64_t part_id = partition_info.partition_id;
+                partitions.insert({part_id, std::move(partition_info)});
             }
         }
         mysql_free_result(result);
@@ -200,8 +201,8 @@ bool MetaChecker::check_fdb_by_fe_meta(MYSQL* conn) {
                 int num_row = mysql_num_rows(result);
                 for (int i = 0; i < num_row; ++i) {
                     MYSQL_ROW row = mysql_fetch_row(result);
-                    int partition_id = atoll(row[0]);
-                    int visible_version = atoll(row[2]);
+                    int64_t partition_id = atoll(row[0]);
+                    int64_t visible_version = atoll(row[2]);
                     partitions[partition_id].visible_version = visible_version;
                 }
             }

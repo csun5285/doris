@@ -269,9 +269,7 @@ void MetaServiceImpl::begin_txn(::google::protobuf::RpcController* controller,
     std::string running_val;
     TxnRunningPB running_pb;
     running_pb.set_timeout_time(prepare_time + txn_info.timeout_ms());
-    for (auto i : txn_info.table_ids()) {
-        running_pb.add_table_ids(i);
-    }
+    running_pb.mutable_table_ids()->CopyFrom(txn_info.table_ids());
     VLOG_DEBUG << "label=" << label << " txn_id=" << txn_id
                << "running_pb=" << running_pb.ShortDebugString();
     if (!running_pb.SerializeToString(&running_val)) {
@@ -443,6 +441,7 @@ void MetaServiceImpl::precommit_txn(::google::protobuf::RpcController* controlle
 
     TxnRunningPB running_pb;
     running_pb.set_timeout_time(precommit_time + txn_info.precommit_timeout_ms());
+    running_pb.mutable_table_ids()->CopyFrom(txn_info.table_ids());
     if (!running_pb.SerializeToString(&running_val)) {
         code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
         ss << "failed to serialize running_pb, txn_id=" << txn_id;
@@ -1616,24 +1615,24 @@ void MetaServiceImpl::check_txn_conflict(::google::protobuf::RpcController* cont
 
             if (running_pb.timeout_time() < check_time) {
                 skip_timeout_txn_cnt++;
-                break;
-            }
-
-            LOG(INFO) << "check watermark conflict range_get txn_run_key=" << hex(k)
-                      << " running_pb=" << running_pb.ShortDebugString();
-            std::vector<int64_t> running_table_ids(running_pb.table_ids().begin(),
-                                                   running_pb.table_ids().end());
-            std::sort(running_table_ids.begin(), running_table_ids.end());
-            std::vector<int64_t> result(std::min(running_table_ids.size(), src_table_ids.size()));
-            std::vector<int64_t>::iterator iter = std::set_intersection(
-                    src_table_ids.begin(), src_table_ids.end(), running_table_ids.begin(),
-                    running_table_ids.end(), result.begin());
-            result.resize(iter - result.begin());
-            if (result.size() > 0) {
-                response->set_finished(false);
-                LOG(INFO) << "skip timeout txn count: " << skip_timeout_txn_cnt
-                          << " total iteration count: " << total_iteration_cnt;
-                return;
+            } else {
+                LOG(INFO) << "check watermark conflict range_get txn_run_key=" << hex(k)
+                          << " running_pb=" << running_pb.ShortDebugString();
+                std::vector<int64_t> running_table_ids(running_pb.table_ids().begin(),
+                                                       running_pb.table_ids().end());
+                std::sort(running_table_ids.begin(), running_table_ids.end());
+                std::vector<int64_t> result(
+                        std::min(running_table_ids.size(), src_table_ids.size()));
+                std::vector<int64_t>::iterator iter = std::set_intersection(
+                        src_table_ids.begin(), src_table_ids.end(), running_table_ids.begin(),
+                        running_table_ids.end(), result.begin());
+                result.resize(iter - result.begin());
+                if (result.size() > 0) {
+                    response->set_finished(false);
+                    LOG(INFO) << "skip timeout txn count: " << skip_timeout_txn_cnt
+                              << " total iteration count: " << total_iteration_cnt;
+                    return;
+                }
             }
 
             if (!it->has_next()) {

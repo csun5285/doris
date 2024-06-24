@@ -42,6 +42,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "common/sync_point.h"
+
 #ifdef DEBUG
 #include <unordered_set>
 #endif
@@ -99,6 +101,8 @@ namespace doris {
 class TExpr;
 
 namespace stream_load {
+
+bvar::LatencyRecorder load_pressure_sleep_micro_seconds("load_pressure_sleep_micro_seconds");
 
 IndexChannel::~IndexChannel() = default;
 
@@ -684,6 +688,7 @@ int VNodeChannel::try_send_and_fetch_status(RuntimeState* state,
     // so we shouldn't use any pthread's blocking sleep function
     if (UNLIKELY(load_pressure_wait_time > 0)) {
         VLOG_DEBUG << "try to sleep due to high load pressure for " << load_pressure_wait_time;
+        load_pressure_sleep_micro_seconds << load_pressure_wait_time;
         bthread_usleep(load_pressure_wait_time);
         _load_pressure_block_ns.fetch_add(load_pressure_wait_time);
         _load_pressure_wait_time = 0;
@@ -769,6 +774,7 @@ void VNodeChannel::try_send_block(RuntimeState* state) {
                                     &uncompressed_bytes, &compressed_bytes,
                                     state->fragement_transmission_compression_type(),
                                     _parent->_transfer_large_data_by_brpc);
+        TEST_INJECTION_POINT_CALLBACK("VNodeChannel::try_send_block", &st);
         if (!st.ok()) {
             cancel(fmt::format("{}, err: {}", channel_info(), st.to_string()));
             _add_block_closure->clear_in_flight();
@@ -1467,22 +1473,23 @@ Status VOlapTableSink::send(RuntimeState* state, vectorized::Block* input_block,
     return Status::OK();
 }
 
-Status VOlapTableSink::_cancel_channel_and_check_intolerable_failure(
-        Status status, const std::string& err_msg, const std::shared_ptr<IndexChannel> ich,
-        const std::shared_ptr<VNodeChannel> nch) {
-    LOG(WARNING) << nch->channel_info() << ", close channel failed, err: " << err_msg;
-    ich->mark_as_failed(nch.get(), err_msg, -1);
+Status VOlapTableSink::_cancel_channel_and_check_intolerable_failure(Status status,
+                                                                     const std::string& err_msg,
+                                                                     IndexChannel& ich,
+                                                                     VNodeChannel& nch) {
+    LOG(WARNING) << nch.channel_info() << ", close channel failed, err: " << err_msg;
+    ich.mark_as_failed(&nch, err_msg, -1);
     // cancel the node channel in best effort
-    nch->cancel(err_msg);
+    nch.cancel(err_msg);
 
     // check if index has intolerable failure
-    Status index_st = ich->check_intolerable_failure();
+    Status index_st = ich.check_intolerable_failure();
     if (!index_st.ok()) {
-        status = index_st;
-    } else if (Status st = ich->check_tablet_received_rows_consistency(); !st.ok()) {
-        status = st;
-    } else if (Status st = ich->check_tablet_filtered_rows_consistency(); !st.ok()) {
-        status = st;
+        status = std::move(index_st);
+    } else if (Status st = ich.check_tablet_received_rows_consistency(); !st.ok()) {
+        status = std::move(st);
+    } else if (Status st = ich.check_tablet_filtered_rows_consistency(); !st.ok()) {
+        status = std::move(st);
     }
     return status;
 }
@@ -1494,9 +1501,12 @@ void VOlapTableSink::_cancel_all_channel(Status status) {
         });
     }
     LOG(INFO) << fmt::format(
-            "close olap table sink. load_id={}, txn_id={}, canceled all node channels due to "
-            "error: {}",
-            print_id(_load_id), _txn_id, status);
+                         "close olap table sink. load_id={}, txn_id={}, canceled all node channels "
+                         "due to "
+                         "error: {}",
+                         print_id(_load_id), _txn_id, status)
+              << '\n'
+              << get_stack_trace(1);
 }
 
 Status VOlapTableSink::try_close(RuntimeState* state, Status exec_status) {
@@ -1520,7 +1530,8 @@ Status VOlapTableSink::try_close(RuntimeState* state, Status exec_status) {
                             ch->mark_close();
                             if (ch->is_cancelled()) {
                                 status = this->_cancel_channel_and_check_intolerable_failure(
-                                        status, ch->get_cancel_msg(), index_channel, ch);
+                                        std::move(status), ch->get_cancel_msg(), *index_channel,
+                                        *ch);
                             }
                         });
             } // end for index channels
@@ -1567,6 +1578,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
     SCOPED_TIMER(_profile->total_time_counter());
 
     try_close(state, exec_status);
+    TEST_INJECTION_POINT("VOlapTableSink::close");
     // If _close_status is not ok, all nodes have been canceled in try_close.
     if (_close_status.ok()) {
         auto status = Status::OK();
@@ -1590,7 +1602,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
                          &actual_consume_ns, &total_add_batch_exec_time_ns, &add_batch_exec_time,
                          &total_wait_exec_time_ns, &wait_exec_time, &total_add_batch_num,
                          &load_pressure_time_ns](const std::shared_ptr<VNodeChannel>& ch) {
-                            if (!status.ok() || ch->is_closed()) {
+                            if (!status.ok() || (ch->is_closed() && !ch->is_cancelled())) {
                                 return;
                             }
                             // in pipeline, all node channels are done or canceled, will not block.
@@ -1598,7 +1610,7 @@ Status VOlapTableSink::close(RuntimeState* state, Status exec_status) {
                             auto s = ch->close_wait(state);
                             if (!s.ok()) {
                                 status = this->_cancel_channel_and_check_intolerable_failure(
-                                        status, s.to_string(), index_channel, ch);
+                                        std::move(status), s.to_string(), *index_channel, *ch);
                             }
                             ch->time_report(&node_add_batch_counter_map, &serialize_batch_ns,
                                             &channel_stat, &queue_push_lock_ns, &actual_consume_ns,

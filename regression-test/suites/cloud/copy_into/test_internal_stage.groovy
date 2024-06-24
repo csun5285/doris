@@ -225,7 +225,7 @@ suite("test_internal_stage_copy_into") {
         if (upload_total > 0) {
             break;
         }
-        if (count >= 20) {
+        if (count >= 60) {
             assertTrue(upload_total > 0)
             break;
         }

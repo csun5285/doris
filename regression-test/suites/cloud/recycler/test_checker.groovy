@@ -73,10 +73,12 @@ suite("test_checker") {
         String fsUri = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.build_conf.fs_name
         String prefix = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.prefix
         String hdfsPath = "/${prefix}/data/${tabletId}/"
+        String username = getObjStoreInfoApiResult.result.storage_vault[0].hdfs_info.build_conf.user
         logger.info(":${fsUri}|${hdfsPath}".toString())
         Configuration configuration = new Configuration();
         configuration.set("fs.defaultFS", fsUri);
         configuration.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+        configuration.set("hadoop.username", username);
         FileSystem fs = FileSystem.get(configuration);
         Path path = new Path(hdfsPath);
         try {

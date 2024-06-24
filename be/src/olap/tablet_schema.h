@@ -118,6 +118,9 @@ public:
     std::string get_aggregation_name() const { return _aggregation_name; }
     bool get_result_is_nullable() const { return _result_is_nullable; }
 
+    void set_is_bf_column(bool is_bf_column) { _is_bf_column = is_bf_column; }
+    void set_has_bitmap_index(bool has_bitmap_index) { _has_bitmap_index = has_bitmap_index; }
+
 private:
     int32_t _unique_id;
     std::string _col_name;
@@ -220,6 +223,7 @@ public:
     void copy_from(const TabletSchema& tablet_schema);
     void update_tablet_columns(const TabletSchema& tablet_schema,
                                const std::vector<TColumn>& t_columns);
+    void update_index_info_from(const TabletSchema& tablet_schema);
     std::string to_key() const;
     int64_t mem_size() const { return _mem_size; }
 
@@ -269,7 +273,7 @@ public:
     const std::vector<TabletIndex>& indexes() const { return _indexes; }
     std::vector<const TabletIndex*> get_indexes_for_column(int32_t col_unique_id) const;
     bool has_inverted_index(int32_t col_unique_id) const;
-    bool has_inverted_index_with_index_id(int32_t index_id) const;
+    bool has_inverted_index_with_index_id(int64_t index_id) const;
     const TabletIndex* get_inverted_index(int32_t col_unique_id) const;
     std::vector<const TabletIndex*> get_inverted_indexes() const;
     bool has_ngram_bf_index(int32_t col_unique_id) const;
@@ -284,8 +288,8 @@ public:
     vectorized::Block create_block(bool ignore_dropped_col = true) const;
     void set_schema_version(int32_t version) { _schema_version = version; }
 
-    void set_table_id(int32_t table_id) { _table_id = table_id; }
-    int32_t table_id() const { return _table_id; }
+    void set_table_id(int64_t table_id) { _table_id = table_id; }
+    int64_t table_id() const { return _table_id; }
     void build_current_tablet_schema(int64_t index_id, int32_t version,
                                      const OlapTableIndexSchema* index,
                                      const TabletSchema& out_tablet_schema);
@@ -367,7 +371,7 @@ private:
     int32_t _sequence_col_idx = -1;
     int32_t _version_col_idx = -1;
     int32_t _schema_version = -1;
-    int32_t _table_id = -1;
+    int64_t _table_id = -1;
     bool _disable_auto_compaction = false;
     bool _enable_single_replica_compaction = false;
     int64_t _mem_size = 0;

@@ -420,7 +420,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         commit_job_stats = cumu_stats;
         cumu.modify_rowsets(nullptr);
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));
@@ -460,7 +460,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         commit_job_stats = base_stats;
         base.modify_rowsets(nullptr);
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));
@@ -492,7 +492,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         cumu.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));
@@ -525,7 +525,7 @@ TEST(CloudCompactionTest, parallel_base_cumu_compaction) {
         base.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));
@@ -669,7 +669,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         commit_job_stats = cumu3_stats;
         cumu3.modify_rowsets(nullptr);
         Versions versions;
-        tablet->capture_consistent_versions({0, 14}, &versions);
+        tablet->capture_consistent_versions({0, 14}, &versions, false);
         ASSERT_EQ(versions.size(), 5);
         EXPECT_EQ(versions[1], Version(2, 5));
         EXPECT_EQ(versions[2], Version(6, 10));
@@ -677,7 +677,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         EXPECT_EQ(versions[4], Version(13, 14));
         tablet->cloud_sync_rowsets();
         versions.clear();
-        tablet->capture_consistent_versions({0, 14}, &versions);
+        tablet->capture_consistent_versions({0, 14}, &versions, false);
         ASSERT_EQ(versions.size(), 4);
         EXPECT_EQ(versions[1], Version(2, 10));
         EXPECT_EQ(versions[2], Version(11, 12));
@@ -781,7 +781,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         cumu1.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
-        tablet->capture_consistent_versions({0, 18}, &versions);
+        tablet->capture_consistent_versions({0, 18}, &versions, false);
         ASSERT_EQ(versions.size(), 7);
         EXPECT_EQ(versions[1], Version(2, 10));
         EXPECT_EQ(versions[2], Version(11, 12));
@@ -813,7 +813,7 @@ TEST(CloudCompactionTest, parallel_cumu_compaction) {
         // BE1 sync tablet cache
         tablet->cloud_sync_rowsets();
         Versions versions;
-        tablet->capture_consistent_versions({0, 18}, &versions);
+        tablet->capture_consistent_versions({0, 18}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 10));
         EXPECT_EQ(versions[2], Version(11, 12));
@@ -992,7 +992,7 @@ TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
         cumu.modify_rowsets(nullptr);
 
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));
@@ -1038,7 +1038,7 @@ TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
         full.modify_rowsets(nullptr);
 
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));
@@ -1048,6 +1048,7 @@ TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
         EXPECT_EQ(tablet->fetch_add_approximate_num_rowsets(0), 3);
     }
     {
+        //sleep(30);
         // Simulate executing commit job and update tablet cache, suppose this BE is BE1:
         //  BE1 prepare full -> BE2 commit cumu -> BE1 commit full -> BE1 full update cache
         prepare_tablet(10013);
@@ -1070,11 +1071,13 @@ TEST(CloudCompactionTest, parallel_full_cumu_compaction) {
         stats.set_base_compaction_cnt(2);
 
         // - BE1 cumu update tablet cache
-        commit_job_stats = stats;
+        auto base_stats = stats;
+        base_stats.set_cumulative_point(31);
+        commit_job_stats = base_stats;
         full.modify_rowsets(nullptr);
         tablet->cloud_sync_rowsets();
         Versions versions;
-        tablet->capture_consistent_versions({0, 34}, &versions);
+        tablet->capture_consistent_versions({0, 34}, &versions, false);
         ASSERT_EQ(versions.size(), 3);
         EXPECT_EQ(versions[1], Version(2, 30));
         EXPECT_EQ(versions[2], Version(31, 34));

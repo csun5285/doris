@@ -19,12 +19,14 @@
 
 #include <CLucene.h>
 
+#include "cloud/io/tmp_file_mgr.h"
 #include "inverted_index_compound_directory.h"
 #include "inverted_index_compound_reader.h"
+#include "io/fs/local_file_system.h"
 #include "util/debug_points.h"
 
 namespace doris::segment_v2 {
-Status compact_column(int32_t index_id, int src_segment_num, int dest_segment_num,
+Status compact_column(int64_t index_id, int src_segment_num, int dest_segment_num,
                       std::vector<std::string> src_index_files,
                       std::vector<std::string> dest_index_files, const io::FileSystemSPtr& fs,
                       std::string index_writer_path, std::string tablet_path,
@@ -61,10 +63,24 @@ Status compact_column(int32_t index_id, int src_segment_num, int dest_segment_nu
 
     // get dest idx file paths
     std::vector<lucene::store::Directory*> dest_index_dirs(dest_segment_num);
+#ifdef CLOUD_MODE
+    auto lfs =
+            doris::io::LocalFileSystem::create(io::TmpFileMgr::instance()->get_tmp_file_dir(), "");
+#endif
+    bool use_compound_file_writer = true;
+    bool can_use_ram_dir = true;
     for (int i = 0; i < dest_segment_num; ++i) {
         // format: rowsetId_segmentId_columnId
         auto path = tablet_path + "/" + dest_index_files[i] + "_" + std::to_string(index_id);
-        dest_index_dirs[i] = DorisCompoundDirectoryFactory::getDirectory(fs, path.c_str(), true);
+#ifdef CLOUD_MODE
+        auto lfs_index_path = dest_index_files[i] + "_" + std::to_string(index_id);
+        dest_index_dirs[i] = DorisCompoundDirectoryFactory::getDirectory(
+                lfs, lfs_index_path.c_str(), use_compound_file_writer, can_use_ram_dir, nullptr, fs,
+                path.c_str());
+#else
+        dest_index_dirs[i] = DorisCompoundDirectoryFactory::getDirectory(fs, path.c_str(),
+                                                                         use_compound_file_writer);
+#endif
     }
 
     DCHECK_EQ(src_index_dirs.size(), trans_vec.size());

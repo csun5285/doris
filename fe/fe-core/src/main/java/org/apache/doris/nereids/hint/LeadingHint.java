@@ -17,7 +17,6 @@
 
 package org.apache.doris.nereids.hint;
 
-import org.apache.doris.catalog.TableIf;
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.jobs.joinorder.hypergraph.bitmap.LongBitmap;
 import org.apache.doris.nereids.trees.expressions.ExprId;
@@ -52,7 +51,7 @@ import java.util.Stack;
 public class LeadingHint extends Hint {
     private String originalString = "";
     private final List<String> tablelist = new ArrayList<>();
-    private final List<Integer> levellist = new ArrayList<>();
+    private final List<Integer> levelList = new ArrayList<>();
 
     private final Map<RelationId, LogicalPlan> relationIdToScanMap = Maps.newLinkedHashMap();
 
@@ -102,9 +101,37 @@ public class LeadingHint extends Hint {
                 }
             } else {
                 tablelist.add(parameter);
-                levellist.add(level);
+                levelList.add(level);
             }
             lastParameter = parameter;
+        }
+        normalizeLevelList();
+    }
+
+    private void removeGap(int left, int right, int gap) {
+        for (int i = left; i <= right; i++) {
+            levelList.set(i, levelList.get(i) - (gap - 1));
+        }
+    }
+
+    // when we write leading like: leading(t1 {{t2 t3} {t4 t5}} t6)
+    // levelList would like 0 2 2 3 3 0, it could be reduced to 0 1 1 2 2 0 like leading(t1 {t2 t3 {t4 t5}} t6)
+    // gap is like 0 to 2 or 3 to 0 in upper example, and this function is to remove gap when we use a lot of braces
+    private void normalizeLevelList() {
+        int leftIndex = 0;
+        // at lease two tables were needed
+        for (int i = 1; i < levelList.size(); i++) {
+            if ((levelList.get(i) - levelList.get(leftIndex)) > 1) {
+                int rightIndex = i;
+                for (int j = i; j < levelList.size(); j++) {
+                    if ((levelList.get(rightIndex) - levelList.get(j)) > 1) {
+                        removeGap(i, rightIndex, Math.min(levelList.get(i) - levelList.get(leftIndex),
+                                levelList.get(rightIndex) - levelList.get(j)));
+                    }
+                    rightIndex = j;
+                }
+            }
+            leftIndex = i;
         }
     }
 
@@ -112,8 +139,8 @@ public class LeadingHint extends Hint {
         return tablelist;
     }
 
-    public List<Integer> getLevellist() {
-        return levellist;
+    public List<Integer> getLevelList() {
+        return levelList;
     }
 
     public Map<RelationId, LogicalPlan> getRelationIdToScanMap() {
@@ -191,14 +218,14 @@ public class LeadingHint extends Hint {
         return null;
     }
 
-    private boolean hasSameName() {
+    private Optional<String> hasSameName() {
         Set<String> tableSet = Sets.newHashSet();
         for (String table : tablelist) {
             if (!tableSet.add(table)) {
-                return true;
+                return Optional.of(table);
             }
         }
-        return false;
+        return Optional.empty();
     }
 
     public Map<ExprId, String> getExprIdToTableNameMap() {
@@ -252,12 +279,14 @@ public class LeadingHint extends Hint {
     /**
      * set total bitmap used in leading before we get into leading join
      */
-    public void setTotalBitmap() {
+    public void setTotalBitmap(Set<RelationId> inputRelationSets) {
         Long totalBitmap = 0L;
-        if (hasSameName()) {
+        Optional<String> duplicateTableName = hasSameName();
+        if (duplicateTableName.isPresent()) {
             this.setStatus(HintStatus.SYNTAX_ERROR);
-            this.setErrorMessage("duplicated table");
+            this.setErrorMessage("duplicated table:" + duplicateTableName.get());
         }
+        Set<RelationId> existRelationSets = new HashSet<>();
         for (int index = 0; index < getTablelist().size(); index++) {
             RelationId id = findRelationIdAndTableName(getTablelist().get(index));
             if (id == null) {
@@ -265,9 +294,30 @@ public class LeadingHint extends Hint {
                 this.setErrorMessage("can not find table: " + getTablelist().get(index));
                 return;
             }
+            existRelationSets.add(id);
             totalBitmap = LongBitmap.set(totalBitmap, id.asInt());
         }
+        if (getTablelist().size() < inputRelationSets.size()) {
+            Set<RelationId> missRelationIds = new HashSet<>();
+            missRelationIds.addAll(inputRelationSets);
+            missRelationIds.removeAll(existRelationSets);
+            String missingTablenames = getMissingTableNames(missRelationIds);
+            this.setStatus(HintStatus.SYNTAX_ERROR);
+            this.setErrorMessage("leading should have all tables in query block, missing tables: " + missingTablenames);
+        }
         this.totalBitmap = totalBitmap;
+    }
+
+    private String getMissingTableNames(Set<RelationId> missRelationIds) {
+        String missTableNames = "";
+        for (RelationId id : missRelationIds) {
+            for (Pair<RelationId, String> pair : relationIdAndTableName) {
+                if (pair.first.equals(id)) {
+                    missTableNames += pair.second + " ";
+                }
+            }
+        }
+        return missTableNames;
     }
 
     /**
@@ -428,10 +478,10 @@ public class LeadingHint extends Hint {
         }
         logicalPlan = makeFilterPlanIfExist(getFilters(), logicalPlan);
         assert (logicalPlan != null);
-        stack.push(Pair.of(getLevellist().get(index), logicalPlan));
-        int stackTopLevel = getLevellist().get(index++);
+        stack.push(Pair.of(getLevelList().get(index), logicalPlan));
+        int stackTopLevel = getLevelList().get(index++);
         while (index < getTablelist().size()) {
-            int currentLevel = getLevellist().get(index);
+            int currentLevel = getLevelList().get(index);
             if (currentLevel == stackTopLevel) {
                 // should return error if can not found table
                 logicalPlan = getLogicalPlanByName(getTablelist().get(index++));
@@ -470,7 +520,7 @@ public class LeadingHint extends Hint {
                     logicalJoin.setBitmap(LongBitmap.or(getBitmap(newStackTop.second), getBitmap(logicalPlan)));
                     if (stackTopLevel > 0) {
                         if (index < getTablelist().size()) {
-                            if (stackTopLevel > getLevellist().get(index)) {
+                            if (stackTopLevel > getLevelList().get(index)) {
                                 stackTopLevel--;
                             }
                         } else {
@@ -564,28 +614,5 @@ public class LeadingHint extends Hint {
         } else {
             return null;
         }
-    }
-
-    /**
-     * get leading containing tables which means leading wants to combine tables into joins
-     * @return long value represent tables we included
-     */
-    public Long getLeadingTableBitmap(List<TableIf> tables) {
-        Long totalBitmap = 0L;
-        if (hasSameName()) {
-            this.setStatus(HintStatus.SYNTAX_ERROR);
-            this.setErrorMessage("duplicated table");
-            return totalBitmap;
-        }
-        for (int index = 0; index < getTablelist().size(); index++) {
-            RelationId id = findRelationIdAndTableName(getTablelist().get(index));
-            if (id == null) {
-                this.setStatus(HintStatus.SYNTAX_ERROR);
-                this.setErrorMessage("can not find table: " + getTablelist().get(index));
-                return totalBitmap;
-            }
-            totalBitmap = LongBitmap.set(totalBitmap, id.asInt());
-        }
-        return totalBitmap;
     }
 }

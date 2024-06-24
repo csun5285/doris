@@ -30,7 +30,6 @@ import com.selectdb.cloud.proto.SelectdbCloud.MetaServiceCode;
 import com.selectdb.cloud.proto.SelectdbCloud.TabletIndexPB;
 import com.selectdb.cloud.proto.SelectdbCloud.TabletStatsPB;
 import com.selectdb.cloud.rpc.MetaServiceProxy;
-import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -45,8 +44,8 @@ import java.util.List;
 public class CloudTabletStatMgr extends MasterDaemon {
     private static final Logger LOG = LogManager.getLogger(CloudTabletStatMgr.class);
 
-    // <(dbId, tableId) -> CloudTableStats>
-    private volatile HashMap<Pair<Long, Long>, CloudTableStats> cloudTableStatsMap = new HashMap<>();
+    // <(dbId, tableId) -> OlapTable.Statistics>
+    private volatile HashMap<Pair<Long, Long>, OlapTable.Statistics> cloudTableStatsMap = new HashMap<>();
 
     public CloudTabletStatMgr() {
         super("cloud tablet stat mgr", Config.tablet_stat_update_interval_second * 1000);
@@ -133,7 +132,7 @@ public class CloudTabletStatMgr extends MasterDaemon {
 
         // after update replica in all backends, update index row num
         start = System.currentTimeMillis();
-        HashMap<Pair<Long, Long>, CloudTableStats> newCloudTableStatsMap = new HashMap<>();
+        HashMap<Pair<Long, Long>, OlapTable.Statistics> newCloudTableStatsMap = new HashMap<>();
         for (Long dbId : dbIds) {
             Database db = Env.getCurrentInternalCatalog().getDbNullable(dbId);
             if (db == null) {
@@ -147,14 +146,14 @@ public class CloudTabletStatMgr extends MasterDaemon {
                 }
                 OlapTable olapTable = (OlapTable) table;
 
-                String dbName = db.getName();
-                Long tableId = table.getId();
-                String tableName = table.getName();
-
                 Long tableDataSize = 0L;
+                Long tableTotalReplicaDataSize = 0L;
+
+                Long tableReplicaCount = 0L;
+
+                Long tableRowCount = 0L;
                 Long tableRowsetCount = 0L;
                 Long tableSegmentCount = 0L;
-                Long tableRowCount = 0L;
 
                 if (!table.writeLockIfExist()) {
                     continue;
@@ -166,6 +165,7 @@ public class CloudTabletStatMgr extends MasterDaemon {
                             long indexRowCount = 0L;
                             for (Tablet tablet : index.getTablets()) {
                                 long tabletDataSize = 0L;
+
                                 long tabletRowsetCount = 0L;
                                 long tabletSegmentCount = 0L;
                                 long tabletRowCount = 0L;
@@ -173,6 +173,11 @@ public class CloudTabletStatMgr extends MasterDaemon {
                                 for (Replica replica : tablet.getReplicas()) {
                                     if (replica.getDataSize() > tabletDataSize) {
                                         tabletDataSize = replica.getDataSize();
+                                    }
+                                    tableTotalReplicaDataSize += replica.getDataSize();
+
+                                    if (replica.getRowCount() > tabletRowCount) {
+                                        tabletRowCount = replica.getRowCount();
                                     }
 
                                     if (replica.getRowsetCount() > tabletRowsetCount) {
@@ -183,29 +188,34 @@ public class CloudTabletStatMgr extends MasterDaemon {
                                         tabletSegmentCount = replica.getSegmentCount();
                                     }
 
-                                    if (replica.getRowCount() > tabletRowCount) {
-                                        tabletRowCount = replica.getRowCount();
-                                    }
+                                    tableReplicaCount++;
                                 }
 
                                 tableDataSize += tabletDataSize;
+
+                                tableRowCount += tabletRowCount;
+                                indexRowCount += tabletRowCount;
+
                                 tableRowsetCount += tabletRowsetCount;
                                 tableSegmentCount += tabletSegmentCount;
-                                tableRowCount += tabletRowCount;
-
-                                indexRowCount += tabletRowCount;
                             } // end for tablets
                             index.setRowCount(indexRowCount);
                         } // end for indices
                     } // end for partitions
+
+                    olapTable.setStatistics(new OlapTable.Statistics(db.getName(),
+                            table.getName(), tableDataSize, tableTotalReplicaDataSize, 0L,
+                            tableReplicaCount, tableRowCount, tableRowsetCount, tableSegmentCount));
+
                     LOG.debug("finished to set row num for table: {} in database: {}",
                              table.getName(), db.getFullName());
                 } finally {
                     table.writeUnlock();
                 }
 
-                newCloudTableStatsMap.put(Pair.of(dbId, tableId), new CloudTableStats(dbName, tableName,
-                        tableDataSize, tableRowsetCount, tableSegmentCount, tableRowCount));
+                newCloudTableStatsMap.put(Pair.of(dbId, table.getId()), new OlapTable.Statistics(db.getName(),
+                        table.getName(), tableDataSize, tableTotalReplicaDataSize, 0L,
+                        tableReplicaCount, tableRowCount, tableRowsetCount, tableSegmentCount));
             }
         }
         this.cloudTableStatsMap = newCloudTableStatsMap;
@@ -238,33 +248,7 @@ public class CloudTabletStatMgr extends MasterDaemon {
         return response;
     }
 
-    public HashMap<Pair<Long, Long>, CloudTableStats> getCloudTableStatsMap() {
+    public HashMap<Pair<Long, Long>, OlapTable.Statistics> getCloudTableStatsMap() {
         return this.cloudTableStatsMap;
-    }
-
-    public static class CloudTableStats {
-        @Getter
-        private String dbName;
-        @Getter
-        private String tableName;
-
-        @Getter
-        private Long tableDataSize;
-        @Getter
-        private Long tableRowsetCount;
-        @Getter
-        private Long tableSegmentCount;
-        @Getter
-        private Long tableRowCount;
-
-        public CloudTableStats(String dbName, String tableName, Long tableDataSize, Long tableRowsetCount,
-                Long tableSegmentCount, Long tableRowCount) {
-            this.dbName = dbName;
-            this.tableName = tableName;
-            this.tableDataSize = tableDataSize;
-            this.tableRowsetCount = tableRowsetCount;
-            this.tableSegmentCount = tableSegmentCount;
-            this.tableRowCount = tableRowCount;
-        }
     }
 }

@@ -400,6 +400,20 @@ class Suite implements GroovyInterceptable {
         return result;
     }
 
+    long getTableId(String dbName, String tableName) {
+        def dbInfo = sql "show proc '/dbs'"
+        for(List<Object> row : dbInfo) {
+            if (row[1].endsWith(":" + dbName)) {
+                def tbInfo = sql "show proc '/dbs/${row[0]}' "
+                for (List<Object> tb : tbInfo) {
+                    if (tb[1].equals(tableName)) {
+                        return tb[0].toLong()
+                    }
+                }
+            }
+        }
+    }
+
     List<List<Object>> order_sql(String sqlStr) {
         return sql(sqlStr,  true)
     }
@@ -978,6 +992,14 @@ class Suite implements GroovyInterceptable {
     }
 
     def add_node = { be_unique_id, ip, port, cluster_name, cluster_id ->
+        node_op(be_unique_id, ip, port, cluster_name, cluster_id, "add_node")
+    }
+
+    def drop_node = { be_unique_id, ip, port, cluster_name, cluster_id ->
+        node_op(be_unique_id, ip, port, cluster_name, cluster_id, "drop_node")
+    }
+    
+    def node_op = { be_unique_id, ip, port, cluster_name, cluster_id, op_type ->
         def jsonOutput = new JsonOutput()
         def clusterInfo = [
                      type: "COMPUTE",
@@ -993,12 +1015,12 @@ class Suite implements GroovyInterceptable {
                  ]
         def map = [instance_id: "${instance_id}", cluster: clusterInfo]
         def js = jsonOutput.toJson(map)
-        log.info("add node req: ${js} ".toString())
+        log.info("${op_type} req: ${js} ".toString())
 
         def add_cluster_api = { request_body, check_func ->
             httpTest {
                 endpoint context.config.metaServiceHttpAddress
-                uri "/MetaService/http/add_node?token=${token}"
+                uri "/MetaService/http/${op_type}?token=${token}"
                 body request_body
                 check check_func
             }
@@ -1006,7 +1028,7 @@ class Suite implements GroovyInterceptable {
 
         add_cluster_api.call(js) {
             respCode, body ->
-                log.info("add node resp: ${body} ${respCode}".toString())
+                log.info("${op_type} resp: ${body} ${respCode}".toString())
                 def json = parseJson(body)
                 assertTrue(json.code.equalsIgnoreCase("OK") || json.code.equalsIgnoreCase("ALREADY_EXISTED"))
         }

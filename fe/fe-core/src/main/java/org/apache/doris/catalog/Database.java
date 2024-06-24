@@ -305,18 +305,14 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
             }
 
             OlapTable olapTable = (OlapTable) table;
-            olapTable.readLock();
-            try {
-                usedDataSize = usedDataSize + olapTable.getDataSize();
-                usedRemoteDataSize = usedRemoteDataSize + olapTable.getRemoteDataSize();
-            } finally {
-                olapTable.readUnlock();
-            }
+            usedDataSize = usedDataSize + olapTable.getDataSize();
+            usedRemoteDataSize = usedRemoteDataSize + olapTable.getRemoteDataSize();
+
         }
         return Pair.of(usedDataSize, usedRemoteDataSize);
     }
 
-    public long getReplicaCountWithLock() {
+    public long getReplicaCount() {
         readLock();
         try {
             long usedReplicaCount = 0;
@@ -326,12 +322,7 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
                 }
 
                 OlapTable olapTable = (OlapTable) table;
-                olapTable.readLock();
-                try {
-                    usedReplicaCount = usedReplicaCount + olapTable.getReplicaCount();
-                } finally {
-                    olapTable.readUnlock();
-                }
+                usedReplicaCount = usedReplicaCount + olapTable.getReplicaCount();
             }
             return usedReplicaCount;
         } finally {
@@ -340,7 +331,7 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
     }
 
     public long getReplicaQuotaLeftWithLock() {
-        long leftReplicaQuota = replicaQuotaSize - getReplicaCountWithLock();
+        long leftReplicaQuota = replicaQuotaSize - getReplicaCount();
         return Math.max(leftReplicaQuota, 0L);
     }
 

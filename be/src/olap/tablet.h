@@ -254,9 +254,10 @@ public:
 
     // Given spec_version, find a continuous version path and store it in version_path.
     // If quiet is true, then only "does this path exist" is returned.
+    // If skip_missing_version is true, return ok even there are missing versions.
     Status capture_consistent_versions(const Version& spec_version,
                                        std::vector<Version>* version_path,
-                                       bool quiet = false) const;
+                                       bool skip_missing_version, bool quiet = false) const;
     // if quiet is true, no error log will be printed if there are missing versions
     Status check_version_integrity(const Version& version, bool quiet = false);
     bool check_version_exist(const Version& version) const;
@@ -265,8 +266,9 @@ public:
 
     Status capture_consistent_rowsets(const Version& spec_version,
                                       std::vector<RowsetSharedPtr>* rowsets) const;
-    Status capture_rs_readers(const Version& spec_version,
-                              std::vector<RowSetSplits>* rs_splits) const;
+    // If skip_missing_version is true, skip versions if they are missing.
+    Status capture_rs_readers(const Version& spec_version, std::vector<RowSetSplits>* rs_splits,
+                              bool skip_missing_version) const;
 
     Status capture_rs_readers(const std::vector<Version>& version_path,
                               std::vector<RowSetSplits>* rs_splits) const;
@@ -363,7 +365,7 @@ public:
     std::vector<RowsetSharedPtr> pick_candidate_rowsets_to_base_compaction();
     std::vector<RowsetSharedPtr> pick_candidate_rowsets_to_full_compaction();
     std::vector<RowsetSharedPtr> pick_candidate_rowsets_to_build_inverted_index(
-            const std::set<int32_t>& alter_index_uids, bool is_drop_op);
+            const std::set<int64_t>& alter_index_uids, bool is_drop_op);
 
     // used for single compaction to get the local versions
     // Single compaction does not require remote rowsets and cannot violate the cooldown semantics
@@ -592,7 +594,7 @@ public:
             const std::vector<segment_v2::SegmentSharedPtr>& segments, int64_t txn_id,
             CalcDeleteBitmapToken* token, RowsetWriter* rowset_writer = nullptr);
 
-    Status update_delete_bitmap(const TabletTxnInfo* txn_info, int64_t txn_id,
+    Status update_delete_bitmap(TabletTxnInfo* txn_info, int64_t txn_id,
                                 int64_t txn_expiration = 0);
     void calc_compaction_output_rowset_delete_bitmap(
             const std::vector<RowsetSharedPtr>& input_rowsets,

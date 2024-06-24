@@ -156,14 +156,14 @@ public class Config extends ConfigBase {
             "已完成或取消的导入作业信息的 label 会在这个时间后被删除。被删除的 label 可以被重用。",
             "Labels of finished or cancelled load jobs will be removed after this time"
                     + "The removed labels can be reused."})
-    public static int label_keep_max_second = 3 * 24 * 3600; // 3 days
+    public static int label_keep_max_second = 6 * 3600; // 6 hour
 
     @ConfField(mutable = true, masterOnly = true, description = {
             "针对一些高频的导入作业，比如 INSERT, STREAMING LOAD, ROUTINE_LOAD_TASK, DELETE"
                     + "如果导入作业或者任务已经完成，且超过这个时间后，会被删除。被删除的作业或者任务可以被重用。",
             "For some high frequency load jobs such as INSERT, STREAMING LOAD, ROUTINE_LOAD_TASK, DELETE"
                     + "Remove the finished job or task if expired. The removed job or task can be reused."})
-    public static int streaming_label_keep_max_second = 43200; // 12 hour
+    public static int streaming_label_keep_max_second = 21600; // 6 hour
 
     @ConfField(mutable = true, masterOnly = true, description = {
             "针对 ALTER, EXPORT 作业，如果作业已经完成，且超过这个时间后，会被删除。",
@@ -1017,6 +1017,30 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static double balance_load_score_threshold = 0.1; // 10%
 
+    // if disk usage > balance_load_score_threshold + urgent_disk_usage_extra_threshold
+    // then this disk need schedule quickly
+    // this value could less than 0.
+    @ConfField(mutable = true, masterOnly = true)
+    public static double urgent_balance_disk_usage_extra_threshold = 0.05;
+
+    // when run urgent disk balance, shuffle the top large tablets
+    // range: [ 0 ~ 100 ]
+    @ConfField(mutable = true, masterOnly = true)
+    public static int urgent_balance_shuffle_large_tablet_percentage = 1;
+
+    @ConfField(mutable = true, masterOnly = true)
+    public static double urgent_balance_pick_large_tablet_num_threshold = 1000;
+
+    // range: 0 ~ 100
+    @ConfField(mutable = true, masterOnly = true)
+    public static int urgent_balance_pick_large_disk_usage_percentage = 80;
+
+    // there's a case, all backend has a high disk, by default, it will not run urgent disk balance.
+    // if set this value to true, urgent disk balance will always run,
+    // the backends will exchange tablets among themselves.
+    @ConfField(mutable = true, masterOnly = true)
+    public static boolean enable_urgent_balance_no_low_backend = true;
+
     /**
      * if set to true, TabletScheduler will not do balance.
      */
@@ -1034,6 +1058,11 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true, masterOnly = true)
     public static boolean disable_disk_balance = false;
+
+    // balance order
+    // ATTN: a temporary config, may delete later.
+    @ConfField(mutable = true, masterOnly = true)
+    public static boolean balance_be_then_disk = true;
 
     /**
      * if set to false, TabletScheduler will not do disk balance for replica num = 1.
@@ -1303,20 +1332,6 @@ public class Config extends ConfigBase {
      */
     @ConfField(mutable = true, masterOnly = true)
     public static boolean recover_with_empty_tablet = false;
-
-    /**
-     * In some scenarios, there is an unrecoverable metadata problem in the cluster,
-     * and the visibleVersion of the data does not match be. In this case, it is still
-     * necessary to restore the remaining data (which may cause problems with the correctness of the data).
-     * This configuration is the same as` recover_with_empty_tablet` should only be used in emergency situations
-     * This configuration has three values:
-     *   disable : If an exception occurs, an error will be reported normally.
-     *   ignore_version: ignore the visibleVersion information recorded in fe partition, use replica version
-     *   ignore_all: In addition to ignore_version, when encountering no queryable replica,
-     *   skip it directly instead of throwing an exception
-     */
-    @ConfField(mutable = true, masterOnly = true)
-    public static String recover_with_skip_missing_version = "disable";
 
     /**
      * Whether to add a delete sign column when create unique table
@@ -2180,15 +2195,15 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true, masterOnly = true)
     public static boolean cloud_delete_loaded_internal_stage_files = false;
 
+    @ConfField(mutable = true)
+    public static int meta_service_rpc_retry_times = 200;
+
     public static int metaServiceRpcRetryTimes() {
         if (isCloudMode() && enable_check_compatibility_mode) {
             return 1;
         }
         return meta_service_rpc_retry_times;
     }
-
-    @ConfField(mutable = true)
-    public static int meta_service_rpc_retry_times = 200;
 
     // 0 means no limit
     @ConfField(mutable = true)
@@ -2303,9 +2318,6 @@ public class Config extends ConfigBase {
 
     @ConfField(mutable = false)
     public static int cloud_copy_txn_conflict_error_retry_num = 5;
-
-    @ConfField
-    public static int cloud_meta_service_rpc_failed_retry_times = 200;
 
     @ConfField
     public static int cloud_query_failed_retry_times = 50;
@@ -2549,19 +2561,19 @@ public class Config extends ConfigBase {
     })
     public static long analyze_record_limit = 20000;
 
-    @ConfField(mutable = true, description = {
+    @ConfField(mutable = true, masterOnly = true, description = {
             "Auto Buckets中最小的buckets数目",
             "min buckets of auto bucket"
     })
     public static int autobucket_min_buckets = 1;
 
-    @ConfField(mutable = true, description = {
+    @ConfField(mutable = true, masterOnly = true, description = {
             "Auto Buckets中最大的buckets数目",
             "max buckets of auto bucket"
     })
     public static int autobucket_max_buckets = 128;
 
-    @ConfField(mutable = true, description = {
+    @ConfField(mutable = true, masterOnly = true, description = {
             "Cloud Auto Buckets中最大的buckets数目",
             "cloud max buckets of auto bucket"
     })
@@ -2713,8 +2725,21 @@ public class Config extends ConfigBase {
     @ConfField(mutable = true)
     public static int mow_insert_into_commit_retry_times = 10;
 
+    // Advance the next id before transferring to the master.
+    @ConfField(description = {
+            "是否在成为 Master 后推进 ID 分配器，保证即使回滚元数据时，它也不会回滚",
+            "Whether to advance the ID generator after becoming Master to ensure that the id "
+                    + "generator will not be rolled back even when metadata is rolled back."
+    })
+    public static boolean enable_advance_next_id = true;
+
     @ConfField(description = {"Stream_Load 导入时，label 被限制的最大长度",
             "Stream_Load When importing, the maximum length of label is limited"})
     public static int label_regex_length = 128;
 
+    @ConfField(mutable = true)
+    public static int max_finished_alter_job_num = 10000;
+
+    @ConfField(mutable = true, masterOnly = true)
+    public static boolean enable_create_bitmap_index_as_inverted_index = false;
 }

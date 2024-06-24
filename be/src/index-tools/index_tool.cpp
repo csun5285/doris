@@ -51,7 +51,7 @@ DEFINE_string(pred_type, "", "inverted index term query predicate, eq/lt/gt/le/g
 DEFINE_bool(print_row_id, false, "print row id when query terms");
 DEFINE_bool(print_doc_id, false, "print doc id when check terms stats");
 // only for debug index compaction
-DEFINE_int32(idx_id, -1, "inverted index id");
+DEFINE_int64(idx_id, -1, "inverted index id");
 DEFINE_string(src_idx_dirs_file, "", "source segment index files");
 DEFINE_string(dest_idx_dirs_file, "", "destination segment index files");
 DEFINE_string(dest_seg_num_rows_file, "", "destination segment number of rows");
@@ -221,7 +221,10 @@ int main(int argc, char** argv) {
                 std::vector<FileInfo> files;
                 bool exists = false;
                 std::filesystem::path root_dir(FLAGS_directory);
-                fs->list(root_dir, true, &files, &exists);
+                bool result = fs->list(root_dir, true, &files, &exists);
+                if (!result) {
+                    std::cout << FLAGS_directory << " list error" << std::endl;
+                }
                 if (!exists) {
                     std::cout << FLAGS_directory << " is not exists" << std::endl;
                     return -1;
@@ -274,15 +277,18 @@ int main(int argc, char** argv) {
                 std::cout << "read file " << file << " failed" << std::endl;
                 return false;
             }
-            file.seekg(0, std::ios::end);
-            size_t sz = file.tellg();
+            ifs.seekg(0, std::ios::end);
+            size_t sz = ifs.tellg();
             output.resize(sz, ' ');
-            file.seekg(0);
-            file.read(&buffer[0], sz);
+            ifs.seekg(0);
+            char* buffer = new char[sz];
+            ifs.read(buffer, sz);
+            output = std::string(buffer, sz);
+            delete[] buffer;
             return true;
         };
 
-        int32_t index_id = FLAGS_idx_id;
+        int64_t index_id = FLAGS_idx_id;
         std::string tablet_path = FLAGS_tablet_path;
         std::string src_index_dirs_string;
         std::string dest_index_dirs_string;

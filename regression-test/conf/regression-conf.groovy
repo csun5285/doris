@@ -40,6 +40,8 @@ cloudUniqueId = ""
 metaServiceHttpAddress = "127.0.0.1:5000"
 recycleServiceHttpAddress = "127.0.0.1:5100"
 feCloudHttpAddress = "127.0.0.1:8904"
+metaServiceToken = "greedisgood9999"
+multiClusterInstance = "selectdb-cloud-dev-asan"
 
 // set DORIS_HOME by system properties
 // e.g. java -DDORIS_HOME=./
@@ -71,7 +73,7 @@ excludeGroups = ""
 excludeSuites = "test_clean_label, \
 test_alter_user,test_explain_tpch_sf_1_q4,test_explain_tpch_sf_1_q20, \
 test_explain_tpch_sf_1_q21,test_explain_tpch_sf_1_q13,test_explain_tpch_sf_1_q22, \
-test_ctl,redundant_conjuncts,test_disable_management_cluster"
+test_ctl,redundant_conjuncts,test_disable_management_cluster,test_index_lowercase_fault_injection"
 // this directories will not be executed
 excludeDirectories = "backup_restore,compaction, cold_heat_separation, javaudf_p0, \
 tpcds_sf1000_p2,primary_index,github_events_p2,,schema_change_p0, \

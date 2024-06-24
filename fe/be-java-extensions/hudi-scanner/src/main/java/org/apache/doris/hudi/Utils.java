@@ -47,6 +47,7 @@ public class Utils {
         String authentication = conf.get(Constants.HADOOP_SECURITY_AUTHENTICATION, null);
         if ("kerberos".equals(authentication)) {
             conf.set("hadoop.security.authorization", "true");
+            conf.set("hadoop.kerberos.keytab.login.autorenewal.enabled", "true");
             UserGroupInformation.setConfiguration(conf);
             String principal = conf.get(Constants.HADOOP_KERBEROS_PRINCIPAL);
             String keytab = conf.get(Constants.HADOOP_KERBEROS_KEYTAB);
@@ -59,11 +60,13 @@ public class Utils {
             }
         } else {
             String hadoopUserName = conf.get(Constants.HADOOP_USER_NAME);
-            if (hadoopUserName != null) {
-                return UserGroupInformation.createRemoteUser(hadoopUserName);
+            if (hadoopUserName == null) {
+                hadoopUserName = "hadoop";
             }
+            UserGroupInformation ugi = UserGroupInformation.createRemoteUser(hadoopUserName);
+            UserGroupInformation.setLoginUser(ugi);
+            return ugi;
         }
-        return null;
     }
 
     public static long getCurrentProcId() {

@@ -502,18 +502,18 @@ void VSetOperationNode<is_intersect>::add_result_columns(RowRefListWithFlags& va
                                                          int& block_size) {
     auto it = value.begin();
     for (auto idx = _build_col_idx.begin(); idx != _build_col_idx.end(); ++idx) {
-        auto& column = *_build_blocks[it->block_offset].get_by_position(idx->first).column;
-        if (_mutable_cols[idx->second]->is_nullable() xor column.is_nullable()) {
-            if (_mutable_cols[idx->second]->is_nullable()) {
-                ((ColumnNullable*)(_mutable_cols[idx->second].get()))
+        const auto& column = *_build_blocks[it->block_offset].get_by_position(idx->second).column;
+        if (_mutable_cols[idx->first]->is_nullable() xor column.is_nullable()) {
+            if (_mutable_cols[idx->first]->is_nullable()) {
+                ((ColumnNullable*)(_mutable_cols[idx->first].get()))
                         ->insert_from_not_nullable(column, it->row_num);
             } else {
                 auto& nest_col = ((ColumnNullable&)column).get_nested_column();
-                _mutable_cols[idx->second]->insert_from(nest_col, it->row_num);
+                _mutable_cols[idx->first]->insert_from(nest_col, it->row_num);
             }
 
         } else {
-            _mutable_cols[idx->second]->insert_from(column, it->row_num);
+            _mutable_cols[idx->first]->insert_from(column, it->row_num);
         }
     }
     block_size++;
@@ -601,7 +601,7 @@ Status VSetOperationNode<is_intersect>::extract_build_column(Block& block,
         }
         raw_ptrs[i] = block.get_by_position(result_col_id).column.get();
         DCHECK_GE(result_col_id, 0);
-        _build_col_idx.insert({result_col_id, i});
+        _build_col_idx.insert({i, result_col_id});
     }
     return Status::OK();
 }

@@ -307,7 +307,7 @@ public class CloudPartition extends Partition {
 
     private static SelectdbCloud.GetVersionResponse getVersionFromMetaInner(SelectdbCloud.GetVersionRequest req)
             throws RpcException {
-        for (int retryTime = 0; retryTime < Config.cloud_meta_service_rpc_failed_retry_times; retryTime++) {
+        for (int retryTime = 0; retryTime < Config.metaServiceRpcRetryTimes(); retryTime++) {
             try {
                 long deadline = System.currentTimeMillis() + Config.default_get_version_from_ms_timeout_second * 1000L;
                 Future<SelectdbCloud.GetVersionResponse> future =
@@ -336,7 +336,7 @@ public class CloudPartition extends Partition {
 
             // sleep random millis [20, 200] ms, retry rpc failed
             int randomMillis = 20 + (int) (Math.random() * (200 - 20));
-            if (retryTime > Config.cloud_meta_service_rpc_failed_retry_times / 2) {
+            if (retryTime > Config.metaServiceRpcRetryTimes() / 2) {
                 // sleep random millis [500, 1000] ms, retry rpc failed
                 randomMillis = 500 + (int) (Math.random() * (1000 - 500));
             }
@@ -348,7 +348,7 @@ public class CloudPartition extends Partition {
         }
 
         LOG.warn("get version from meta service failed after retry {} times",
-                Config.cloud_meta_service_rpc_failed_retry_times);
+                Config.metaServiceRpcRetryTimes());
         throw new RpcException("get version from meta service", "failed after retry n times");
     }
 

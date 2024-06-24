@@ -117,7 +117,9 @@ suite("test_index_change_2") {
     wait_for_latest_op_on_table_finish(tableName, timeout)
     sql """ DROP INDEX idx_note ON ${tableName} """
     wait_for_latest_op_on_table_finish(tableName, timeout)
-    // wait_for_build_index_on_partition_finish(tableName, timeout)
+    if (!isCloudMode()) {
+        wait_for_build_index_on_partition_finish(tableName, timeout)
+    }
 
     def show_result = sql "show index from ${tableName}"
     logger.info("show index from " + tableName + " result: " + show_result)
