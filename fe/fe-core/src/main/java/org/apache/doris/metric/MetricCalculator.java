@@ -23,6 +23,9 @@ import org.apache.doris.metric.Metric.MetricUnit;
 import org.apache.doris.system.Backend;
 import org.apache.doris.system.SystemInfoService;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +36,8 @@ import java.util.TimerTask;
  * such QPS, and save the result for users to get.
  */
 public class MetricCalculator extends TimerTask {
+    private static final Logger LOG = LogManager.getLogger(MetricCalculator.class);
+
     private long lastTs = -1;
     private long lastQueryCounter = -1;
     private long lastRequestCounter = -1;
@@ -113,7 +118,13 @@ public class MetricCalculator extends TimerTask {
                     if (!Env.getCurrentEnv().isMaster()) {
                         return 0L;
                     }
-                    return (long) Env.getCurrentEnv().getCloudTabletRebalancer().getSnapshotTabletsByBeId(beId).size();
+                    try {
+                        return (long) Env.getCurrentEnv().getCloudTabletRebalancer()
+                                .getSnapshotTabletsByBeId(beId).size();
+                    } catch (Exception e) {
+                        LOG.warn("be {}, ignore exception", beId, e);
+                        return 0L;
+                    }
                 }
             };
             tabletNum.addLabel(new MetricLabel("backend", be.getHost() + ":" + be.getHeartbeatPort()));
