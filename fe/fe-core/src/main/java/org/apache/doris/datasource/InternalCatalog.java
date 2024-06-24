@@ -1815,7 +1815,7 @@ public class InternalCatalog implements CatalogIf<Database> {
                 List<Long> partitionIds = new ArrayList<Long>();
                 partitionIds.add(partitionId);
                 List<Long> indexIds = indexIdToMeta.keySet().stream().collect(Collectors.toList());
-                if (!isCreateTable) {
+                if (Config.isCloudMode() && !isCreateTable) {
                     commitCloudPartition(olapTable.getId(), partitionIds, indexIds);
                 }
 
