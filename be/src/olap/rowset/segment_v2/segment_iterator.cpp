@@ -317,6 +317,40 @@ Status SegmentIterator::_init_impl(const StorageReadOptions& opts) {
     if (opts.output_columns != nullptr) {
         _output_columns = *(opts.output_columns);
     }
+
+    // find columns that definitely require reading data, such as functions that are not pushed down.
+    {
+        std::set<std::string> push_down_preds;
+        for (auto* pred : _col_predicates) {
+            if (!_check_apply_by_inverted_index(pred)) {
+                //column predicate, like column predicate etc. always need read data
+                auto cid = pred->column_id();
+                _need_read_data_indices[cid] = true;
+                continue;
+            }
+            push_down_preds.insert(_gen_predicate_result_sign(pred));
+        }
+        for (auto* pred : _col_preds_except_leafnode_of_andnode) {
+            if (!_check_apply_by_inverted_index(pred)) {
+                //column predicate, like column predicate etc. always need read data
+                auto cid = pred->column_id();
+                _need_read_data_indices[cid] = true;
+                continue;
+            }
+            push_down_preds.insert(_gen_predicate_result_sign(pred));
+        }
+        for (auto& preds_in_remaining_vconjuct : _column_pred_in_remaining_vconjunct) {
+            const auto& column_name = preds_in_remaining_vconjuct.first;
+            for (auto& pred_info : preds_in_remaining_vconjuct.second) {
+                auto column_sign = _gen_predicate_result_sign(&pred_info);
+                if (!push_down_preds.contains(column_sign)) {
+                    auto cid = _opts.tablet_schema->field_index(column_name);
+                    _need_read_data_indices[cid] = true;
+                }
+            }
+        }
+    }
+
     return Status::OK();
 }
 
@@ -474,6 +508,14 @@ Status SegmentIterator::_get_row_ranges_by_column_conditions() {
                     }
                 } else {
                     ++it;
+                }
+            }
+            _col_preds_except_leafnode_of_andnode.clear();
+            // 1. if all conditions in the compound hit the inverted index and there are no other expr to handle.
+            // 2. then there is no need to generate index_result_column.
+            if (_enable_common_expr_pushdown && _remaining_conjunct_roots.empty()) {
+                for (auto& iter : _rowid_result_for_index) {
+                    iter.second.first = false;
                 }
             }
         }
@@ -698,16 +740,16 @@ Status SegmentIterator::_execute_predicates_except_leafnode_of_andnode(
         _column_predicate_info->column_name = expr->expr_name();
     } else if (_is_literal_node(node_type)) {
         auto v_literal_expr = std::dynamic_pointer_cast<doris::vectorized::VLiteral>(expr);
-        _column_predicate_info->query_values.push_back(v_literal_expr->value());
+        _column_predicate_info->query_values.insert(v_literal_expr->value());
     } else if (node_type == TExprNodeType::BINARY_PRED || node_type == TExprNodeType::MATCH_PRED ||
                node_type == TExprNodeType::IN_PRED) {
         if (node_type == TExprNodeType::MATCH_PRED) {
             _column_predicate_info->query_op = "match";
         } else if (node_type == TExprNodeType::IN_PRED) {
             if (expr->op() == TExprOpcode::type::FILTER_IN) {
-                _column_predicate_info->query_op = "in_list";
+                _column_predicate_info->query_op = "in";
             } else {
-                _column_predicate_info->query_op = "not_in_list";
+                _column_predicate_info->query_op = "not_in";
             }
         } else {
             _column_predicate_info->query_op = expr->fn().name.function_name;
@@ -870,9 +912,10 @@ Status SegmentIterator::_apply_index_except_leafnode_of_andnode() {
         _rowid_result_for_index.emplace(
                 std::make_pair(pred_result_sign, std::make_pair(true, bitmap)));
 
-        if (!pred->predicate_params()->marked_by_runtime_filter &&
-            !_need_read_data_indices.contains(column_id)) {
-            _need_read_data_indices[column_id] = false;
+        if (!pred->predicate_params()->marked_by_runtime_filter) {
+            if (!_need_read_data_indices.contains(column_id)) {
+                _need_read_data_indices[column_id] = false;
+            }
         }
     }
 
@@ -920,7 +963,8 @@ std::string SegmentIterator::_gen_predicate_result_sign(ColumnPredicate* predica
 std::string SegmentIterator::_gen_predicate_result_sign(ColumnPredicateInfo* predicate_info) {
     std::string pred_result_sign;
     pred_result_sign = BeConsts::BLOCK_TEMP_COLUMN_PREFIX + predicate_info->column_name + "_" +
-                       predicate_info->query_op + "_" + join(predicate_info->query_values, ",");
+                       predicate_info->query_op + "_" +
+                       boost::join(predicate_info->query_values, ",");
     return pred_result_sign;
 }
 
@@ -983,6 +1027,7 @@ Status SegmentIterator::_apply_inverted_index_on_column_predicate(
 
         if (need_remaining_after_evaluate) {
             remaining_predicates.emplace_back(pred);
+            _need_read_data_indices[pred->column_id()] = true;
             return Status::OK();
         }
 
@@ -2471,15 +2516,15 @@ void SegmentIterator::_calculate_pred_in_remaining_conjunct_root(
         }
     } else if (_is_literal_node(node_type)) {
         auto v_literal_expr = static_cast<const doris::vectorized::VLiteral*>(expr.get());
-        _column_predicate_info->query_values.push_back(v_literal_expr->value());
+        _column_predicate_info->query_values.insert(v_literal_expr->value());
     } else {
         if (node_type == TExprNodeType::MATCH_PRED) {
             _column_predicate_info->query_op = "match";
         } else if (node_type == TExprNodeType::IN_PRED) {
             if (expr->op() == TExprOpcode::type::FILTER_IN) {
-                _column_predicate_info->query_op = "in_list";
+                _column_predicate_info->query_op = "in";
             } else {
-                _column_predicate_info->query_op = "not_in_list";
+                _column_predicate_info->query_op = "not_in";
             }
         } else if (node_type != TExprNodeType::COMPOUND_PRED) {
             _column_predicate_info->query_op = expr->fn().name.function_name;
@@ -2495,7 +2540,9 @@ void SegmentIterator::_calculate_pred_in_remaining_conjunct_root(
 
 bool SegmentIterator::_no_need_read_key_data(ColumnId cid, vectorized::MutableColumnPtr& column,
                                              size_t nrows_read) {
-    if (_opts.tablet_schema->keys_type() != KeysType::DUP_KEYS) {
+    if (!((_opts.tablet_schema->keys_type() == KeysType::DUP_KEYS ||
+           (_opts.tablet_schema->keys_type() == KeysType::UNIQUE_KEYS &&
+            _opts.enable_unique_key_merge_on_write)))) {
         return false;
     }
 
@@ -2521,6 +2568,9 @@ bool SegmentIterator::_no_need_read_key_data(ColumnId cid, vectorized::MutableCo
 
     // If the key is present in expr, data needs to be read.
     if (cids.contains(cid)) {
+        return false;
+    }
+    if (_column_pred_in_remaining_vconjunct.contains(_opts.tablet_schema->column(cid).name())) {
         return false;
     }
 
