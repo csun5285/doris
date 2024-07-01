@@ -49,7 +49,6 @@
 #include <CLucene/store/RAMDirectory.h>
 #include <CLucene/util/Misc.h>
 #include <assert.h>
-#include <errno.h> // IWYU pragma: keep
 #include <glog/logging.h>
 #include <stdio.h>
 #include <string.h>
@@ -121,17 +120,28 @@ bool DorisFSDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, const ch
         error.set(CL_ERR_IO, "File open io error");
     } else if (st.code() == ErrorCode::PERMISSION_DENIED) {
         error.set(CL_ERR_IO, "File Access denied");
-    } else {
-        error.set(CL_ERR_IO, "Could not open file");
+    } else if (!st.ok()) {
+        error.set(CL_ERR_IO, st.msg().data());
     }
 
     //Check if a valid handle was retrieved
     if (st.ok() && h->_reader) {
-        //Store the file length
-        h->_length = h->_reader->size();
-        h->_fpos = 0;
-        ret = _CLNEW FSIndexInput(std::move(h), buffer_size);
-        return true;
+        DBUG_EXECUTE_IF("DorisFSDirectory::FSIndexInput::open::inverted index file is empty", {
+            error.set(CL_ERR_IO, "mock error: inverted index file is empty");
+            return false;
+        })
+        // check if file is empty
+        if (h->_reader->size() == 0) {
+            LOG(WARNING) << "inverted index file " << path << " is empty.";
+            error.set(CL_ERR_IO, "File is empty");
+            return false;
+        } else {
+            //Store the file length
+            h->_length = h->_reader->size();
+            h->_fpos = 0;
+            ret = _CLNEW FSIndexInput(std::move(h), buffer_size);
+            return true;
+        }
     }
 
     //delete h->_shared_lock;

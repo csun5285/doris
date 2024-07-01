@@ -42,28 +42,15 @@ Status InvertedIndexFileReader::_init_from_v2(int32_t read_buffer_size) {
 
     std::unique_lock<std::shared_mutex> lock(_mutex); // Lock for writing
     try {
-        int64_t file_size = 0;
-        Status st = _fs->file_size(index_file_full_path, &file_size);
-        DBUG_EXECUTE_IF("inverted file read error: index file not found", {
-            st = Status::Error<doris::ErrorCode::NOT_FOUND>("index file not found");
-        })
-        if (st.code() == ErrorCode::NOT_FOUND) {
-            return Status::Error<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>(
-                    "inverted index file {} is not found", index_file_full_path);
-        } else if (!st.ok()) {
-            return st;
-        }
-        if (file_size == 0) {
-            LOG(WARNING) << "inverted index file " << index_file_full_path << " is empty.";
-            return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
-                    "inverted index file {} is empty", index_file_full_path);
-        }
-
         CLuceneError err;
         CL_NS(store)::IndexInput* index_input = nullptr;
         auto ok = DorisFSDirectory::FSIndexInput::open(_fs, index_file_full_path.c_str(),
                                                        index_input, err, read_buffer_size);
         if (!ok) {
+            if (err.number() == CL_ERR_FileNotFound) {
+                return Status::Error<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>(
+                        "inverted index path: {} not exist.", index_file_full_path);
+            }
             return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
                     "CLuceneError occur when open idx file {}, error msg: {}", index_file_full_path,
                     err.what());
