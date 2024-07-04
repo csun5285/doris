@@ -634,7 +634,7 @@ public class CloudTabletRebalancer extends MasterDaemon {
         long partId = replica.getPartitionId();
         long indexId = replica.getIndexId();
 
-        List<Tablet> tablets = globalBeToTablets.get(tableId);
+        List<Tablet> tablets = globalBeToTablets.get(srcBe);
         synchronized (tablets) {
             tablets.remove(pickedTablet);
         }
