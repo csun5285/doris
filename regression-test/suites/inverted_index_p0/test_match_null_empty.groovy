@@ -44,6 +44,7 @@ suite("test_match_null_empty", "p0") {
     sql "DROP TABLE IF EXISTS ${testTable}"
     sql """
         CREATE TABLE IF NOT EXISTS ${testTable} (
+            `id` bigint not null auto_increment(100),
             `@timestamp` int(11) NULL,
             `clientip` varchar(20) NULL,
             `request` text NULL,
@@ -54,28 +55,33 @@ suite("test_match_null_empty", "p0") {
             INDEX clientip_idx (`clientip`) USING INVERTED COMMENT '',
             INDEX request_idx (`request`) USING INVERTED PROPERTIES("parser"="english") COMMENT ''
         ) ENGINE=OLAP
-        DUPLICATE KEY(`@timestamp`)
+        DUPLICATE KEY(`id`)
         COMMENT 'OLAP'
-        DISTRIBUTED BY HASH(`@timestamp`) BUCKETS 1
+        DISTRIBUTED BY HASH(`id`) BUCKETS 1
         PROPERTIES (
             "replication_allocation" = "tag.location.default: 1"
         );
     """
     load_data.call(testTable)
-    sql """ insert into ${testTable} values (100, '10.16.10.6', 'GET /api/v1 HTTP', 200, 200); """
-    sql """ insert into ${testTable} values (100, NULL, 'GET /api/v1 HTTP', 200, 200); """
-    sql """ insert into ${testTable} values (100, '10.16.10.6', NULL, 200, 200); """
-    sql """ insert into ${testTable} values (100, '10.16.10.6', 'GET /api/v1 HTTP', NULL, 200); """
-    sql """ insert into ${testTable} values (100, '', '', 200, 200); """
+    sql """ insert into ${testTable} (`@timestamp`, clientip, request, status, size) values (100, '10.16.10.6', 'GET /api/v1 HTTP', 200, 200); """
+    sql """ insert into ${testTable} (`@timestamp`, clientip, request, status, size) values (100, NULL, 'GET /api/v1 HTTP', 200, 200); """
+    sql """ insert into ${testTable} (`@timestamp`, clientip, request, status, size) values (100, '10.16.10.6', NULL, 200, 200); """
+    sql """ insert into ${testTable} (`@timestamp`, clientip, request, status, size) values (100, '10.16.10.6', 'GET /api/v1 HTTP', NULL, 200); """
+    sql """ insert into ${testTable} (`@timestamp`, clientip, request, status, size) values (100, '', '', 200, 200); """
 
-    sql """set enable_no_need_read_data_opt = false"""
-    def result2 = sql """ select count() from ${testTable} where request match 'GET' and request like '%GET%'; """
-    logger.info("result2 is {}", result2)
+    try {
+          GetDebugPoint().enableDebugPointForAllBEs("match.invert_index_not_support_execute_match")
+        sql """set enable_no_need_read_data_opt = false"""
+        def result2 = sql """ select count() from ${testTable} where request match 'GET' and request like '%GET%'; """
+        logger.info("result2 is {}", result2)
 
-    sql """set enable_no_need_read_data_opt = true"""
-    def result1 = sql """ select count() from ${testTable} where request match 'GET' and request like '%GET%'; """
-    logger.info("result1 is {}", result1)
+        sql """set enable_no_need_read_data_opt = true"""
+        def result1 = sql """ select count() from ${testTable} where request match 'GET' and request like '%GET%'; """
+        logger.info("result1 is {}", result1)
 
 
-    assertEquals(result1, result2)
+        assertEquals(result1, result2)
+    } finally {
+        GetDebugPoint().disableDebugPointForAllBEs("match.invert_index_not_support_execute_match")
+    }
 }
