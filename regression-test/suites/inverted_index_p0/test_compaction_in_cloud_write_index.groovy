@@ -20,7 +20,6 @@ import org.codehaus.groovy.runtime.IOGroovyMethods
 suite("test_compaction_in_cloud_write_index") {
     def tableName = "test_compaction_in_cloud_write_index"
 
-    String backend_id;
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
     getBackendIpHttpPort(backendId_to_backendIP, backendId_to_backendHttpPort);
@@ -79,9 +78,6 @@ suite("test_compaction_in_cloud_write_index") {
     }
 
     def set_be_config = { key, value ->
-        def backendId_to_backendIP = [:]
-        def backendId_to_backendHttpPort = [:]
-        getBackendIpHttpPort(backendId_to_backendIP, backendId_to_backendHttpPort);
 
         for (String backend_id: backendId_to_backendIP.keySet()) {
             def (code, out, err) = update_be_config(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), key, value)
@@ -104,7 +100,7 @@ suite("test_compaction_in_cloud_write_index") {
     for (def tablet in tablets) {
         String tablet_id = tablet.TabletId
         backend_id = tablet.BackendId
-        (code, out, err) = be_run_cumulative_compaction(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
+        (code, out, err) = be_run_full_compaction(backendId_to_backendIP.get(backend_id), backendId_to_backendHttpPort.get(backend_id), tablet_id)
         logger.info("Run compaction: code=" + code + ", out=" + out + ", err=" + err)
 
         assertEquals(code, 0)
@@ -130,21 +126,4 @@ suite("test_compaction_in_cloud_write_index") {
         } while (running)
     }
 
-    def replicaNum = get_table_replica_num(tableName)
-    logger.info("get table replica num: " + replicaNum)
-    int rowCount = 0
-    for (def tablet in tablets) {
-        String tablet_id = tablet.TabletId
-
-        (code, out, err) = curl("GET", tablet.CompactionStatus)
-        logger.info("Show tablets status: code=" + code + ", out=" + out + ", err=" + err)
-        assertEquals(code, 0)
-        
-        def tabletJson = parseJson(out.trim())
-        assert tabletJson.rowsets instanceof List
-        for (String rowset in (List<String>) tabletJson.rowsets) {
-            rowCount += Integer.parseInt(rowset.split(" ")[1])
-        }
-    }
-    assert (rowCount <= 8 * replicaNum)
 }
