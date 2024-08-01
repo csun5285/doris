@@ -761,25 +761,45 @@ Status Compaction::construct_output_rowset_writer(RowsetWriterContext& ctx, bool
                                     return false;
                                 }
 
-                                // check index meta
-                                std::filesystem::path p(inverted_index_src_file_path);
-                                std::string dir_str = p.parent_path().string();
-                                std::string file_str = p.filename().string();
-                                lucene::store::Directory* dir =
-                                        DorisCompoundDirectoryFactory::getDirectory(
-                                                fs, dir_str.c_str());
-                                DorisCompoundReader reader(dir, file_str.c_str());
-                                std::vector<std::string> files;
-                                reader.list(&files);
-                                reader.close();
+                                CLuceneError err;
+                                CL_NS(store)::IndexInput* index_input = nullptr;
 
-                                // why is 3?
-                                // bkd index will write at least 3 files
-                                if (files.size() < 3) {
-                                    LOG(WARNING) << "tablet[" << _tablet->tablet_id()
-                                                 << "] column_unique_id[" << col_unique_id << "],"
-                                                 << inverted_index_src_file_path
-                                                 << " is corrupted, will skip index compaction";
+                                // open file
+                                auto ok = DorisCompoundDirectory::FSIndexInput::open(
+                                        fs, inverted_index_src_file_path.c_str(), index_input, err,
+                                        config::inverted_index_read_buffer_size);
+                                if (!ok) {
+                                    LOG(WARNING)
+                                            << "tablet[" << _tablet->tablet_id()
+                                            << "] column_unique_id[" << col_unique_id << "],"
+                                            << inverted_index_src_file_path
+                                            << " open file failed, will skip index compaction, "
+                                            << err.what();
+                                    return false;
+                                }
+                                try {
+                                    DorisCompoundReader reader(
+                                            index_input, config::inverted_index_read_buffer_size);
+                                    std::vector<std::string> files;
+                                    reader.list(&files);
+                                    reader.close();
+
+                                    // why is 3?
+                                    // bkd index will write at least 3 files
+                                    if (files.size() < 3) {
+                                        LOG(WARNING) << "tablet[" << _tablet->tablet_id()
+                                                     << "] column_unique_id[" << col_unique_id
+                                                     << "]," << inverted_index_src_file_path
+                                                     << " is corrupted, will skip index compaction";
+                                        return false;
+                                    }
+                                } catch (CLuceneError& err) {
+                                    LOG(WARNING)
+                                            << "tablet[" << _tablet->tablet_id()
+                                            << "] column_unique_id[" << col_unique_id << "],"
+                                            << inverted_index_src_file_path
+                                            << " open file failed, will skip index compaction, "
+                                            << err.what();
                                     return false;
                                 }
                             }

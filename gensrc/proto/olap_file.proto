@@ -128,6 +128,9 @@ message RowsetMetaPB {
     // If enable_segments_file_size is false,
     // the segments_file_size maybe is empty or error
     optional bool enable_segments_file_size = 103;
+
+    optional bool enable_inverted_index_file_info = 106;
+    repeated InvertedIndexFileInfo inverted_index_file_info = 107;
 }
 
 // kv value for reclaiming remote rowset

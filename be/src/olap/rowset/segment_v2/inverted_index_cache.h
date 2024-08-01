@@ -92,7 +92,8 @@ public:
 
     static IndexSearcherPtr build_index_searcher(const io::FileSystemSPtr& fs,
                                                  const std::string& index_dir,
-                                                 const std::string& file_name);
+                                                 const std::string& file_name,
+                                                 int64_t index_file_size = -1);
 
     InvertedIndexSearcherCache(size_t capacity, uint32_t num_shards);
 

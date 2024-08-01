@@ -123,7 +123,8 @@ public:
 
     Status new_inverted_index_iterator(const TabletIndex* index_meta,
                                        const StorageReadOptions& read_options,
-                                       std::unique_ptr<InvertedIndexIterator>* iterator);
+                                       std::unique_ptr<InvertedIndexIterator>* iterator,
+                                       int64_t index_file_size = -1);
 
     // Seek to the first entry in the column.
     Status seek_to_first(OrdinalPageIndexIterator* iter);
@@ -190,16 +191,18 @@ private:
 
     // Read column inverted indexes into memory
     // May be called multiple times, subsequent calls will no op.
-    Status _ensure_inverted_index_loaded(const TabletIndex* index_meta) {
+    Status _ensure_inverted_index_loaded(const TabletIndex* index_meta,
+                                         int64_t index_file_size = -1) {
         // load inverted index only if not loaded or index_id is changed
-        RETURN_IF_ERROR(_load_inverted_index_index(index_meta));
+        RETURN_IF_ERROR(_load_inverted_index_index(index_meta, index_file_size));
         return Status::OK();
     }
 
     [[nodiscard]] Status _load_zone_map_index(bool use_page_cache, bool kept_in_memory);
     [[nodiscard]] Status _load_ordinal_index(bool use_page_cache, bool kept_in_memory);
     [[nodiscard]] Status _load_bitmap_index(bool use_page_cache, bool kept_in_memory);
-    [[nodiscard]] Status _load_inverted_index_index(const TabletIndex* index_meta);
+    [[nodiscard]] Status _load_inverted_index_index(const TabletIndex* index_meta,
+                                                    int64_t index_file_size = -1);
     [[nodiscard]] Status _load_bloom_filter_index(bool use_page_cache, bool kept_in_memory);
 
     bool _zone_map_match_condition(const ZoneMapPB& zone_map, WrapperField* min_value_container,

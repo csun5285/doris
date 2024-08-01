@@ -248,8 +248,9 @@ Status ColumnReader::new_bitmap_index_iterator(BitmapIndexIterator** iterator) {
 
 Status ColumnReader::new_inverted_index_iterator(const TabletIndex* index_meta,
                                                  const StorageReadOptions& read_options,
-                                                 std::unique_ptr<InvertedIndexIterator>* iterator) {
-    RETURN_IF_ERROR(_ensure_inverted_index_loaded(index_meta));
+                                                 std::unique_ptr<InvertedIndexIterator>* iterator,
+                                                 int64_t index_file_size) {
+    RETURN_IF_ERROR(_ensure_inverted_index_loaded(index_meta, index_file_size));
     {
         std::shared_lock<std::shared_mutex> rlock(_load_index_lock);
         if (_inverted_index) {
@@ -526,7 +527,8 @@ Status ColumnReader::_load_bitmap_index(bool use_page_cache, bool kept_in_memory
     return Status::OK();
 }
 
-Status ColumnReader::_load_inverted_index_index(const TabletIndex* index_meta) {
+Status ColumnReader::_load_inverted_index_index(const TabletIndex* index_meta,
+                                                int64_t index_file_size) {
     std::unique_lock<std::shared_mutex> wlock(_load_index_lock);
 
     if (_inverted_index && index_meta &&
@@ -546,8 +548,9 @@ Status ColumnReader::_load_inverted_index_index(const TabletIndex* index_meta) {
     if (is_string_type(type)) {
         if (parser_type != InvertedIndexParserType::PARSER_NONE) {
             try {
-                _inverted_index = FullTextIndexReader::create_shared(
-                        _file_reader->fs(), _file_reader->path().native(), index_meta);
+                _inverted_index = FullTextIndexReader::create_shared(_file_reader->fs(),
+                                                                     _file_reader->path().native(),
+                                                                     index_meta, index_file_size);
                 return Status::OK();
             } catch (const CLuceneError& e) {
                 return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
@@ -556,7 +559,8 @@ Status ColumnReader::_load_inverted_index_index(const TabletIndex* index_meta) {
         } else {
             try {
                 _inverted_index = StringTypeInvertedIndexReader::create_shared(
-                        _file_reader->fs(), _file_reader->path().native(), index_meta);
+                        _file_reader->fs(), _file_reader->path().native(), index_meta,
+                        index_file_size);
             } catch (const CLuceneError& e) {
                 return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
                         "create StringTypeInvertedIndexReader error: {}", e.what());
@@ -565,7 +569,7 @@ Status ColumnReader::_load_inverted_index_index(const TabletIndex* index_meta) {
     } else if (is_numeric_type(type)) {
         try {
             _inverted_index = BkdIndexReader::create_shared(
-                    _file_reader->fs(), _file_reader->path().native(), index_meta);
+                    _file_reader->fs(), _file_reader->path().native(), index_meta, index_file_size);
         } catch (const CLuceneError& e) {
             return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
                     "create BkdIndexReader error: {}", e.what());

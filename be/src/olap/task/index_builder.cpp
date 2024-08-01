@@ -260,7 +260,8 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
                     return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
                             "CLuceneError occured: {}", e.what());
                 }
-                inverted_index_size += _inverted_index_builders[writer_sign]->file_size();
+                inverted_index_size +=
+                        _inverted_index_builders[writer_sign]->file_info().index_file_size();
             }
 
             _olap_data_convertor->reset();

@@ -71,8 +71,8 @@ using IndexSearcherPtr = std::shared_ptr<lucene::search::IndexSearcher>;
 class InvertedIndexReader : public std::enable_shared_from_this<InvertedIndexReader> {
 public:
     explicit InvertedIndexReader(io::FileSystemSPtr fs, const std::string& path,
-                                 const TabletIndex* index_meta)
-            : _fs(fs), _path(path), _index_meta(*index_meta) {}
+                                 const TabletIndex* index_meta, int64_t index_file_size = -1)
+            : _fs(fs), _path(path), _index_meta(*index_meta), _index_file_size(index_file_size) {}
     virtual ~InvertedIndexReader() = default;
 
     // create a new column iterator. Client should delete returned iterator
@@ -121,6 +121,7 @@ protected:
     io::FileSystemSPtr _fs;
     const std::string& _path;
     TabletIndex _index_meta;
+    int64_t _index_file_size = -1;
 };
 
 class FullTextIndexReader : public InvertedIndexReader {
@@ -128,8 +129,8 @@ class FullTextIndexReader : public InvertedIndexReader {
 
 public:
     explicit FullTextIndexReader(io::FileSystemSPtr fs, const std::string& path,
-                                 const TabletIndex* index_meta)
-            : InvertedIndexReader(fs, path, index_meta) {}
+                                 const TabletIndex* index_meta, int64_t index_file_size = -1)
+            : InvertedIndexReader(fs, path, index_meta, index_file_size) {}
     ~FullTextIndexReader() override = default;
 
     Status new_iterator(OlapReaderStatistics* stats, RuntimeState* runtime_state,
@@ -184,8 +185,9 @@ class StringTypeInvertedIndexReader : public InvertedIndexReader {
 
 public:
     explicit StringTypeInvertedIndexReader(io::FileSystemSPtr fs, const std::string& path,
-                                           const TabletIndex* index_meta)
-            : InvertedIndexReader(fs, path, index_meta) {}
+                                           const TabletIndex* index_meta,
+                                           int64_t index_file_size = -1)
+            : InvertedIndexReader(fs, path, index_meta, index_file_size) {}
     ~StringTypeInvertedIndexReader() override = default;
 
     Status new_iterator(OlapReaderStatistics* stats, RuntimeState* runtime_state,
@@ -244,7 +246,7 @@ private:
 
 public:
     explicit BkdIndexReader(io::FileSystemSPtr fs, const std::string& path,
-                            const TabletIndex* index_meta);
+                            const TabletIndex* index_meta, int64_t index_file_size = -1);
     ~BkdIndexReader() override {
         if (_compoundReader != nullptr) {
             try {

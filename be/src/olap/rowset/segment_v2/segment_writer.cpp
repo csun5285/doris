@@ -940,14 +940,6 @@ uint64_t SegmentWriter::estimate_segment_size() {
     return size;
 }
 
-size_t SegmentWriter::try_get_inverted_index_file_size() {
-    size_t total_size = 0;
-    for (auto& column_writer : _column_writers) {
-        total_size += column_writer->get_inverted_index_size();
-    }
-    return total_size;
-}
-
 Status SegmentWriter::finalize_columns_data() {
     if (_has_key) {
         _row_count = _num_rows_written;
@@ -988,7 +980,14 @@ Status SegmentWriter::finalize_columns_index(uint64_t* index_size) {
         }
         *index_size = _file_writer->bytes_appended() - index_start;
     }
-    _inverted_index_file_size = try_get_inverted_index_file_size();
+    for (auto& column_writer : _column_writers) {
+        auto idx_file_info = column_writer->get_inverted_index_file_info();
+        if (idx_file_info.has_index_id() && idx_file_info.has_index_file_size()) {
+            InvertedIndexFileInfo_IndexInfo* new_index_info =
+                    _inverted_index_file_info.add_index_info();
+            *new_index_info = idx_file_info;
+        }
+    }
     // reset all column writers and data_conveter
     clear();
 
@@ -1167,6 +1166,14 @@ void SegmentWriter::set_max_key(const Slice& key) {
 
 void SegmentWriter::set_mow_context(std::shared_ptr<MowContext> mow_context) {
     _mow_context = mow_context;
+}
+
+int64_t SegmentWriter::get_inverted_index_file_total_size() {
+    int64_t file_size = 0;
+    for (const auto& index_info : _inverted_index_file_info.index_info()) {
+        file_size += index_info.index_file_size();
+    }
+    return file_size;
 }
 
 } // namespace segment_v2

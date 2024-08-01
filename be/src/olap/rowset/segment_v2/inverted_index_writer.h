@@ -58,7 +58,7 @@ public:
 
     virtual int64_t size() const = 0;
 
-    virtual int64_t file_size() const = 0;
+    virtual InvertedIndexFileInfo_IndexInfo file_info() const = 0;
 
     virtual void close_on_error() = 0;
 

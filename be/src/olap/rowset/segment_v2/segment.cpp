@@ -83,8 +83,10 @@ bvar::Adder<uint64_t> memory_segment_counter("segment_count_in_memroy");
 Status Segment::open(io::FileSystemSPtr fs, const std::string& path, uint32_t segment_id,
                      RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
                      const io::FileReaderOptions& reader_options, std::shared_ptr<Segment>* output,
-                     bool is_lazy_open, bool disable_file_cache) {
-    std::shared_ptr<Segment> segment(new Segment(segment_id, rowset_id, tablet_schema));
+                     const InvertedIndexFileInfo& idx_file_info, bool is_lazy_open,
+                     bool disable_file_cache) {
+    std::shared_ptr<Segment> segment(
+            new Segment(segment_id, rowset_id, tablet_schema, idx_file_info));
     io::FileReaderSPtr file_reader;
     RETURN_IF_ERROR(fs->open_file(path, &file_reader, &reader_options));
     segment->_file_reader = std::move(file_reader);
@@ -109,11 +111,13 @@ Status Segment::check_segment_footer(io::FileReaderSPtr file_reader) {
 Segment::Segment()
         : _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {}
 
-Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema)
+Segment::Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
+                 const InvertedIndexFileInfo& idx_file_info)
         : _segment_id(segment_id),
           _meta_mem_usage(0),
           _rowset_id(rowset_id),
           _tablet_schema(tablet_schema),
+          _idx_file_info(idx_file_info),
           _segment_meta_mem_tracker(StorageEngine::instance()->segment_meta_mem_tracker()) {
     memory_segment_counter << 1;
 }
@@ -478,8 +482,15 @@ Status Segment::new_inverted_index_iterator(const TabletColumn& tablet_column,
                                             std::unique_ptr<InvertedIndexIterator>* iter) {
     auto col_unique_id = tablet_column.unique_id();
     if (_column_readers.count(col_unique_id) > 0 && index_meta) {
+        int64_t index_file_size = -1;
+        for (const auto& index_info : _idx_file_info.index_info()) {
+            if (index_info.index_id() == index_meta->index_id()) {
+                index_file_size = index_info.index_file_size();
+            }
+        }
         RETURN_IF_ERROR(_column_readers.at(col_unique_id)
-                                ->new_inverted_index_iterator(index_meta, read_options, iter));
+                                ->new_inverted_index_iterator(index_meta, read_options, iter,
+                                                              index_file_size));
         return Status::OK();
     }
     return Status::OK();

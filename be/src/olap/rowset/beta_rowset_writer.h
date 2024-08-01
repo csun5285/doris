@@ -198,6 +198,7 @@ protected:
     // conversion when compaction in unique key with MoW model
     std::vector<uint32_t> _segment_num_rows;
     std::vector<std::pair<int, io::FileWriterPtr>> _file_writers;
+    std::vector<std::pair<int, InvertedIndexFileInfo>> _inverted_index_files_info;
     // for unique key table with merge-on-write
     std::vector<KeyBoundsPB> _segments_encoded_key_bounds;
 

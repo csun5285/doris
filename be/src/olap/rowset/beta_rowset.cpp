@@ -177,8 +177,9 @@ Status BetaRowset::load_segments(int64_t seg_id_begin, int64_t seg_id_end,
         reader_options.is_doris_table = true;
         reader_options.file_size = _rowset_meta->get_segment_file_size(seg_id);
         auto s = segment_v2::Segment::open(fs, seg_path, seg_id, rowset_id(), _schema,
-                                           reader_options, &segment, is_lazy_open,
-                                           disable_file_cache);
+                                           reader_options, &segment,
+                                           _rowset_meta->get_inverted_index_file_info(seg_id),
+                                           is_lazy_open, disable_file_cache);
         if (!s.ok()) {
             LOG(WARNING) << "failed to open segment. " << seg_path << " under rowset "
                          << unique_id() << " : " << s.to_string();
@@ -466,7 +467,8 @@ bool BetaRowset::check_current_rowset_segment() {
         reader_options.is_doris_table = true;
         reader_options.file_size = _rowset_meta->get_segment_file_size(seg_id);
         auto s = segment_v2::Segment::open(fs, seg_path, seg_id, rowset_id(), _schema,
-                                           reader_options, &segment);
+                                           reader_options, &segment,
+                                           _rowset_meta->get_inverted_index_file_info(seg_id));
         if (!s.ok()) {
             LOG(WARNING) << "segment can not be opened. file=" << seg_path;
             return false;

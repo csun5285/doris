@@ -74,7 +74,8 @@ public:
     static Status open(io::FileSystemSPtr fs, const std::string& path, uint32_t segment_id,
                        RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
                        const io::FileReaderOptions& reader_options,
-                       std::shared_ptr<Segment>* output, bool is_lazy_open = false,
+                       std::shared_ptr<Segment>* output,
+                       const InvertedIndexFileInfo& idx_file_info = {}, bool is_lazy_open = false,
                        bool disable_file_cache = false);
 
     static Status check_segment_footer(io::FileReaderSPtr file_reader);
@@ -140,7 +141,8 @@ public:
 
 private:
     DISALLOW_COPY_AND_ASSIGN(Segment);
-    Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema);
+    Segment(uint32_t segment_id, RowsetId rowset_id, TabletSchemaSPtr tablet_schema,
+            const InvertedIndexFileInfo& idx_file_info = {});
     Segment();
     // open segment file and read the minimum amount of necessary information (footer)
     Status _open();
@@ -171,6 +173,8 @@ private:
     std::map<int32_t, std::unique_ptr<ColumnReader>> _column_readers;
 
     std::map<int32_t, std::unique_ptr<ColumnReader>> _column_without_index_readers;
+
+    InvertedIndexFileInfo _idx_file_info = {};
 
     // used to guarantee that short key index will be loaded at most once in a thread-safe way
     DorisCallOnce<Status> _load_index_once;

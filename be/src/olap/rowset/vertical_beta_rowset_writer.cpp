@@ -155,8 +155,7 @@ Status VerticalBetaRowsetWriter::_flush_columns(
         _segment_num_rows.resize(_cur_writer_idx + 1);
         _segment_num_rows[_cur_writer_idx] = _segment_writers[_cur_writer_idx]->row_count();
     }
-    _total_index_size +=
-            static_cast<int64_t>(index_size) + (*segment_writer)->get_inverted_index_file_size();
+    _total_index_size += static_cast<int64_t>(index_size);
     return Status::OK();
 }
 
@@ -227,7 +226,8 @@ Status VerticalBetaRowsetWriter::final_flush() {
             LOG(WARNING) << "Fail to finalize segment footer, " << st;
             return st;
         }
-        _total_data_size += segment_size + segment_writer->get_inverted_index_file_size();
+        _total_data_size += segment_size + segment_writer->get_inverted_index_file_total_size();
+        _total_index_size += segment_writer->get_inverted_index_file_total_size();
         segment_writer.reset();
     }
     return Status::OK();

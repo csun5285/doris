@@ -58,3 +58,11 @@ message PTopNCounter {
     required uint32 space_expand_rate = 2;
     repeated PCounter counter = 3;
 }
+
+message InvertedIndexFileInfo {
+    message IndexInfo {
+        required int64 index_id = 1;
+        required int64 index_file_size = 2 [default = -1];
+    }
+    repeated IndexInfo index_info = 1;
+}

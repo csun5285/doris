@@ -504,7 +504,9 @@ Status ScalarColumnWriter::init() {
                     Status add_nulls(uint32_t count) override { return Status::OK(); }
                     Status finish() override { return Status::OK(); }
                     int64_t size() const override { return 0; }
-                    int64_t file_size() const override { return 0; }
+                    InvertedIndexFileInfo_IndexInfo file_info() const override {
+                        return InvertedIndexFileInfo_IndexInfo();
+                    }
                     void close_on_error() override {}
                 };
 
@@ -675,12 +677,11 @@ Status ScalarColumnWriter::write_inverted_index() {
     return Status::OK();
 }
 
-size_t ScalarColumnWriter::get_inverted_index_size() {
+InvertedIndexFileInfo_IndexInfo ScalarColumnWriter::get_inverted_index_file_info() {
     if (_opts.inverted_index) {
-        auto size = _inverted_index_builder->file_size();
-        return size == -1 ? 0 : size;
+        return _inverted_index_builder->file_info();
     }
-    return 0;
+    return InvertedIndexFileInfo_IndexInfo();
 }
 
 Status ScalarColumnWriter::write_bloom_filter_index() {
@@ -839,15 +840,8 @@ Status StructColumnWriter::write_inverted_index() {
     return Status::OK();
 }
 
-size_t StructColumnWriter::get_inverted_index_size() {
-    size_t total_size = 0;
-    if (_opts.inverted_index) {
-        for (auto& column_writer : _sub_column_writers) {
-            auto size = column_writer->get_inverted_index_size();
-            total_size += (size == -1 ? 0 : size);
-        }
-    }
-    return total_size;
+InvertedIndexFileInfo_IndexInfo StructColumnWriter::get_inverted_index_file_info() {
+    return InvertedIndexFileInfo_IndexInfo();
 }
 
 Status StructColumnWriter::append_nullable(const uint8_t* null_map, const uint8_t** ptr,
@@ -966,12 +960,11 @@ Status ArrayColumnWriter::write_inverted_index() {
     return Status::OK();
 }
 
-size_t ArrayColumnWriter::get_inverted_index_size() {
+InvertedIndexFileInfo_IndexInfo ArrayColumnWriter::get_inverted_index_file_info() {
     if (_opts.inverted_index) {
-        auto size = _inverted_index_builder->file_size();
-        return size == -1 ? 0 : size;
+        return _inverted_index_builder->file_info();
     }
-    return 0;
+    return InvertedIndexFileInfo_IndexInfo();
 }
 
 // batch append data for array
@@ -1214,12 +1207,11 @@ Status MapColumnWriter::write_inverted_index() {
     return Status::OK();
 }
 
-size_t MapColumnWriter::get_inverted_index_size() {
+InvertedIndexFileInfo_IndexInfo MapColumnWriter::get_inverted_index_file_info() {
     if (_opts.inverted_index) {
-        auto size = _inverted_index_builder->file_size();
-        return size == -1 ? 0 : size;
+        return _inverted_index_builder->file_info();
     }
-    return 0;
+    return InvertedIndexFileInfo_IndexInfo();
 }
 
 } // namespace segment_v2

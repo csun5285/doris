@@ -17,6 +17,7 @@
 
 #include "olap/rowset/segment_v2/inverted_index_cache.h"
 
+#include <CLucene/debug/error.h>
 #include <CLucene/debug/mem.h>
 #include <CLucene/search/IndexSearcher.h>
 
@@ -34,6 +35,7 @@
 #include "olap/rowset/segment_v2/inverted_index_compound_directory.h"
 #include "olap/rowset/segment_v2/inverted_index_compound_reader.h"
 #include "runtime/thread_context.h"
+#include "util/debug_points.h"
 #include "util/defer_op.h"
 #include "util/runtime_profile.h"
 
@@ -44,10 +46,26 @@ InvertedIndexSearcherCache* InvertedIndexSearcherCache::_s_instance = nullptr;
 
 IndexSearcherPtr InvertedIndexSearcherCache::build_index_searcher(const io::FileSystemSPtr& fs,
                                                                   const std::string& index_dir,
-                                                                  const std::string& file_name) {
-    DorisCompoundReader* directory = new DorisCompoundReader(
-            DorisCompoundDirectoryFactory::getDirectory(fs, index_dir.c_str()), file_name.c_str(),
-            config::inverted_index_read_buffer_size);
+                                                                  const std::string& file_name,
+                                                                  int64_t file_size) {
+    DBUG_EXECUTE_IF("file_size_not_in_rowset_meta", {
+        if (file_size == -1) {
+            _CLTHROWA(CL_ERR_IO, "file_size_not_in_rowset_meta");
+        }
+    })
+
+    CLuceneError err;
+    CL_NS(store)::IndexInput* index_input = nullptr;
+
+    // open file
+    auto ok = DorisCompoundDirectory::FSIndexInput::open(fs, file_name.c_str(), index_input, err,
+                                                         config::inverted_index_read_buffer_size,
+                                                         file_size);
+    if (!ok) {
+        throw err;
+    }
+    DorisCompoundReader* directory =
+            new DorisCompoundReader(index_input, config::inverted_index_read_buffer_size);
     auto closeDirectory = true;
     auto index_searcher =
             std::make_shared<lucene::search::IndexSearcher>(directory, closeDirectory);
@@ -145,9 +163,11 @@ Status InvertedIndexSearcherCache::get_index_searcher(const io::FileSystemSPtr& 
         } catch (CLuceneError& err) {
             if (err.number() == CL_ERR_FileNotFound) {
                 return Status::Error<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>(
-                        "inverted index path: {} not exist.", file_path);
+                        "build index searcher failed, inverted index path: {} not exist.",
+                        file_name);
             }
-            throw err;
+            return Status::Error<ErrorCode::INTERNAL_ERROR>(
+                    "build index searcher failed, err is {}", err.what());
         }
     }
 #endif
@@ -184,7 +204,18 @@ Status InvertedIndexSearcherCache::insert(const io::FileSystemSPtr& fs,
 #ifndef BE_TEST
     {
         SCOPED_CONSUME_MEM_TRACKER(mem_tracker.get());
-        index_searcher = build_index_searcher(fs, index_dir, file_name);
+        try {
+            index_searcher = build_index_searcher(fs, index_dir, file_name);
+        } catch (CLuceneError& err) {
+            if (err.number() == CL_ERR_FileNotFound) {
+                return Status::Error<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>(
+                        "build index searcher failed, inverted index path: {} not exist.",
+                        file_name);
+            } else {
+                return Status::Error<ErrorCode::INTERNAL_ERROR>(
+                        "build index searcher failed, err is {}", err.what());
+            }
+        }
     }
 #endif
 

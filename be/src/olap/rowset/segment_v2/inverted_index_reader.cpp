@@ -205,15 +205,31 @@ Status InvertedIndexReader::read_null_bitmap(OlapReaderStatistics* stats,
 
         if (!dir) {
             try {
-                dir = new DorisCompoundReader(
-                        DorisCompoundDirectoryFactory::getDirectory(_fs, index_dir.c_str()),
-                        index_file_name.c_str(), config::inverted_index_read_buffer_size);
-            } catch (CLuceneError& err) {
-                if (err.number() == CL_ERR_FileNotFound) {
-                    return Status::Error<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>(
-                            "inverted index path: {} not exist.", index_file_path.native());
+                CLuceneError err;
+                CL_NS(store)::IndexInput* index_input = nullptr;
+
+                DBUG_EXECUTE_IF("file_size_not_in_rowset_meta ", {
+                    if (_index_file_size == -1) {
+                        return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
+                                "CLuceneError occur file size = -1, file is {}", index_file_name);
+                    }
+                })
+
+                // open file
+                auto ok = DorisCompoundDirectory::FSIndexInput::open(
+                        _fs, index_file_name.c_str(), index_input, err,
+                        config::inverted_index_read_buffer_size, _index_file_size);
+                if (!ok) {
+                    throw err;
                 }
-                throw err;
+                dir = new DorisCompoundReader(index_input, config::inverted_index_read_buffer_size);
+            } catch (CLuceneError& e) {
+                if (e.number() == CL_ERR_FileNotFound) {
+                    return Status::Error<ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND>(
+                            "inverted index path: {} not exist.", index_file_name);
+                }
+                return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>(
+                        "open file: {}, CLuceneError occured: {}", index_file_name, e.what());
             }
             owned_dir = true;
         }
@@ -747,8 +763,8 @@ InvertedIndexReaderType StringTypeInvertedIndexReader::type() {
 }
 
 BkdIndexReader::BkdIndexReader(io::FileSystemSPtr fs, const std::string& path,
-                               const TabletIndex* index_meta)
-        : InvertedIndexReader(fs, path, index_meta), _compoundReader(nullptr) {
+                               const TabletIndex* index_meta, int64_t index_file_size)
+        : InvertedIndexReader(fs, path, index_meta, index_file_size), _compoundReader(nullptr) {
     io::Path io_path(_path);
     auto index_dir = io_path.parent_path();
     auto index_file_name = InvertedIndexDescriptor::get_index_file_name(io_path.filename(),
@@ -756,14 +772,20 @@ BkdIndexReader::BkdIndexReader(io::FileSystemSPtr fs, const std::string& path,
     auto index_file = index_dir / index_file_name;
     _file_full_path = index_file;
     try {
-        _compoundReader = std::make_unique<DorisCompoundReader>(
-                DorisCompoundDirectoryFactory::getDirectory(fs, index_dir.c_str()),
-                index_file_name.c_str(), config::inverted_index_read_buffer_size);
-    } catch (CLuceneError& err) {
-        if (err.number() == CL_ERR_FileNotFound) {
-            LOG(WARNING) << "bkd index: " << index_file.string() << " not exist.";
-            return;
+        CLuceneError err;
+        CL_NS(store)::IndexInput* index_input = nullptr;
+        // open file
+        auto ok = DorisCompoundDirectory::FSIndexInput::open(
+                fs, index_file_name.c_str(), index_input, err,
+                config::inverted_index_read_buffer_size, _index_file_size);
+        if (!ok) {
+            throw err;
         }
+        _compoundReader = std::make_unique<DorisCompoundReader>(
+                index_input, config::inverted_index_read_buffer_size);
+    } catch (CLuceneError& e) {
+        LOG(WARNING) << "open file: " << index_file_name << " CLuceneError occured: " << e.what();
+        return;
     }
 }
 

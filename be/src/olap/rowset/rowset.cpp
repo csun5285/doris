@@ -103,6 +103,11 @@ void Rowset::merge_rowset_meta(const RowsetMetaSharedPtr& other) {
             _rowset_meta->add_segments_file_size(other->get_segment_file_size(idx));
         }
     }
+    if (other->enable_inverted_index_file_info()) {
+        for (size_t idx = 0; idx < other->num_segments(); idx++) {
+            _rowset_meta->add_inverted_index_file_info(other->get_inverted_index_file_info(idx));
+        }
+    }
 }
 
 } // namespace doris

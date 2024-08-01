@@ -18,6 +18,7 @@
 #ifndef DORIS_BE_SRC_OLAP_ROWSET_ROWSET_META_H
 #define DORIS_BE_SRC_OLAP_ROWSET_ROWSET_META_H
 
+#include <gen_cpp/olap_common.pb.h>
 #include <gen_cpp/olap_file.pb.h>
 
 #include <memory>
@@ -453,9 +454,64 @@ public:
                        : -1;
     }
 
+    void add_inverted_index_file_info(
+            const std::vector<std::pair<int, InvertedIndexFileInfo>>& inverted_index_files_info,
+            int seg_start_id = 0) {
+        size_t size = inverted_index_files_info.size();
+        auto check = [&]() -> bool {
+            std::unordered_set<int> seg_id_offsets;
+            for (const auto& [seg_id, _] : inverted_index_files_info) {
+                int seg_id_offset = seg_id - seg_start_id;
+                if (seg_id_offset < 0 || seg_id_offset >= size ||
+                    seg_id_offsets.find(seg_id_offset) != seg_id_offsets.end()) {
+                    LOG(ERROR) << fmt::format("inverted_index_files_info error {} {}",
+                                              seg_id_offset, size);
+                    return false;
+                }
+                seg_id_offsets.insert(seg_id_offset);
+            }
+            return true;
+        };
+        DCHECK(check());
+        if (!check()) {
+            return;
+        }
+        // sort
+        std::vector<InvertedIndexFileInfo> files_info(size);
+        for (auto& [seg_id, finfo] : inverted_index_files_info) {
+            files_info[seg_id - seg_start_id] = finfo;
+        }
+        for (size_t i = 0; i < size; i++) {
+            auto file_info = files_info[i];
+            InvertedIndexFileInfo* new_file_info = _rowset_meta_pb.add_inverted_index_file_info();
+            *new_file_info = file_info;
+        }
+        _rowset_meta_pb.set_enable_inverted_index_file_info(true);
+    }
+
+    void add_inverted_index_file_info(InvertedIndexFileInfo file_info) {
+        InvertedIndexFileInfo* new_file_info = _rowset_meta_pb.add_inverted_index_file_info();
+        *new_file_info = file_info;
+    }
+
+    InvertedIndexFileInfo get_inverted_index_file_info(int idx) const {
+        return _rowset_meta_pb.has_enable_inverted_index_file_info()
+                       ? (_rowset_meta_pb.enable_inverted_index_file_info()
+                                  ? (_rowset_meta_pb.inverted_index_file_info_size() > idx
+                                             ? _rowset_meta_pb.inverted_index_file_info(idx)
+                                             : InvertedIndexFileInfo())
+                                  : InvertedIndexFileInfo())
+                       : InvertedIndexFileInfo();
+    }
+
     bool enable_segments_file_size() const {
         return _rowset_meta_pb.has_enable_segments_file_size() &&
                _rowset_meta_pb.enable_segments_file_size();
+    }
+
+    bool enable_inverted_index_file_info() const {
+        return _rowset_meta_pb.has_enable_inverted_index_file_info() &&
+               _rowset_meta_pb.enable_inverted_index_file_info();
     }
 
     void set_compaction_level(int64_t compaction_level) {

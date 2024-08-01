@@ -613,6 +613,11 @@ Status BetaRowsetWriter::build(RowsetSharedPtr& rowset) {
     } else {
         _rowset_meta->add_segments_file_size(_file_writers);
     }
+    if (_context.is_transient_rowset_writer) {
+        _rowset_meta->add_inverted_index_file_info(_inverted_index_files_info, _segment_start_id);
+    } else {
+        _rowset_meta->add_inverted_index_file_info(_inverted_index_files_info);
+    }
     RETURN_NOT_OK_STATUS_WITH_WARN(
             RowsetFactory::create_rowset(_context.tablet_schema, _context.rowset_dir, _rowset_meta,
                                          &rowset),
@@ -882,8 +887,8 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
 
     Statistics segstat;
     segstat.row_num = row_num;
-    segstat.data_size = segment_size + (*writer)->get_inverted_index_file_size();
-    segstat.index_size = index_size + (*writer)->get_inverted_index_file_size();
+    segstat.data_size = segment_size + (*writer)->get_inverted_index_file_total_size();
+    segstat.index_size = index_size + (*writer)->get_inverted_index_file_total_size();
     segstat.key_bounds = key_bounds;
     {
         std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);
@@ -907,6 +912,10 @@ Status BetaRowsetWriter::_flush_segment_writer(std::unique_ptr<segment_v2::Segme
             _num_segment++;
         }
     }
+    {
+        std::lock_guard<SpinLock> l(_lock);
+        _inverted_index_files_info.push_back({segid, (*writer)->get_inverted_index_file_info()});
+    }
     return Status::OK();
 }
 
@@ -925,8 +934,8 @@ Status BetaRowsetWriter::flush_segment_writer_for_segcompaction(
 
     Statistics segstat;
     segstat.row_num = row_num;
-    segstat.data_size = segment_size + (*writer)->get_inverted_index_file_size();
-    segstat.index_size = index_size + (*writer)->get_inverted_index_file_size();
+    segstat.data_size = segment_size + (*writer)->get_inverted_index_file_total_size();
+    segstat.index_size = index_size + (*writer)->get_inverted_index_file_total_size();
     segstat.key_bounds = key_bounds;
     {
         std::lock_guard<std::mutex> lock(_segid_statistics_map_mutex);

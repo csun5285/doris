@@ -256,7 +256,7 @@ public:
 
 bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, const char* path,
                                                 IndexInput*& ret, CLuceneError& error,
-                                                int32_t buffer_size) {
+                                                int32_t buffer_size, int64_t index_file_size) {
     CND_PRECONDITION(path != nullptr, "path is NULL");
 
     if (buffer_size == -1) {
@@ -266,24 +266,30 @@ bool DorisCompoundDirectory::FSIndexInput::open(const io::FileSystemSPtr& fs, co
     io::FileBlockCachePathPolicy cache_policy;
     auto type = config::enable_file_cache ? config::file_cache_type : "";
     io::FileReaderOptions reader_options(io::cache_type_from_string(type), cache_policy);
+    reader_options.file_size = index_file_size;
     auto st = fs->open_file(path, &h->_reader, &reader_options);
     if (st.is_not_found()) {
-        error.set(CL_ERR_FileNotFound, "File does not exist");
+        error.set(CL_ERR_FileNotFound, fmt::format("File does not exist, file is {}", path).data());
     } else if (st.is_io_error()) {
-        error.set(CL_ERR_IO, "File open io error");
+        error.set(CL_ERR_IO, fmt::format("File open io error, file is {}", path).data());
     } else if (st.code() == ErrorCode::PERMISSION_DENIED) {
-        error.set(CL_ERR_IO, "File Access denied");
-    } else {
-        error.set(CL_ERR_IO, "Could not open file");
+        error.set(CL_ERR_IO, fmt::format("File Access denied, file is {}", path).data());
+    } else if (!st.ok()) {
+        error.set(CL_ERR_IO, fmt::format("Could not open file, file is {}", path).data());
     }
 
     //Check if a valid handle was retrieved
     if (st.ok() && h->_reader) {
-        //Store the file length
-        h->_length = h->_reader->size();
-        h->_fpos = 0;
-        ret = _CLNEW FSIndexInput(h, buffer_size);
-        return true;
+        if (h->_reader->size() == 0) {
+            // may be a empty file
+            error.set(CL_ERR_IO, fmt::format("Opened File is empty, file is {}", path).data());
+        } else {
+            //Store the file length
+            h->_length = h->_reader->size();
+            h->_fpos = 0;
+            ret = _CLNEW FSIndexInput(h, buffer_size);
+            return true;
+        }
     }
 
     delete h->_shared_lock;

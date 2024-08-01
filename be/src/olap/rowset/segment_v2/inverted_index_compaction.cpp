@@ -55,10 +55,25 @@ Status compact_column(int64_t index_id, int src_segment_num, int dest_segment_nu
         // format: rowsetId_segmentId_indexId.idx
         std::string src_idx_full_name =
                 src_index_files[i] + "_" + std::to_string(index_id) + ".idx";
-        auto* reader = new DorisCompoundReader(
-                DorisCompoundDirectoryFactory::getDirectory(fs, tablet_path.c_str()),
-                src_idx_full_name.c_str());
-        src_index_dirs[i] = reader;
+
+        try {
+            CLuceneError err;
+            CL_NS(store)::IndexInput* index_input = nullptr;
+
+            // open file
+            auto ok = DorisCompoundDirectory::FSIndexInput::open(
+                    fs, src_idx_full_name.c_str(), index_input, err,
+                    config::inverted_index_read_buffer_size);
+            if (!ok) {
+                throw err;
+            }
+            auto* reader =
+                    new DorisCompoundReader(index_input, config::inverted_index_read_buffer_size);
+            src_index_dirs[i] = reader;
+        } catch (CLuceneError& e) {
+            return Status::Error<ErrorCode::INVERTED_INDEX_COMPACTION_ERROR>(
+                    "open file: {}, CLuceneError occured: {}", src_idx_full_name, e.what());
+        }
     }
 
     // get dest idx file paths

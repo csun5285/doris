@@ -498,7 +498,7 @@ public:
         return 0;
     }
 
-    int64_t file_size() const override {
+    InvertedIndexFileInfo_IndexInfo file_info() const override {
         std::filesystem::path dir(_directory);
         dir /= _segment_file_name;
         auto file_name =
@@ -508,7 +508,10 @@ public:
         if (!st.ok()) {
             LOG(ERROR) << "try to get file:" << file_name << " size error:" << st;
         }
-        return size;
+        InvertedIndexFileInfo_IndexInfo index_info;
+        index_info.set_index_id(_index_meta->index_id());
+        index_info.set_index_file_size(size);
+        return index_info;
     }
 
     void write_null_bitmap(lucene::store::IndexOutput* null_bitmap_out,
