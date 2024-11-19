@@ -84,6 +84,10 @@ public class MaxComputeScanNode extends FileQueryScanNode {
     TableBatchReadSession tableBatchReadSession;
     private Predicate filterPredicate;
 
+    private int connectTimeout;
+    private int readTimeout;
+    private int retryTimes;
+
     public MaxComputeScanNode(PlanNodeId id, TupleDescriptor desc, boolean needCheckColumnPriv) {
         this(id, desc, "MCScanNode", StatisticalType.MAX_COMPUTE_SCAN_NODE, needCheckColumnPriv);
     }
@@ -108,6 +112,11 @@ public class MaxComputeScanNode extends FileQueryScanNode {
         fileDesc.setPartitionSpec("deprecated");
         fileDesc.setTableBatchReadSession(maxComputeSplit.scanSerialize);
         fileDesc.setSessionId(maxComputeSplit.getSessionId());
+
+        fileDesc.setReadTimeout(readTimeout);
+        fileDesc.setConnectTimeout(connectTimeout);
+        fileDesc.setRetryTimes(retryTimes);
+
         tableFormatFileDesc.setMaxComputeParams(fileDesc);
         rangeDesc.setTableFormatParams(tableFormatFileDesc);
         rangeDesc.setPath("[ " + maxComputeSplit.getStart() + " , " + maxComputeSplit.getLength() + " ]");
@@ -436,6 +445,10 @@ public class MaxComputeScanNode extends FileQueryScanNode {
             long modificationTime = table.getOdpsTable().getLastDataModifiedTime().getTime();
 
             MaxComputeExternalCatalog mcCatalog = (MaxComputeExternalCatalog) table.getCatalog();
+
+            readTimeout = mcCatalog.getReadTimeout();
+            connectTimeout = mcCatalog.getConnectTimeout();
+            retryTimes = mcCatalog.getRetryTimes();
 
             if (mcCatalog.getSplitStrategy().equals(MCProperties.SPLIT_BY_BYTE_SIZE_STRATEGY)) {
 
