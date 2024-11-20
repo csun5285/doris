@@ -21,27 +21,21 @@ import org.apache.doris.common.util.LocationPath;
 import org.apache.doris.datasource.FileSplit;
 import org.apache.doris.thrift.TFileType;
 
-import lombok.Getter;
-
 import java.util.List;
+import java.util.Optional;
 
-@Getter
 public class MaxComputeSplit extends FileSplit {
-    public String scanSerialize;
-    public String sessionId;
-
-    public enum SplitType {
-        ROW_OFFSET,
-        BYTE_SIZE
-    }
-
-    public SplitType splitType;
+    private final Optional<String> partitionSpec;
 
     public MaxComputeSplit(LocationPath path, long start, long length, long fileLength,
-            long modificationTime, String[] hosts, List<String> partitionValues) {
+            long modificationTime, String[] hosts, List<String> partitionValues, String partitionSpec) {
         super(path, start, length, fileLength, modificationTime, hosts, partitionValues);
+        this.partitionSpec = Optional.ofNullable(partitionSpec);
         // MC always use FILE_NET type
         this.locationType = TFileType.FILE_NET;
     }
 
+    public Optional<String> getPartitionSpec() {
+        return partitionSpec;
+    }
 }

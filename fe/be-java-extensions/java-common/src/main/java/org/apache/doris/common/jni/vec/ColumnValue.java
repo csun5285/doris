@@ -59,18 +59,6 @@ public interface ColumnValue {
 
     LocalDate getDate();
 
-    default String getChar() {
-        return getString();
-    }
-
-    default byte[] getCharAsBytes() {
-        return getStringAsBytes();
-    }
-
-    default boolean canGetCharAsBytes() {
-        return canGetStringAsBytes();
-    }
-
     LocalDateTime getDateTime();
 
     byte[] getBytes();

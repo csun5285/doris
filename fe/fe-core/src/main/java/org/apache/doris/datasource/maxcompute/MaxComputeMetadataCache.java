@@ -30,11 +30,21 @@ import java.util.stream.Collectors;
 
 public class MaxComputeMetadataCache {
     private final Cache<MaxComputeCacheKey, TablePartitionValues> partitionValuesCache;
+    private final Cache<MaxComputeCacheKey, Long> tableRowCountCache;
 
     public MaxComputeMetadataCache() {
         partitionValuesCache = Caffeine.newBuilder().maximumSize(Config.max_hive_partition_cache_num)
                 .expireAfterAccess(Config.external_cache_expire_time_minutes_after_access, TimeUnit.MINUTES)
                 .build();
+        tableRowCountCache = Caffeine.newBuilder().maximumSize(10000)
+                .expireAfterAccess(Config.external_cache_expire_time_minutes_after_access, TimeUnit.MINUTES)
+                .build();
+    }
+
+    public Long getCachedRowCount(String dbName, String tblName, String partitionSpec,
+            Function<? super MaxComputeCacheKey, ? extends Long> loader) {
+        MaxComputeCacheKey tablePartitionKey = new MaxComputeCacheKey(dbName, tblName, partitionSpec);
+        return tableRowCountCache.get(tablePartitionKey, loader);
     }
 
     public TablePartitionValues getCachedPartitionValues(MaxComputeCacheKey tablePartitionKey,
@@ -44,6 +54,7 @@ public class MaxComputeMetadataCache {
 
     public void cleanUp() {
         partitionValuesCache.invalidateAll();
+        tableRowCountCache.invalidateAll();
     }
 
     public void cleanDatabaseCache(String dbName) {
@@ -52,10 +63,17 @@ public class MaxComputeMetadataCache {
                 .filter(k -> k.getDbName().equalsIgnoreCase(dbName))
                 .collect(Collectors.toList());
         partitionValuesCache.invalidateAll(removeCacheList);
+
+        List<MaxComputeCacheKey> removeCacheRowCountList = tableRowCountCache.asMap().keySet()
+                .stream()
+                .filter(k -> k.getDbName().equalsIgnoreCase(dbName))
+                .collect(Collectors.toList());
+        tableRowCountCache.invalidateAll(removeCacheRowCountList);
     }
 
     public void cleanTableCache(String dbName, String tblName) {
         MaxComputeCacheKey cacheKey = new MaxComputeCacheKey(dbName, tblName);
         partitionValuesCache.invalidate(cacheKey);
+        tableRowCountCache.invalidate(cacheKey);
     }
 }
