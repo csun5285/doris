@@ -18,7 +18,6 @@
 package org.apache.doris.datasource.maxcompute.source;
 
 import org.apache.doris.analysis.TupleDescriptor;
-import org.apache.doris.catalog.PartitionItem;
 import org.apache.doris.catalog.TableIf;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Pair;
@@ -28,7 +27,7 @@ import org.apache.doris.datasource.FileQueryScanNode;
 import org.apache.doris.datasource.TableFormatType;
 import org.apache.doris.datasource.TablePartitionValues;
 import org.apache.doris.datasource.maxcompute.MaxComputeExternalTable;
-import org.apache.doris.planner.ListPartitionPrunerV2;
+import org.apache.doris.nereids.trees.plans.logical.LogicalFileScan.SelectedPartitions;
 import org.apache.doris.planner.PlanNodeId;
 import org.apache.doris.spi.Split;
 import org.apache.doris.statistics.StatisticalType;
@@ -40,9 +39,9 @@ import org.apache.doris.thrift.TTableFormatFileDesc;
 import com.aliyun.odps.Table;
 import com.aliyun.odps.tunnel.TunnelException;
 import com.google.common.collect.Maps;
+import lombok.Setter;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +52,9 @@ public class MaxComputeScanNode extends FileQueryScanNode {
     private final MaxComputeExternalTable table;
     private static final int MIN_SPLIT_SIZE = 4096;
     private static final LocationPath VIRTUAL_SLICE_PART = new LocationPath("/virtual_slice_part", Maps.newHashMap());
+
+    @Setter
+    private SelectedPartitions selectedPartitions = null;
 
     public MaxComputeScanNode(PlanNodeId id, TupleDescriptor desc, boolean needCheckColumnPriv) {
         this(id, desc, "MCScanNode", StatisticalType.MAX_COMPUTE_SCAN_NODE, needCheckColumnPriv);
@@ -110,11 +112,11 @@ public class MaxComputeScanNode extends FileQueryScanNode {
             return result;
         }
         try {
-            if (!table.getPartitionColumns().isEmpty()) {
-                if (conjuncts.isEmpty()) {
-                    throw new IllegalArgumentException("Max Compute partition table need partition predicate.");
-                }
+            if (table.isPartitionedTable()) {
                 List<String> partitionSpecs = getPartitionSpecs();
+                if (partitionSpecs.isEmpty()) {
+                    return result;
+                }
                 for (String partitionSpec : partitionSpecs) {
                     addPartitionSplits(result, odpsTable, partitionSpec);
                 }
@@ -168,26 +170,16 @@ public class MaxComputeScanNode extends FileQueryScanNode {
 
     private List<String> getPrunedPartitionSpecs() throws AnalysisException {
         List<String> result = new ArrayList<>();
-        TablePartitionValues partitionValues = table.getPartitionValues();
-        // prune partitions by expr
-        partitionValues.readLock().lock();
-        try {
-            Map<Long, PartitionItem> idToPartitionItem = partitionValues.getIdToPartitionItem();
-            this.totalPartitionNum = idToPartitionItem.size();
-            ListPartitionPrunerV2 pruner = new ListPartitionPrunerV2(idToPartitionItem,
-                    table.getPartitionColumns(), columnNameToRange,
-                    partitionValues.getUidToPartitionRange(),
-                    partitionValues.getRangeToId(),
-                    partitionValues.getSingleColumnRangeMap(),
-                    false);
-            Collection<Long> filteredPartitionIds = pruner.prune();
-            this.selectedPartitionNum = filteredPartitionIds.size();
-            // get partitions from cache
-            Map<Long, String> partitionIdToNameMap = partitionValues.getPartitionIdToNameMap();
-            filteredPartitionIds.forEach(id -> result.add(partitionIdToNameMap.get(id)));
+        if (!table.isPartitionedTable()) {
             return result;
-        } finally {
-            partitionValues.readLock().unlock();
         }
+        TablePartitionValues partitionValues = table.getPartitionValues();
+
+        this.totalPartitionNum = selectedPartitions.totalPartitionNum;
+
+        Map<Long, String> partitionIdToNameMap = partitionValues.getPartitionIdToNameMap();
+        selectedPartitions.selectedPartitions.forEach((key, value) -> result.add(partitionIdToNameMap.get(key)));
+        this.selectedPartitionNum = selectedPartitions.selectedPartitions.size();
+        return result;
     }
 }

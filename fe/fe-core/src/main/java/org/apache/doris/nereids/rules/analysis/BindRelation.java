@@ -35,6 +35,7 @@ import org.apache.doris.common.util.Util;
 import org.apache.doris.datasource.ExternalTable;
 import org.apache.doris.datasource.hive.HMSExternalTable;
 import org.apache.doris.datasource.hive.HMSExternalTable.DLAType;
+import org.apache.doris.datasource.maxcompute.MaxComputeExternalTable;
 import org.apache.doris.nereids.CTEContext;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.SqlCacheContext;
@@ -423,12 +424,19 @@ public class BindRelation extends OneAnalysisRuleFactory {
                                 unboundRelation.getTableSample(),
                                 unboundRelation.getTableSnapshot());
                     }
+                case MAX_COMPUTE_EXTERNAL_TABLE: {
+                    return new LogicalFileScan(unboundRelation.getRelationId(), (MaxComputeExternalTable) table,
+                            qualifierWithoutTableName,
+                            ((MaxComputeExternalTable) table).getAllPartitions(),
+                            unboundRelation.getTableSample(),
+                            unboundRelation.getTableSnapshot());
+                }
                 case ICEBERG_EXTERNAL_TABLE:
-                case PAIMON_EXTERNAL_TABLE:
-                case MAX_COMPUTE_EXTERNAL_TABLE:
+                case PAIMON_EXTERNAL_TABLE: {
                     return new LogicalFileScan(unboundRelation.getRelationId(), (ExternalTable) table,
                             qualifierWithoutTableName, unboundRelation.getTableSample(),
                             unboundRelation.getTableSnapshot());
+                }
                 case SCHEMA:
                     return new LogicalSchemaScan(unboundRelation.getRelationId(), table, qualifierWithoutTableName);
                 case JDBC_EXTERNAL_TABLE:

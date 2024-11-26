@@ -21,6 +21,7 @@ import org.apache.doris.catalog.PartitionItem;
 import org.apache.doris.datasource.ExternalTable;
 import org.apache.doris.datasource.hive.HMSExternalTable;
 import org.apache.doris.datasource.hive.HMSExternalTable.DLAType;
+import org.apache.doris.datasource.maxcompute.MaxComputeExternalTable;
 import org.apache.doris.nereids.CascadesContext;
 import org.apache.doris.nereids.rules.Rule;
 import org.apache.doris.nereids.rules.RuleType;
@@ -64,6 +65,10 @@ public class PruneFileScanPartition extends OneRewriteRuleFactory {
                     if (tbl instanceof HMSExternalTable && ((HMSExternalTable) tbl).getDlaType() == DLAType.HIVE) {
                         HMSExternalTable hiveTbl = (HMSExternalTable) tbl;
                         selectedPartitions = pruneHivePartitions(hiveTbl, filter, scan, ctx.cascadesContext);
+                    } else if (tbl instanceof MaxComputeExternalTable) {
+                        MaxComputeExternalTable maxComputeTbl = (MaxComputeExternalTable) tbl;
+                        selectedPartitions = pruneMaxComputePartitions(maxComputeTbl, filter,
+                                scan, ctx.cascadesContext);
                     } else {
                         // set isPruned so that it won't go pass the partition prune again
                         selectedPartitions = new SelectedPartitions(0, ImmutableMap.of(), true);
@@ -98,6 +103,34 @@ public class PruneFileScanPartition extends OneRewriteRuleFactory {
         for (Long id : prunedPartitions) {
             selectedPartitionItems.put(id, idToPartitionItem.get(id));
         }
+        return new SelectedPartitions(idToPartitionItem.size(), selectedPartitionItems, true);
+    }
+
+    private SelectedPartitions pruneMaxComputePartitions(MaxComputeExternalTable mcTable,
+            LogicalFilter<LogicalFileScan> filter, LogicalFileScan scan, CascadesContext ctx) {
+        if (!mcTable.isPartitionedTable()) {
+            // non partitioned table, return NOT_PRUNED.
+            return SelectedPartitions.NOT_PRUNED;
+        }
+        Map<String, Slot> scanOutput = scan.getOutput()
+                .stream()
+                .collect(Collectors.toMap(slot -> slot.getName().toLowerCase(), Function.identity()));
+
+        List<Slot> partitionSlots = mcTable.getPartitionColumns()
+                .stream()
+                .map(column -> scanOutput.get(column.getName().toLowerCase()))
+                .collect(Collectors.toList());
+
+        Map<Long, PartitionItem> idToPartitionItem = scan.getSelectedPartitions().selectedPartitions;
+
+        List<Long> prunedPartitions = new ArrayList<>(PartitionPruner.prune(
+                partitionSlots, filter.getPredicate(), idToPartitionItem, ctx, PartitionTableType.MAXCOMPUTE));
+
+        Map<Long, PartitionItem> selectedPartitionItems = Maps.newHashMap();
+        for (Long id : prunedPartitions) {
+            selectedPartitionItems.put(id, idToPartitionItem.get(id));
+        }
+
         return new SelectedPartitions(idToPartitionItem.size(), selectedPartitionItems, true);
     }
 }

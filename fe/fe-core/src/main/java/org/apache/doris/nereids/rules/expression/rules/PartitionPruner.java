@@ -55,7 +55,8 @@ public class PartitionPruner extends DefaultExpressionRewriter<Void> {
     /** Different type of table may have different partition prune behavior. */
     public enum PartitionTableType {
         OLAP,
-        HIVE
+        HIVE,
+        MAXCOMPUTE
     }
 
     private PartitionPruner(List<OnePartitionEvaluator> partitions, Expression partitionPredicate) {
