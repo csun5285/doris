@@ -25,6 +25,7 @@ import org.apache.doris.catalog.Index;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.common.Config;
 import org.apache.doris.nereids.exceptions.AnalysisException;
+import org.apache.doris.nereids.types.ArrayType;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.thrift.TInvertedIndexFileStorageFormat;
@@ -89,6 +90,23 @@ public class IndexDefinition {
         }
 
         this.comment = comment;
+    }
+
+    /**
+     * Check if the column type is supported for inverted index
+     */
+    public static boolean isSupportIdxType(DataType columnType) {
+        if (columnType.isArrayType()) {
+            DataType itemType = ((ArrayType) columnType).getItemType();
+            if (itemType.isArrayType()) {
+                return false;
+            }
+            return isSupportIdxType(itemType);
+        }
+        return columnType.isDateLikeType() || columnType.isDecimalLikeType()
+                || columnType.isIntegralType() || columnType.isStringLikeType()
+                || columnType.isBooleanType() || columnType.isVariantType()
+                || columnType.isIPType();
     }
 
     /**
@@ -221,5 +239,21 @@ public class IndexDefinition {
     public Index translateToCatalogStyle() {
         return new Index(Env.getCurrentEnv().getNextId(), name, cols, indexType, properties,
                 comment);
+    }
+
+    public Map<String, String> getProperties() {
+        return properties;
+    }
+
+    public boolean isAnalyzedInvertedIndex() {
+        return indexType == IndexDef.IndexType.INVERTED
+                && properties != null
+                        && properties.containsKey(InvertedIndexUtil.INVERTED_INDEX_PARSER_KEY);
+    }
+
+    public boolean isNonAnalyzedInvertedIndex() {
+        return indexType == IndexDef.IndexType.INVERTED
+                && (properties == null
+                        || !properties.containsKey(InvertedIndexUtil.INVERTED_INDEX_PARSER_KEY));
     }
 }

@@ -41,6 +41,8 @@
 #include "olap/rowset/segment_v2/page_handle.h"        // for PageHandle
 #include "olap/rowset/segment_v2/page_pointer.h"
 #include "olap/rowset/segment_v2/parsed_page.h" // for ParsedPage
+#include "olap/rowset/segment_v2/stream_reader.h"
+#include "olap/tablet_schema.h"
 #include "olap/types.h"
 #include "olap/utils.h"
 #include "util/once.h"
@@ -79,6 +81,7 @@ class InvertedIndexFileReader;
 class PageDecoder;
 class RowRanges;
 class ZoneMapIndexReader;
+struct VariantStatistics;
 
 struct ColumnReaderOptions {
     // whether verify checksum when read page
@@ -87,6 +90,8 @@ struct ColumnReaderOptions {
     bool kept_in_memory = false;
 
     int be_exec_version = -1;
+
+    TabletSchemaSPtr tablet_schema = nullptr;
 };
 
 struct ColumnIteratorOptions {
@@ -113,10 +118,15 @@ struct ColumnIteratorOptions {
 // This will cache data shared by all reader
 class ColumnReader : public MetadataAdder<ColumnReader> {
 public:
+    ColumnReader() = default;
     // Create an initialized ColumnReader in *reader.
     // This should be a lightweight operation without I/O.
     static Status create(const ColumnReaderOptions& opts, const ColumnMetaPB& meta,
                          uint64_t num_rows, const io::FileReaderSPtr& file_reader,
+                         std::unique_ptr<ColumnReader>* reader);
+    static Status create(const ColumnReaderOptions& opts, const SegmentFooterPB& footer,
+                         uint32_t column_id, uint64_t num_rows,
+                         const io::FileReaderSPtr& file_reader,
                          std::unique_ptr<ColumnReader>* reader);
     static Status create_array(const ColumnReaderOptions& opts, const ColumnMetaPB& meta,
                                const io::FileReaderSPtr& file_reader,
@@ -130,11 +140,19 @@ public:
     static Status create_agg_state(const ColumnReaderOptions& opts, const ColumnMetaPB& meta,
                                    uint64_t num_rows, const io::FileReaderSPtr& file_reader,
                                    std::unique_ptr<ColumnReader>* reader);
+    static Status create_variant(const ColumnReaderOptions& opts, const SegmentFooterPB& footer,
+                                 uint32_t column_id, uint64_t num_rows,
+                                 const io::FileReaderSPtr& file_reader,
+                                 std::unique_ptr<ColumnReader>* reader);
     enum DictEncodingType { UNKNOWN_DICT_ENCODING, PARTIAL_DICT_ENCODING, ALL_DICT_ENCODING };
 
-    virtual ~ColumnReader();
+    static bool is_compaction_reader_type(ReaderType type);
+
+    ~ColumnReader() override;
 
     // create a new column iterator. Client should delete returned iterator
+    virtual Status new_iterator(ColumnIterator** iterator, const TabletColumn* col,
+                                const StorageReadOptions*);
     Status new_iterator(ColumnIterator** iterator);
     Status new_array_iterator(ColumnIterator** iterator);
     Status new_struct_iterator(ColumnIterator** iterator);
@@ -207,7 +225,9 @@ public:
 
     void disable_index_meta_cache() { _use_index_page_cache = false; }
 
-    FieldType get_meta_type() { return _meta_type; }
+    virtual FieldType get_meta_type() { return _meta_type; }
+
+    int64_t get_metadata_size() const override;
 
 private:
     ColumnReader(const ColumnReaderOptions& opts, const ColumnMetaPB& meta, uint64_t num_rows,
@@ -252,8 +272,6 @@ private:
     Status _calculate_row_ranges(const std::vector<uint32_t>& page_indexes, RowRanges* row_ranges,
                                  const ColumnIteratorOptions& iter_opts);
 
-    int64_t get_metadata_size() const override;
-
 private:
     int64_t _meta_length;
     FieldType _meta_type;
@@ -284,12 +302,61 @@ private:
     std::unique_ptr<ZoneMapIndexReader> _zone_map_index;
     std::unique_ptr<OrdinalIndexReader> _ordinal_index;
     std::unique_ptr<BitmapIndexReader> _bitmap_index;
-    std::shared_ptr<InvertedIndexReader> _inverted_index;
+    std::unordered_map<int64_t, std::shared_ptr<InvertedIndexReader>> _inverted_indexs;
     std::shared_ptr<BloomFilterIndexReader> _bloom_filter_index;
 
     std::vector<std::unique_ptr<ColumnReader>> _sub_readers;
 
     DorisCallOnce<Status> _set_dict_encoding_type_once;
+};
+
+class VariantColumnReader : public ColumnReader {
+public:
+    VariantColumnReader() = default;
+
+    Status init(const ColumnReaderOptions& opts, const SegmentFooterPB& footer, uint32_t column_id,
+                uint64_t num_rows, io::FileReaderSPtr file_reader);
+
+    Status new_iterator(ColumnIterator** iterator, const TabletColumn* col,
+                        const StorageReadOptions* opt) override;
+
+    const SubcolumnColumnReaders::Node* get_reader_by_path(
+            const vectorized::PathInData& relative_path) const;
+
+    ~VariantColumnReader() override = default;
+
+    FieldType get_meta_type() override { return FieldType::OLAP_FIELD_TYPE_VARIANT; }
+
+    const VariantStatistics* get_stats() const { return _statistics.get(); }
+
+    int64_t get_metadata_size() const override;
+
+    std::vector<const TabletIndex*> find_subcolumn_tablet_indexes(const std::string&);
+
+    bool exist_in_sparse_column(const vectorized::PathInData& path) const;
+
+    const SubcolumnColumnReaders* get_subcolumn_readers() const { return _subcolumn_readers.get(); }
+
+    std::vector<std::string> get_typed_paths() const;
+
+private:
+    // init for compaction read
+    Status _new_default_iter_with_same_nested(ColumnIterator** iterator, const TabletColumn& col);
+    Status _new_iterator_with_flat_leaves(ColumnIterator** iterator, const TabletColumn& col,
+                                          const StorageReadOptions* opts,
+                                          bool exceeded_sparse_column_limit,
+                                          bool existed_in_sparse_column);
+
+    Status _create_hierarchical_reader(ColumnIterator** reader, vectorized::PathInData path,
+                                       const SubcolumnColumnReaders::Node* node,
+                                       const SubcolumnColumnReaders::Node* root);
+    Status _create_sparse_merge_reader(ColumnIterator** iterator, const StorageReadOptions* opts,
+                                       const TabletColumn& target_col, ColumnIterator* inner_iter);
+    std::unique_ptr<SubcolumnColumnReaders> _subcolumn_readers;
+    std::unique_ptr<ColumnReader> _sparse_column_reader;
+    std::unique_ptr<VariantStatistics> _statistics;
+    // key: subcolumn path, value: subcolumn indexes
+    std::unordered_map<std::string, TabletIndexes> _variant_subcolumns_indexes;
 };
 
 // Base iterator to read one column data

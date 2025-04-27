@@ -17,9 +17,11 @@
 
 package org.apache.doris.analysis;
 
+import org.apache.doris.catalog.ArrayType;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.thrift.TInvertedIndexFileStorageFormat;
@@ -214,6 +216,22 @@ public class IndexDef {
         return (this.indexType == IndexType.INVERTED);
     }
 
+    // Check if the column type is supported for inverted index
+    public static boolean isSupportIdxType(Type colType) {
+        if (colType.isArrayType()) {
+            Type itemType = ((ArrayType) colType).getItemType();
+            if (itemType.isArrayType()) {
+                return false;
+            }
+            return isSupportIdxType(itemType);
+        }
+        PrimitiveType primitiveType = colType.getPrimitiveType();
+        return primitiveType.isDateType() || primitiveType.isDecimalV2Type() || primitiveType.isDecimalV3Type()
+                || primitiveType.isFixedPointType() || primitiveType.isStringType()
+                || primitiveType == PrimitiveType.BOOLEAN
+                || primitiveType.isVariantType() || primitiveType.isIPType();
+    }
+
     public void checkColumn(Column column, KeysType keysType, boolean enableUniqueKeyMergeOnWrite,
             TInvertedIndexFileStorageFormat invertedIndexFileStorageFormat) throws AnalysisException {
         if (indexType == IndexType.BITMAP || indexType == IndexType.INVERTED || indexType == IndexType.BLOOMFILTER
@@ -290,5 +308,11 @@ public class IndexDef {
         } catch (NumberFormatException e) {
             throw new AnalysisException("Invalid value for '" + key + "': " + valueStr, e);
         }
+    }
+
+    public boolean isAnalyzedInvertedIndex() {
+        return indexType == IndexDef.IndexType.INVERTED
+            && properties != null
+            && properties.containsKey(InvertedIndexUtil.INVERTED_INDEX_PARSER_KEY);
     }
 }
