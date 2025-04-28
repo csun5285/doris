@@ -17,7 +17,7 @@
 
 suite("test_single_column_multi_index1", "p0") {
     def tableName = "test_single_column_multi_index1"
-    
+
     // Function to create the test table
     def createTestTable = { ->
         sql "DROP TABLE IF EXISTS ${tableName}"
@@ -94,24 +94,74 @@ suite("test_single_column_multi_index1", "p0") {
         }
     }
 
+    def timeout = 60000
+    def delta_time = 1000
+    def alter_res = "null"
+    def useTime = 0
+    def wait_for_latest_op_on_table_finish = { table_name, OpTimeout ->
+        for(int t = delta_time; t <= OpTimeout; t += delta_time){
+            alter_res = sql """SHOW ALTER TABLE COLUMN WHERE TableName = "${table_name}" ORDER BY CreateTime DESC LIMIT 1;"""
+            alter_res = alter_res.toString()
+            if(alter_res.contains("FINISHED")) {
+                sleep(3000) // wait change table state to normal
+                logger.info(table_name + " latest alter job finished, detail: " + alter_res)
+                break
+            }
+            useTime = t
+            sleep(delta_time)
+        }
+        assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
+    }
+
+    def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
+        for(int t = delta_time; t <= OpTimeout; t += delta_time){
+            alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
+            def expected_finished_num = alter_res.size();
+            def finished_num = 0;
+            for (int i = 0; i < expected_finished_num; i++) {
+                logger.info(table_name + " build index job state: " + alter_res[i][7] + i)
+                if (alter_res[i][7] == "FINISHED") {
+                    ++finished_num;
+                }
+            }
+            if (finished_num == expected_finished_num) {
+                logger.info(table_name + " all build index jobs finished, detail: " + alter_res)
+                break
+            }
+            useTime = t
+            sleep(delta_time)
+        }
+        assertTrue(useTime <= OpTimeout, "wait_for_latest_build_index_on_partition_finish timeout")
+    }
+
     try {
       createTestTable()
       loadTestData()
       runMatchQueries()
 
       sql """ alter table ${tableName} add index request_text_idx(`request`) USING INVERTED PROPERTIES("support_phrase" = "true", "parser" = "unicode", "lower_case" = "true"); """
+      wait_for_latest_op_on_table_finish(tableName, timeout)
       sql """ alter table ${tableName} add index request_keyword_idx(`request`) USING INVERTED;; """
+      wait_for_latest_op_on_table_finish(tableName, timeout)
       
       loadTestData()
       runMatchQueries()
 
       sql """ BUILD INDEX request_text_idx ON ${tableName}; """
+      if (!isCloudMode()) {
+          wait_for_build_index_on_partition_finish(tableName, timeout)
+      }
       sql """ BUILD INDEX request_keyword_idx ON ${tableName}; """
+      if (!isCloudMode()) {
+          wait_for_build_index_on_partition_finish(tableName, timeout)
+      }
 
       runMatchQueries()
 
       sql """ DROP INDEX request_text_idx ON ${tableName}; """
+      wait_for_latest_op_on_table_finish(tableName, timeout)
       sql """ DROP INDEX request_keyword_idx ON ${tableName}; """
+      wait_for_latest_op_on_table_finish(tableName, timeout)
 
       runMatchQueries()
     } finally {

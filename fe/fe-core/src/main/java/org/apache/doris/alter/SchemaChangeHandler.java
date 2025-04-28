@@ -101,6 +101,7 @@ import org.apache.doris.task.AgentTaskExecutor;
 import org.apache.doris.task.AgentTaskQueue;
 import org.apache.doris.task.ClearAlterTask;
 import org.apache.doris.task.UpdateTabletMetaInfoTask;
+import org.apache.doris.thrift.TInvertedIndexFileStorageFormat;
 import org.apache.doris.thrift.TStorageFormat;
 import org.apache.doris.thrift.TStorageMedium;
 import org.apache.doris.thrift.TTaskType;
@@ -2786,7 +2787,9 @@ public class SchemaChangeHandler extends AlterHandler {
             Set<String> existedIdxColSet = Sets.newTreeSet(String.CASE_INSENSITIVE_ORDER);
             existedIdxColSet.addAll(index.getColumns());
             if (index.getIndexType() == indexDef.getIndexType() && newColset.equals(existedIdxColSet)) {
-                if (newColset.size() == 1) {
+                if (newColset.size() == 1
+                        && olapTable.getInvertedIndexFileStorageFormat()
+                            .compareTo(TInvertedIndexFileStorageFormat.V2) >= 0) {
                     String columnName = indexDef.getColumns().get(0);
                     Column column = olapTable.getColumn(columnName);
                     if (column != null && column.getType().isStringType()) {
@@ -2797,6 +2800,9 @@ public class SchemaChangeHandler extends AlterHandler {
                                 indexDef.getIndexType() + " index for column (" + columnName + ") with "
                                     + (isNewIndexAnalyzer ? "analyzed" : "non-analyzed") + " type already exists.");
                         }
+                    } else {
+                        throw new DdlException(
+                            indexDef.getIndexType() + " index for column (" + columnName + ") already exists.");
                     }
                 } else {
                     throw new DdlException(
