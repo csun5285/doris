@@ -297,6 +297,7 @@ Status FullTextIndexReader::query(const io::IOContext* io_ctx, OlapReaderStatist
             }
 
             InvertedIndexCtxSPtr inverted_index_ctx = std::make_shared<InvertedIndexCtx>(
+                    get_custom_analyzer_string_from_properties(_index_meta.properties()),
                     get_inverted_index_parser_type_from_string(
                             get_parser_string_from_properties(_index_meta.properties())),
                     get_parser_mode_string_from_properties(_index_meta.properties()),

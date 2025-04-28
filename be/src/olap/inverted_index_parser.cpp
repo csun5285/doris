@@ -136,4 +136,13 @@ std::string get_parser_stopwords_from_properties(
     }
 }
 
+std::string get_custom_analyzer_string_from_properties(
+        const std::map<std::string, std::string>& properties) {
+    if (properties.find(INVERTED_INDEX_CUSTOM_ANALYZER_KEY) != properties.end()) {
+        return properties.at(INVERTED_INDEX_CUSTOM_ANALYZER_KEY);
+    } else {
+        return "";
+    }
+}
+
 } // namespace doris

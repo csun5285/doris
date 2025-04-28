@@ -335,6 +335,9 @@ unsupportedShowStatement
     | SHOW COPY ((FROM | IN) database=multipartIdentifier)?
         whereClause? sortClause? limitClause?                                       #showCopy
     | SHOW WARM UP JOB wildWhere?                                                   #showWarmUpJob
+    | SHOW INVERTED INDEX ANALYZER                                                  #showAnalyzer
+    | SHOW INVERTED INDEX TOKENIZER                                                 #showTokenizer
+    | SHOW INVERTED INDEX TOKEN_FILTER                                              #showTokenFilter
     ;
 
 unsupportedLoadStatement
@@ -672,6 +675,9 @@ unsupportedDropStatement
         (FOR (userIdentify | ROLE roleName=identifier))?                        #dropRowPolicy
     | DROP STORAGE POLICY (IF EXISTS)? name=identifier                          #dropStoragePolicy
     | DROP STAGE (IF EXISTS)? name=identifier                                   #dropStage
+    | DROP INVERTED INDEX ANALYZER (IF EXISTS)? name=identifier                 #dropAnalyzer
+    | DROP INVERTED INDEX TOKENIZER (IF EXISTS)? name=identifier                #dropTokenizer
+    | DROP INVERTED INDEX TOKEN_FILTER (IF EXISTS)? name=identifier             #dropTokenFilter
     ;
 
 unsupportedStatsStatement
@@ -760,6 +766,12 @@ unsupportedCreateStatement
     | BUILD INDEX name=identifier ON tableName=multipartIdentifier
         partitionSpec?                                                          #buildIndex
     | CREATE STAGE (IF NOT EXISTS)? name=identifier properties=propertyClause?  #createStage
+    | CREATE INVERTED INDEX ANALYZER (IF NOT EXISTS)?
+        name=identifier properties=propertyClause?                              #createAnalyzer
+    | CREATE INVERTED INDEX TOKENIZER (IF NOT EXISTS)?
+        name=identifier properties=propertyClause?                              #createTokenizer
+    | CREATE INVERTED INDEX TOKEN_FILTER (IF NOT EXISTS)?
+        name=identifier properties=propertyClause?                              #createTokenFilter
     ;
 
 workloadPolicyActions

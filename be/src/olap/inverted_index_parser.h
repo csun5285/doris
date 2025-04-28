@@ -43,6 +43,7 @@ enum class InvertedIndexParserType {
 using CharFilterMap = std::map<std::string, std::string>;
 
 struct InvertedIndexCtx {
+    std::string custom_analyzer;
     InvertedIndexParserType parser_type;
     std::string parser_mode;
     CharFilterMap char_filter_map;
@@ -83,6 +84,8 @@ const std::string INVERTED_INDEX_PARSER_LOWERCASE_KEY = "lower_case";
 
 const std::string INVERTED_INDEX_PARSER_STOPWORDS_KEY = "stopwords";
 
+const std::string INVERTED_INDEX_CUSTOM_ANALYZER_KEY = "analyzer";
+
 std::string inverted_index_parser_type_to_string(InvertedIndexParserType parser_type);
 
 InvertedIndexParserType get_inverted_index_parser_type_from_string(const std::string& parser_str);
@@ -117,6 +120,9 @@ std::string get_parser_lowercase_from_properties(
 }
 
 std::string get_parser_stopwords_from_properties(
+        const std::map<std::string, std::string>& properties);
+
+std::string get_custom_analyzer_string_from_properties(
         const std::map<std::string, std::string>& properties);
 
 } // namespace doris
