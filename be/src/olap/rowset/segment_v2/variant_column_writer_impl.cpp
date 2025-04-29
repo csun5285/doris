@@ -112,12 +112,8 @@ Status _create_column_writer(uint32_t cid, const TabletColumn& column,
             init_opt_inverted_index();
         }
         // the subcolumn index is not initialized, but the parent index is present
-        else if (!parent_index.empty()) {
-            for (const auto& index : parent_index) {
-                subcolumn_indexes.push_back(std::make_unique<TabletIndex>(*index));
-                subcolumn_indexes.back()->set_escaped_escaped_index_suffix_path(
-                        column.path_info_ptr()->get_path());
-            }
+        else if (!parent_index.empty() &&
+                 vectorized::schema_util::inherit_index(parent_index, subcolumn_indexes, column)) {
             init_opt_inverted_index();
         }
         // no parent index and no subcolumn index

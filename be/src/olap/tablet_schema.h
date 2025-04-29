@@ -36,6 +36,7 @@
 #include "common/consts.h"
 #include "common/status.h"
 #include "gutil/stringprintf.h"
+#include "olap/inverted_index_parser.h"
 #include "olap/metadata_adder.h"
 #include "olap/olap_common.h"
 #include "olap/rowset/segment_v2/options.h"
@@ -307,6 +308,11 @@ public:
     void set_escaped_escaped_index_suffix_path(const std::string& name);
 
     bool is_inverted_index() const { return _index_type == IndexType::INVERTED; }
+
+    void remove_parser_and_analyzer() {
+        _properties.erase(INVERTED_INDEX_PARSER_KEY);
+        _properties.erase(INVERTED_INDEX_CUSTOM_ANALYZER_KEY);
+    }
 
     std::string field_pattern() const {
         if (_properties.contains("field_pattern")) {

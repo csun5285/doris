@@ -537,20 +537,26 @@ Status SegmentIterator::_get_row_ranges_by_column_conditions() {
             }
         }
     }
-    DBUG_EXECUTE_IF("segment_iterator.apply_inverted_index", {
-        LOG(INFO) << "Debug Point: segment_iterator.apply_inverted_index";
-        if (!_common_expr_ctxs_push_down.empty() || !_col_predicates.empty()) {
-            return Status::Error<ErrorCode::INTERNAL_ERROR>("it is failed to apply inverted index");
-        }
-    })
+
     DBUG_EXECUTE_IF("segment_iterator.inverted_index.filtered_rows", {
-        LOG(INFO) << "Debug Point: segment_iterator.inverted_index.filtered_rows";
+        LOG(INFO) << "Debug Point: segment_iterator.inverted_index.filtered_rows: "
+                  << _opts.stats->rows_inverted_index_filtered;
         auto filtered_rows = DebugPoints::instance()->get_debug_param_or_default<int32_t>(
-                "segment_iterator.inverted_index.filtered_rows", "filtered_rows", 0);
+                "segment_iterator.inverted_index.filtered_rows", "filtered_rows", -1);
         if (filtered_rows != _opts.stats->rows_inverted_index_filtered) {
             return Status::Error<ErrorCode::INTERNAL_ERROR>(
                     "filtered_rows: {} not equal to expected: {}",
                     _opts.stats->rows_inverted_index_filtered, filtered_rows);
+        }
+    })
+
+    DBUG_EXECUTE_IF("segment_iterator.apply_inverted_index", {
+        LOG(INFO) << "Debug Point: segment_iterator.apply_inverted_index";
+        if (!_common_expr_ctxs_push_down.empty() || !_col_predicates.empty()) {
+            return Status::Error<ErrorCode::INTERNAL_ERROR>(
+                    "it is failed to apply inverted index, common_expr_ctxs_push_down: {}, "
+                    "col_predicates: {}",
+                    _common_expr_ctxs_push_down.size(), _col_predicates.size());
         }
     })
 
@@ -795,13 +801,12 @@ bool SegmentIterator::_check_apply_by_inverted_index(ColumnPredicate* pred) {
         return false;
     }
 
-    bool handle_by_fulltext = _column_has_fulltext_index(pred_column_id);
+    bool handle_by_fulltext = _column_only_has_fulltext_index(pred_column_id);
     if (handle_by_fulltext) {
         // when predicate is leafNode of andNode,
         // can apply 'match query' and 'equal query' and 'list query' for fulltext index.
         return pred->type() == PredicateType::MATCH || pred->type() == PredicateType::IS_NULL ||
-               pred->type() == PredicateType::IS_NOT_NULL ||
-               PredicateTypeTraits::is_equal_or_list(pred->type());
+               pred->type() == PredicateType::IS_NOT_NULL;
     }
 
     return true;
@@ -861,10 +866,12 @@ bool SegmentIterator::_downgrade_without_index(Status res, bool need_remaining) 
     return false;
 }
 
-bool SegmentIterator::_column_has_fulltext_index(int32_t cid) {
+bool SegmentIterator::_column_only_has_fulltext_index(int32_t cid) {
     bool has_fulltext_index =
             _inverted_index_iterators[cid] != nullptr &&
-            _inverted_index_iterators[cid]->get_reader(InvertedIndexReaderType::FULLTEXT);
+            _inverted_index_iterators[cid]->get_reader(InvertedIndexReaderType::FULLTEXT) &&
+            _inverted_index_iterators[cid]->get_reader(InvertedIndexReaderType::STRING_TYPE) ==
+                    nullptr;
 
     return has_fulltext_index;
 }
@@ -879,13 +886,11 @@ Status SegmentIterator::_apply_inverted_index_on_column_predicate(
     if (!_check_apply_by_inverted_index(pred)) {
         remaining_predicates.emplace_back(pred);
     } else {
-        bool need_remaining_after_evaluate = _column_has_fulltext_index(pred->column_id()) &&
-                                             PredicateTypeTraits::is_equal_or_list(pred->type());
         Status res = pred->evaluate(_storage_name_and_type[pred->column_id()],
                                     _inverted_index_iterators[pred->column_id()].get(), num_rows(),
                                     &_row_bitmap);
         if (!res.ok()) {
-            if (_downgrade_without_index(res, need_remaining_after_evaluate)) {
+            if (_downgrade_without_index(res)) {
                 remaining_predicates.emplace_back(pred);
                 return Status::OK();
             }
@@ -900,10 +905,6 @@ Status SegmentIterator::_apply_inverted_index_on_column_predicate(
             *continue_apply = false;
         }
 
-        if (need_remaining_after_evaluate) {
-            remaining_predicates.emplace_back(pred);
-            return Status::OK();
-        }
         if (!pred->predicate_params()->marked_by_runtime_filter) {
             _column_predicate_inverted_index_status[pred->column_id()][pred] = true;
         }

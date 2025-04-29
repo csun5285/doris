@@ -541,7 +541,10 @@ public:
         if (iter == nullptr) {
             return Status::OK();
         }
-        if (iter->get_reader(segment_v2::InvertedIndexReaderType::FULLTEXT)) {
+
+        // only string type and bkd inverted index reader can be used for comparison
+        if (iter->get_reader(segment_v2::InvertedIndexReaderType::STRING_TYPE) == nullptr &&
+            iter->get_reader(segment_v2::InvertedIndexReaderType::BKD) == nullptr) {
             //NOT support comparison predicate when parser is FULLTEXT for expr inverted index evaluate.
             return Status::OK();
         }

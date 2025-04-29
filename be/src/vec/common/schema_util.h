@@ -163,4 +163,14 @@ bool generate_sub_column_info(const TabletSchema& schema, int32_t col_unique_id,
                               const std::string& path,
                               TabletSchema::SubColumnInfo* sub_column_info);
 
+bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
+                   TabletIndexes& sub_column_indexes, FieldType column_type,
+                   const std::string& suffix_path, bool is_array_nested_type = false);
+
+bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
+                   TabletIndexes& sub_column_indexes, const TabletColumn& column);
+
+bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
+                   TabletIndexes& sub_column_indexes, const segment_v2::ColumnMetaPB& column_pb);
+
 } // namespace  doris::vectorized::schema_util

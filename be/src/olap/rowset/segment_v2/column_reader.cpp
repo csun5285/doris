@@ -586,16 +586,9 @@ Status VariantColumnReader::init(const ColumnReaderOptions& opts, const SegmentF
                 _variant_subcolumns_indexes[path.get_path()] = std::move(sub_column_info.indexes);
             }
             // if parent column has index, add index to _variant_subcolumns_indexes
-            else if (!parent_index.empty() &&
-                     InvertedIndexColumnWriter::check_support_inverted_index(
-                             (FieldType)column_pb.type())) {
-                for (const auto& index : parent_index) {
-                    const auto& suffix_path = path.get_path();
-                    auto subcolumn_index = std::make_unique<TabletIndex>(*index);
-                    subcolumn_index->set_escaped_escaped_index_suffix_path(suffix_path);
-                    _variant_subcolumns_indexes[suffix_path].emplace_back(
-                            std::move(subcolumn_index));
-                }
+            else if (!parent_index.empty()) {
+                vectorized::schema_util::inherit_index(
+                        parent_index, _variant_subcolumns_indexes[path.get_path()], column_pb);
             }
         }
     }
@@ -1110,8 +1103,8 @@ Status ColumnReader::_load_inverted_index_index(
                     "create BkdIndexReader error: {}", e.what());
         }
     } else {
-        // return Status::Error<ErrorCode::INVERTED_INDEX_NOT_SUPPORTED>(
-        //         "Field type {} is not supported for inverted index", type);
+        return Status::Error<ErrorCode::INVERTED_INDEX_NOT_SUPPORTED>(
+                "Field type {} is not supported for inverted index", type);
     }
     _inverted_indexs[index_meta->index_id()] = inverted_index;
     return Status::OK();

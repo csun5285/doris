@@ -49,7 +49,9 @@ Status MatchPredicate::evaluate(const vectorized::IndexFieldNameAndTypePair& nam
                                 InvertedIndexIterator* iterator, uint32_t num_rows,
                                 roaring::Roaring* bitmap) const {
     if (iterator == nullptr) {
-        return Status::OK();
+        return Status::Error<ErrorCode::INVERTED_INDEX_EVALUATE_SKIPPED>(
+                "Inverted index evaluate skipped, no inverted index reader can not support "
+                "match predicate");
     }
     if (_check_evaluate(iterator)) {
         return Status::Error<ErrorCode::INVERTED_INDEX_INVALID_PARAMETERS>(

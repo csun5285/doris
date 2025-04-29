@@ -128,7 +128,10 @@ public:
         if (iter == nullptr) {
             return Status::OK();
         }
-        if (iter->get_reader(segment_v2::InvertedIndexReaderType::FULLTEXT)) {
+
+        // only string type inverted index reader can be used for array_index
+        if (iter->get_reader(segment_v2::InvertedIndexReaderType::STRING_TYPE) == nullptr &&
+            iter->get_reader(segment_v2::InvertedIndexReaderType::BKD) == nullptr) {
             // parser is not none we can not make sure the result is correct in expr combination
             // for example, filter: !array_index(array, 'tall:120cm, weight: 35kg')
             // here we have rows [tall:120cm, weight: 35kg, hobbies: reading book] which be tokenized

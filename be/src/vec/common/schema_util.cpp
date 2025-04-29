@@ -1202,14 +1202,8 @@ bool generate_sub_column_info(const TabletSchema& schema, int32_t col_unique_id,
         }
         // 2. find parent column's index
         else if (const auto parent_index = schema.inverted_indexs(col_unique_id);
-                 !parent_index.empty() &&
-                 InvertedIndexColumnWriter::check_support_inverted_index(sub_column_info->column)) {
-            for (const auto& index : parent_index) {
-                auto index_ptr = std::make_shared<TabletIndex>(*index);
-                index_ptr->set_escaped_escaped_index_suffix_path(
-                        sub_column_info->column.path_info_ptr()->get_path());
-                sub_column_info->indexes.emplace_back(std::move(index_ptr));
-            }
+                 !parent_index.empty()) {
+            inherit_index(parent_index, sub_column_info->indexes, sub_column_info->column);
         } else {
             sub_column_info->indexes.clear();
         }
@@ -1308,6 +1302,70 @@ TabletSchemaSPtr calculate_variant_extended_schema(const std::vector<RowsetShare
         return base_schema;
     }
     return least_common_schema;
+}
+
+bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
+                   TabletIndexes& subcolumns_indexes, FieldType column_type,
+                   const std::string& suffix_path, bool is_array_nested_type) {
+    if (parent_indexes.empty()) {
+        return false;
+    }
+    subcolumns_indexes.clear();
+    // bkd index or array index only need to inherit one index
+    if (field_is_numeric_type(column_type) ||
+        (is_array_nested_type &&
+         (field_is_numeric_type(column_type) || field_is_slice_type(column_type)))) {
+        auto index_ptr = std::make_shared<TabletIndex>(*parent_indexes[0]);
+        index_ptr->set_escaped_escaped_index_suffix_path(suffix_path);
+        // no need parse for bkd index or array index
+        index_ptr->remove_parser_and_analyzer();
+        subcolumns_indexes.emplace_back(std::move(index_ptr));
+        return true;
+    }
+    // string type need to inherit all indexes
+    else if (field_is_slice_type(column_type) && !is_array_nested_type) {
+        for (const auto& index : parent_indexes) {
+            auto index_ptr = std::make_shared<TabletIndex>(*index);
+            index_ptr->set_escaped_escaped_index_suffix_path(suffix_path);
+            subcolumns_indexes.emplace_back(std::move(index_ptr));
+        }
+        return true;
+    }
+    return false;
+}
+
+bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
+                   TabletIndexes& subcolumns_indexes, const TabletColumn& column) {
+    if (!column.is_extracted_column()) {
+        return false;
+    }
+    if (column.is_array_type()) {
+        if (column.get_sub_columns().empty()) {
+            return false;
+        }
+        return inherit_index(parent_indexes, subcolumns_indexes,
+                             column.get_sub_columns()[0]->type(),
+                             column.path_info_ptr()->get_path(), true);
+    }
+    return inherit_index(parent_indexes, subcolumns_indexes, column.type(),
+                         column.path_info_ptr()->get_path());
+}
+
+bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
+                   TabletIndexes& subcolumns_indexes, const ColumnMetaPB& column_pb) {
+    if (!column_pb.has_column_path_info()) {
+        return false;
+    }
+    if (column_pb.type() == (int)FieldType::OLAP_FIELD_TYPE_ARRAY) {
+        if (column_pb.children_columns_size() == 0) {
+            return false;
+        }
+        return inherit_index(parent_indexes, subcolumns_indexes,
+                             (FieldType)column_pb.children_columns(0).type(),
+                             column_pb.column_path_info().path(), true);
+    }
+    return inherit_index(parent_indexes, subcolumns_indexes, (FieldType)column_pb.type(),
+                         column_pb.column_path_info().path());
 }
 
 } // namespace doris::vectorized::schema_util

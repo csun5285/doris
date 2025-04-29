@@ -123,12 +123,14 @@ suite("test_variant_predefine_types_with_indexes_profile", "p0, nonConcurrent"){
     def queryAndCheck = { String sqlQuery, int expectedFilteredRows = -1, boolean checkFilterUsed = true ->
       def checkpoints_name = "segment_iterator.inverted_index.filtered_rows"
       try {
+          GetDebugPoint().enableDebugPointForAllBEs("segment_iterator.apply_inverted_index")
           GetDebugPoint().enableDebugPointForAllBEs(checkpoints_name, [filtered_rows: expectedFilteredRows])
           sql "set experimental_enable_parallel_scan = false"
           sql "sync"
           sql "${sqlQuery}"
       } finally {
           GetDebugPoint().disableDebugPointForAllBEs(checkpoints_name)
+          GetDebugPoint().disableDebugPointForAllBEs("segment_iterator.apply_inverted_index")
       }
     }
 
@@ -158,7 +160,7 @@ suite("test_variant_predefine_types_with_indexes_profile", "p0, nonConcurrent"){
 
       queryAndCheck("select count() from test_variant_predefine_types_with_indexes_profile where var['string_1_nested']['message'] match_any 'object'", 82173)
 
-      queryAndCheck("select count() from test_variant_predefine_types_with_indexes_profile where var['string_1_nested']['metadata']['timestamp'] = '2023-10-27T12:00:00Z'", 90000)
+      queryAndCheck("select count() from test_variant_predefine_types_with_indexes_profile where var['string_1_nested']['metadata']['timestamp'] match '2023-10-27T12:00:00Z'", 90000)
 
       queryAndCheck("select count() from test_variant_predefine_types_with_indexes_profile where cast(var['decimal_1'] as decimalv3(26,9)) = 12345.6789", 90000)
 

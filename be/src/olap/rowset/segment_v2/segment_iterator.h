@@ -206,7 +206,7 @@ private:
             ColumnPredicate* pred, std::vector<ColumnPredicate*>& remaining_predicates,
             bool* continue_apply);
     [[nodiscard]] Status _apply_index_expr();
-    bool _column_has_fulltext_index(int32_t cid);
+    bool _column_only_has_fulltext_index(int32_t cid);
     bool _downgrade_without_index(Status res, bool need_remaining = false);
     inline bool _inverted_index_not_support_pred_type(const PredicateType& type);
     bool _is_literal_node(const TExprNodeType::type& node_type);
