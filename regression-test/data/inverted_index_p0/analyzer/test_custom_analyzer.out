@@ -26,6 +26,9 @@
 -- !tokenize_sql --
 ["ǁuǁe", "language"]
 
+-- !tokenize_sql --
+["1080º", "avalanche"]
+
 -- !sql --
 1	abcDEF
 
