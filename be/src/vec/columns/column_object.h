@@ -326,13 +326,12 @@ public:
         return subcolumns.get_mutable_root()->data.get_finalized_column_ptr()->assume_mutable();
     }
 
-    Status serialize_one_row_to_string(int row, std::string* output) const;
+    void serialize_one_row_to_string(int row, std::string* output) const;
 
-    Status serialize_one_row_to_string(int row, BufferWritable& output) const;
+    void serialize_one_row_to_string(int row, BufferWritable& output) const;
 
     // serialize one row to json format
-    Status serialize_one_row_to_json_format(int64_t row, BufferWritable& output,
-                                            bool* is_null) const;
+    void serialize_one_row_to_json_format(int64_t row, BufferWritable& output, bool* is_null) const;
 
     // Fill the `serialized_sparse_column`
     Status serialize_sparse_columns(std::map<std::string_view, Subcolumn>&& remaing_subcolumns);
@@ -522,109 +521,6 @@ public:
                                const uint8_t* __restrict null_data) const override;
 
     // Not implemented
-    MutableColumnPtr get_shrinked_column() override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "get_shrinked_column" + std::string(get_family_name()));
-    }
-
-    Int64 get_int(size_t /*n*/) const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "get_int" + std::string(get_family_name()));
-    }
-
-    bool get_bool(size_t /*n*/) const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "get_bool" + std::string(get_family_name()));
-    }
-
-    void insert_many_fix_len_data(const char* pos, size_t num) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "insert_many_fix_len_data" + std::string(get_family_name()));
-    }
-
-    void insert_many_dict_data(const int32_t* data_array, size_t start_index, const StringRef* dict,
-                               size_t data_num, uint32_t dict_num = 0) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "insert_many_dict_data" + std::string(get_family_name()));
-    }
-
-    void insert_many_binary_data(char* data_array, uint32_t* len_array,
-                                 uint32_t* start_offset_array, size_t num) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "insert_many_binary_data" + std::string(get_family_name()));
-    }
-
-    void insert_many_continuous_binary_data(const char* data, const uint32_t* offsets,
-                                            const size_t num) override {
-        throw doris::Exception(
-                ErrorCode::NOT_IMPLEMENTED_ERROR,
-                "insert_many_continuous_binary_data" + std::string(get_family_name()));
-    }
-
-    void insert_many_strings(const StringRef* strings, size_t num) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "insert_many_strings" + std::string(get_family_name()));
-    }
-
-    void insert_many_strings_overflow(const StringRef* strings, size_t num,
-                                      size_t max_length) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "insert_many_strings_overflow" + std::string(get_family_name()));
-    }
-
-    void insert_many_raw_data(const char* pos, size_t num) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "insert_many_raw_data" + std::string(get_family_name()));
-    }
-
-    size_t get_max_row_byte_size() const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "get_max_row_byte_size" + std::string(get_family_name()));
-    }
-
-    void serialize_vec(std::vector<StringRef>& keys, size_t num_rows,
-                       size_t max_row_byte_size) const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "serialize_vec" + std::string(get_family_name()));
-    }
-
-    void serialize_vec_with_null_map(std::vector<StringRef>& keys, size_t num_rows,
-                                     const uint8_t* null_map) const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "serialize_vec_with_null_map" + std::string(get_family_name()));
-    }
-
-    void deserialize_vec(std::vector<StringRef>& keys, const size_t num_rows) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "deserialize_vec" + std::string(get_family_name()));
-    }
-
-    void deserialize_vec_with_null_map(std::vector<StringRef>& keys, const size_t num_rows,
-                                       const uint8_t* null_map) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "deserialize_vec_with_null_map" + std::string(get_family_name()));
-    }
-
-    Status filter_by_selector(const uint16_t* sel, size_t sel_size, IColumn* col_ptr) override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "filter_by_selector" + std::string(get_family_name()));
-    }
-
-    bool structure_equals(const IColumn&) const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "structure_equals" + std::string(get_family_name()));
-    }
-
-    StringRef get_raw_data() const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "get_raw_data" + std::string(get_family_name()));
-    }
-
-    size_t size_of_value_if_fixed() const override {
-        throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
-                               "size_of_value_if_fixed" + std::string(get_family_name()));
-    }
-
     StringRef get_data_at(size_t) const override {
         throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
                                "get_data_at" + std::string(get_family_name()));

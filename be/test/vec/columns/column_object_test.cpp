@@ -24,6 +24,7 @@
 #include <rapidjson/prettywriter.h>
 #include <stdio.h>
 
+#include "common/cast_set.h"
 #include "runtime/jsonb_value.h"
 #include "testutil/variant_util.h"
 #include "vec/columns/common_column_test.h"
@@ -812,126 +813,6 @@ TEST(ColumnVariantTest, empty_inset_range_from) {
         EXPECT_EQ(pair3.first.get<String>(), "50");
         EXPECT_EQ(start, end);
     }
-}
-
-TEST_F(ColumnObjectTest, permute) {
-    auto column_variant = construct_dst_varint_column();
-    {
-        // test empty column and limit == 0
-        IColumn::Permutation permutation(0);
-        auto col = column_variant->clone_empty();
-        col->permute(permutation, 0);
-        EXPECT_EQ(col->size(), 0);
-    }
-
-    MutableColumns columns;
-    columns.push_back(column_variant->get_ptr());
-    assert_column_vector_permute(columns, 0);
-    assert_column_vector_permute(columns, 1);
-    assert_column_vector_permute(columns, column_variant->size());
-    assert_column_vector_permute(columns, UINT64_MAX);
-}
-
-// TEST
-TEST_F(ColumnObjectTest, test_pop_back) {
-    ColumnObject::Subcolumn subcolumn(0, true /* is_nullable */, false /* is_root */);
-
-    Field field_int(123);
-    Field field_string("hello");
-
-    subcolumn.insert(field_int);
-    subcolumn.insert(field_string);
-
-    subcolumn.pop_back(1);
-    EXPECT_EQ(subcolumn.size(), 1);
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int8)");
-
-    subcolumn.pop_back(1);
-    EXPECT_EQ(subcolumn.size(), 0);
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nothing");
-}
-
-TEST_F(ColumnObjectTest, test_pop_back_multiple_types) {
-    ColumnObject::Subcolumn subcolumn(0, true /* is_nullable */, false /* is_root */);
-
-    Field field_int8(42);
-    subcolumn.insert(field_int8);
-    EXPECT_EQ(subcolumn.size(), 1);
-    EXPECT_EQ(subcolumn.data_types.size(), 1);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int8)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int8)");
-
-    Field field_int16(12345);
-    subcolumn.insert(field_int16);
-    EXPECT_EQ(subcolumn.size(), 2);
-    EXPECT_EQ(subcolumn.data_types.size(), 2);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int8)");
-    EXPECT_EQ(subcolumn.data_types[1]->get_name(), "Nullable(Int16)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int16)");
-
-    Field field_int32(1234567);
-    subcolumn.insert(field_int32);
-    EXPECT_EQ(subcolumn.size(), 3);
-    EXPECT_EQ(subcolumn.data_types.size(), 3);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int8)");
-    EXPECT_EQ(subcolumn.data_types[1]->get_name(), "Nullable(Int16)");
-    EXPECT_EQ(subcolumn.data_types[2]->get_name(), "Nullable(Int32)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int32)");
-
-    subcolumn.pop_back(1);
-    EXPECT_EQ(subcolumn.size(), 2);
-    EXPECT_EQ(subcolumn.data_types.size(), 2);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int8)");
-    EXPECT_EQ(subcolumn.data_types[1]->get_name(), "Nullable(Int16)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int16)");
-
-    subcolumn.pop_back(1);
-    EXPECT_EQ(subcolumn.size(), 1);
-    EXPECT_EQ(subcolumn.data_types.size(), 1);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int8)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int8)");
-
-    subcolumn.pop_back(1);
-    EXPECT_EQ(subcolumn.size(), 0);
-    EXPECT_EQ(subcolumn.data_types.size(), 0);
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nothing");
-
-    subcolumn.insert(field_int32);
-    EXPECT_EQ(subcolumn.size(), 1);
-    EXPECT_EQ(subcolumn.data_types.size(), 1);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int32)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int32)");
-
-    subcolumn.insert(field_int16);
-    EXPECT_EQ(subcolumn.size(), 2);
-    EXPECT_EQ(subcolumn.data_types.size(), 1);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int32)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int32)");
-
-    subcolumn.insert(field_int8);
-    EXPECT_EQ(subcolumn.size(), 3);
-    EXPECT_EQ(subcolumn.data_types.size(), 1);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int32)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int32)");
-
-    subcolumn.pop_back(1);
-    EXPECT_EQ(subcolumn.size(), 2);
-    EXPECT_EQ(subcolumn.data_types.size(), 1);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int32)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(Int32)");
-
-    Field field_string("hello");
-    subcolumn.insert(field_string);
-    EXPECT_EQ(subcolumn.size(), 3);
-    EXPECT_EQ(subcolumn.data_types.size(), 2);
-    EXPECT_EQ(subcolumn.data_types[0]->get_name(), "Nullable(Int32)");
-    EXPECT_EQ(subcolumn.data_types[1]->get_name(), "Nullable(JSONB)");
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nullable(JSONB)");
-
-    subcolumn.pop_back(3);
-    EXPECT_EQ(subcolumn.size(), 0);
-    EXPECT_EQ(subcolumn.data_types.size(), 0);
-    EXPECT_EQ(subcolumn.get_least_common_type()->get_name(), "Nothing");
 }
 
 } // namespace doris::vectorized

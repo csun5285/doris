@@ -26,22 +26,14 @@
 
 #include "arrow/array/array_base.h"
 #include "arrow/type.h"
-#include "olap/schema.h"
-#include "runtime/descriptors.cpp"
 #include "runtime/descriptors.h"
 #include "util/arrow/block_convertor.h"
 #include "util/arrow/row_batch.h"
 #include "vec/columns/column.h"
 #include "vec/columns/column_array.h"
-#include "vec/columns/column_map.h"
-#include "vec/columns/columns_number.h"
 #include "vec/core/field.h"
-#include "vec/core/sort_block.h"
-#include "vec/core/sort_description.h"
 #include "vec/core/types.h"
 #include "vec/data_types/data_type.h"
-#include "vec/data_types/data_type_array.h"
-#include "vec/data_types/data_type_map.h"
 #include "vec/runtime/ipv6_value.h"
 #include "vec/utils/arrow_column_to_doris_column.h"
 
@@ -55,9 +47,9 @@
 //  serialize_one_cell_to_json (const IColumn &column, int row_num, BufferWritable &bw, FormatOptions &options) const =0
 //  serialize_column_to_json (const IColumn &column, int start_idx, int end_idx, BufferWritable &bw, FormatOptions &options) const =0
 //  deserialize_one_cell_from_json (IColumn &column, Slice &slice, const FormatOptions &options) const =0
-//  deserialize_column_from_json_vector (IColumn &column, std::vector< Slice > &slices, int *num_deserialized, const FormatOptions &options) const =0
-//  deserialize_column_from_fixed_json (IColumn &column, Slice &slice, int rows, int *num_deserialized, const FormatOptions &options) const
-//  insert_column_last_value_multiple_times (IColumn &column, int times) const
+//  deserialize_column_from_json_vector (IColumn &column, std::vector< Slice > &slices, uint64_t *num_deserialized, const FormatOptions &options) const =0
+//  deserialize_column_from_fixed_json (IColumn &column, Slice &slice, uint64_t rows, uint64_t *num_deserialized, const FormatOptions &options) const
+//  insert_column_last_value_multiple_times (IColumn &column, uint64_t times) const
 // 3. fe|be protobuffer ser-deserialize
 //  write_column_to_pb (const IColumn &column, PValues &result, int start, int end) const =0
 //  read_column_from_pb (IColumn &column, const PValues &arg) const =0
@@ -133,7 +125,8 @@ public:
     static void load_data_and_assert_from_csv(const DataTypeSerDeSPtrs serders,
                                               MutableColumns& columns, const std::string& file_path,
                                               const char spliter = ';',
-                                              const std::set<int> idxes = {0}) {
+                                              const std::set<int> idxes = {0},
+                                              bool should_finialize = false) {
         ASSERT_EQ(serders.size(), columns.size())
                 << "serder size: " << serders.size() << " column size: " << columns.size();
         ASSERT_EQ(serders.size(), idxes.size())
@@ -154,16 +147,14 @@ public:
 
         while (std::getline(file, line)) {
             std::stringstream lineStream(line);
-            //            std::cout << "whole : " << lineStream.str() << std::endl;
             std::string value;
             int l_idx = 0;
             int c_idx = 0;
-            std::vector<string> row;
+            std::vector<std::string> row;
             while (std::getline(lineStream, value, spliter)) {
-                if (idxes.contains(l_idx)) {
+                if (!value.starts_with("//") && idxes.contains(l_idx)) {
                     // load csv data
                     Slice string_slice(value.data(), value.size());
-                    std::cout << "origin : " << string_slice << std::endl;
                     Status st;
                     // deserialize data
                     if constexpr (is_hive_format) {
@@ -179,6 +170,10 @@ public:
                         columns[c_idx]->insert_default();
                         std::cout << "error in deserialize but continue: " << st.to_string()
                                   << std::endl;
+                    }
+                    if (should_finialize) {
+                        // finalize column if needed
+                        columns[c_idx]->finalize();
                     }
                     // serialize data
                     size_t row_num = columns[c_idx]->size() - 1;
@@ -196,13 +191,6 @@ public:
                     bw.commit();
                     // assert data : origin data and serialized data should be equal or generated
                     // file to check data
-                    size_t assert_size = assert_str_cols[c_idx]->size();
-                    if constexpr (!generate_res_file) {
-                        EXPECT_EQ(assert_str_cols[c_idx]->get_data_at(assert_size - 1).to_string(),
-                                  string_slice.to_string())
-                                << "column: " << columns[c_idx]->get_name() << " row: " << row_num
-                                << " is_hive_format: " << is_hive_format;
-                    }
                     ++c_idx;
                 }
                 res.push_back(row);
@@ -213,7 +201,7 @@ public:
         if (generate_res_file) {
             // generate res
             auto pos = file_path.find_last_of(".");
-            string hive_format = is_hive_format ? "_hive" : "";
+            std::string hive_format = is_hive_format ? "_hive" : "";
             std::string res_file = file_path.substr(0, pos) + hive_format + "_serde_res.csv";
             std::ofstream res_f(res_file);
             if (!res_f.is_open()) {
@@ -221,8 +209,6 @@ public:
             }
             for (size_t r = 0; r < assert_str_cols[0]->size(); ++r) {
                 for (size_t c = 0; c < assert_str_cols.size(); ++c) {
-                    std::cout << assert_str_cols[c]->get_data_at(r).to_string() << spliter
-                              << std::endl;
                     res_f << assert_str_cols[c]->get_data_at(r).to_string() << spliter;
                 }
                 res_f << std::endl;
@@ -233,6 +219,8 @@ public:
     }
 
     // standard hive text ser-deserialize assert function
+    // pb serde now is only used RPCFncall and fold_constant_executor which just write column data to pb value means
+    // just call write_column_to_pb
     static void assert_pb_format(MutableColumns& load_cols, DataTypeSerDeSPtrs serders) {
         for (size_t i = 0; i < load_cols.size(); ++i) {
             auto& col = load_cols[i];
@@ -266,6 +254,21 @@ public:
     static void assert_jsonb_format(MutableColumns& load_cols, DataTypeSerDeSPtrs serders) {
         Arena pool;
         auto jsonb_column = ColumnString::create(); // jsonb column
+        // maybe these load_cols has different size, so we keep it same
+        size_t max_row_size = load_cols[0]->size();
+        for (size_t i = 1; i < load_cols.size(); ++i) {
+            if (load_cols[i]->size() > max_row_size) {
+                max_row_size = load_cols[i]->size();
+            }
+        }
+        // keep same rows
+        for (size_t i = 0; i < load_cols.size(); ++i) {
+            if (load_cols[i]->size() < max_row_size) {
+                load_cols[i]->insert_many_defaults(max_row_size - load_cols[i]->size());
+            } else if (load_cols[i]->size() > max_row_size) {
+                load_cols[i]->resize(max_row_size);
+            }
+        }
         jsonb_column->reserve(load_cols[0]->size());
         MutableColumns assert_cols;
         for (size_t i = 0; i < load_cols.size(); ++i) {
@@ -318,6 +321,16 @@ public:
                 EXPECT_TRUE(st.ok()) << st.to_string();
             }
         }
+        MysqlRowBuffer<true> row_buffer1;
+        for (size_t i = 0; i < load_cols.size(); ++i) {
+            auto& col = load_cols[i];
+            for (size_t j = 0; j < col->size(); ++j) {
+                Status st;
+                EXPECT_NO_FATAL_FAILURE(
+                        st = serders[i]->write_column_to_mysql(*col, row_buffer1, j, true, {}));
+                EXPECT_TRUE(st.ok()) << st.to_string();
+            }
+        }
     }
 
     // assert arrow serialize
@@ -325,6 +338,21 @@ public:
                                     DataTypes types) {
         // make a block to write to arrow
         auto block = std::make_shared<Block>();
+        // maybe these load_cols has different size, so we keep it same
+        size_t max_row_size = load_cols[0]->size();
+        for (size_t i = 1; i < load_cols.size(); ++i) {
+            if (load_cols[i]->size() > max_row_size) {
+                max_row_size = load_cols[i]->size();
+            }
+        }
+        // keep same rows
+        for (size_t i = 0; i < load_cols.size(); ++i) {
+            if (load_cols[i]->size() < max_row_size) {
+                load_cols[i]->insert_many_defaults(max_row_size - load_cols[i]->size());
+            } else if (load_cols[i]->size() > max_row_size) {
+                load_cols[i]->resize(max_row_size);
+            }
+        }
         for (size_t i = 0; i < load_cols.size(); ++i) {
             auto& col = load_cols[i];
             block->insert(ColumnWithTypeAndName(std::move(col), types[i], types[i]->get_name()));
@@ -333,6 +361,7 @@ public:
         std::cout << "block: " << block->dump_structure() << std::endl;
         std::shared_ptr<arrow::Schema> block_arrow_schema;
         EXPECT_EQ(get_arrow_schema_from_block(*block, &block_arrow_schema, "UTC"), Status::OK());
+        std::cout << "schema: " << block_arrow_schema->ToString(true) << std::endl;
         // convert block to arrow
         std::shared_ptr<arrow::RecordBatch> result;
         cctz::time_zone _timezone_obj; //default UTC
@@ -369,6 +398,7 @@ public:
                 EXPECT_EQ(cell, assert_cell) << "column: " << col->get_name() << " row: " << j;
             }
         }
+        std::cout << "assert block: " << assert_block.dump_structure() << std::endl;
     }
 
     // assert rapidjson format

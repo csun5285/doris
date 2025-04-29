@@ -344,7 +344,7 @@ public:
                     assert_callback) {
         for (auto& col : load_cols) {
             // Create a column to verify `insert_many_strings_overflow` functionality
-            if (!is_column<ColumnString>(*col)) {
+            if (!check_column<ColumnString>(*col)) {
                 // just expect throw exception as not support
                 EXPECT_ANY_THROW(col->insert_many_strings_overflow(nullptr, 0, 0));
             } else {
@@ -652,7 +652,7 @@ public:
                         // insert_range_from now we have no any exception error data to handle, so here will meet crash
                         continue;
                     } else if (*pos + *cl > source_column->size()) {
-                        if (is_column<ColumnArray>(
+                        if (check_column<ColumnArray>(
                                     remove_nullable(source_column->assume_mutable()).get())) {
                             // insert_range_from in array has DCHECK_LG
                             continue;
@@ -2384,7 +2384,7 @@ public:
             LOG(INFO) << "now we are in convert_to_full_column_if_const column : "
                       << load_cols[i]->get_name() << " for column size : " << source_column->size();
             auto ptr = source_column->convert_to_full_column_if_const();
-            if (is_column<ColumnConst>(*source_column)) {
+            if (check_column<ColumnConst>(*source_column)) {
                 // now we should check the ptr is not the same with source_column,we create a new column for the const column
                 EXPECT_NE(ptr.get(), source_column.get());
                 assert_func(ptr);
@@ -2499,7 +2499,7 @@ public:
             auto& source_column = load_cols[i];
             LOG(INFO) << "now we are in column_nullable_funcs column : " << load_cols[i]->get_name()
                       << " for column size : " << source_column->size();
-            if (source_column->is_nullable() || is_column<ColumnConst>(*source_column)) {
+            if (source_column->is_nullable() || check_column<ColumnConst>(*source_column)) {
                 if (source_column->size() == 1 && source_column->is_null_at(0)) {
                     EXPECT_EQ(source_column->only_null(), true);
                     EXPECT_EQ(source_column->has_null(), true);
@@ -2519,10 +2519,10 @@ public:
             auto& source_column = load_cols[i];
             LOG(INFO) << "now we are in column_string_funcs column : " << load_cols[i]->get_name()
                       << " for column size : " << source_column->size();
-            if (is_column<ColumnString>(*source_column)) {
+            if (check_column<ColumnString>(*source_column)) {
                 EXPECT_EQ(source_column->is_column_string(), true);
                 EXPECT_EQ(source_column->is_column_string64(), false);
-            } else if (is_column<ColumnString64>(*source_column)) {
+            } else if (check_column<ColumnString64>(*source_column)) {
                 EXPECT_EQ(source_column->is_column_string(), false);
                 EXPECT_EQ(source_column->is_column_string64(), true);
             } else {
@@ -2538,36 +2538,6 @@ public:
     //    eg. column_desc: char(6), insert into char(3), the char(3) will padding the 3 zeros at the end for writing to disk.
     //       but we select should just print the char(3) without the padding zeros
     //  limit and topN operation will trigger this function call
-    void shrink_padding_chars_callback(MutableColumns& load_cols, DataTypeSerDeSPtrs serders) {
-        auto option = DataTypeSerDe::FormatOptions();
-        std::vector<std::vector<string>> res;
-        for (size_t i = 0; i < load_cols.size(); i++) {
-            auto& source_column = load_cols[i];
-            LOG(INFO) << "now we are in shrink_padding_chars column : " << load_cols[i]->get_name()
-                      << " for column size : " << source_column->size();
-            source_column->shrink_padding_chars();
-            // check after get_shrinked_column: 1 in selector present the load cols data is selected and data should be default value
-            auto ser_col = ColumnString::create();
-            ser_col->reserve(source_column->size());
-            VectorBufferWriter buffer_writer(*ser_col.get());
-            std::vector<string> data;
-            data.push_back("column: " + source_column->get_name() +
-                           " with shrinked column size: " + std::to_string(source_column->size()));
-            for (size_t j = 0; j < source_column->size(); ++j) {
-                if (auto st = serders[i]->serialize_one_cell_to_json(*source_column, j,
-                                                                     buffer_writer, option);
-                    !st) {
-                    LOG(ERROR) << "Failed to serialize column " << i << " at row " << j;
-                    break;
-                }
-                buffer_writer.commit();
-                std::string actual_str_value = ser_col->get_data_at(j).to_string();
-                data.push_back(actual_str_value);
-            }
-            res.push_back(data);
-        }
-        check_res_file("shrink_padding_chars", res);
-    }
 
     void assert_size_eq(MutableColumnPtr col, size_t expect_size) {
         EXPECT_EQ(col->size(), expect_size);
@@ -2757,7 +2727,9 @@ auto assert_column_vector_update_hashes_with_value_callback = [](const MutableCo
             res.push_back(data);
         }
         std::string file_name = res_file_path.empty() ? "update_hashes_with_value" : res_file_path;
-        file_name += with_nullmap ? "_with_nullmap" : "";
+        if (with_nullmap) {
+            file_name.replace(file_name.rfind(".out"), 4, "_with_nullmap.out");
+        }
         check_or_generate_res_file(file_name, res);
     };
     test_func(false);
@@ -2799,7 +2771,9 @@ auto assert_column_vector_update_crc_hashes_callback = [](const MutableColumns& 
             res.push_back(data);
         }
         std::string file_name = res_file_path.empty() ? "update_crcs_hashes" : res_file_path;
-        file_name += with_nullmap ? "_with_nullmap" : "";
+        if (with_nullmap) {
+            file_name.replace(file_name.rfind(".out"), 4, "_with_nullmap.out");
+        }
         check_or_generate_res_file(file_name, res);
     };
     test_func(false);
@@ -2865,7 +2839,9 @@ auto assert_update_xxHash_with_value_callback = [](const MutableColumns& load_co
             res.push_back(data);
         }
         std::string file_name = res_file_path.empty() ? "update_xxHash_with_value" : res_file_path;
-        file_name += with_nullmap ? "_with_nullmap" : "";
+        if (with_nullmap) {
+            file_name.replace(file_name.rfind(".out"), 4, "_with_nullmap.out");
+        }
         check_or_generate_res_file(file_name, res);
     };
     test_func(false);
@@ -2906,7 +2882,9 @@ auto assert_update_crc_with_value_callback = [](const MutableColumns& load_cols,
             res.push_back(data);
         }
         std::string file_name = res_file_path.empty() ? "update_crc_with_value" : res_file_path;
-        file_name += with_nullmap ? "_with_nullmap" : "";
+        if (with_nullmap) {
+            file_name.replace(file_name.rfind(".out"), 4, "_with_nullmap.out");
+        }
         check_or_generate_res_file(file_name, res);
     };
     test_func(false);
@@ -2930,7 +2908,9 @@ auto assert_byte_size_with_file_callback = [](const MutableColumns& load_cols,
             res.push_back(data);
         }
         std::string file_name = res_file_path.empty() ? "_byte_size" : res_file_path;
-        file_name += with_nullmap ? "_with_nullmap" : "";
+        if (with_nullmap) {
+            file_name.replace(file_name.rfind(".out"), 4, "_with_nullmap.out");
+        }
         check_or_generate_res_file(file_name, res);
     };
     test_func(false);
@@ -2954,7 +2934,9 @@ auto assert_allocated_bytes_with_file_callback = [](const MutableColumns& load_c
             res.push_back(data);
         }
         std::string file_name = res_file_path.empty() ? "_allocate_size" : res_file_path;
-        file_name += with_nullmap ? "_with_nullmap" : "";
+        if (with_nullmap) {
+            file_name.replace(file_name.rfind(".out"), 4, "_with_nullmap.out");
+        }
         check_or_generate_res_file(file_name, res);
     };
     test_func(false);
