@@ -110,8 +110,8 @@ public:
         std::shared_ptr<roaring::Roaring> roaring = std::make_shared<roaring::Roaring>();
 
         std::unique_ptr<InvertedIndexQueryParamFactory> query_param = nullptr;
-        RETURN_IF_ERROR(
-                InvertedIndexQueryParamFactory::create_query_value<Type>(&_value, query_param));
+        RETURN_IF_ERROR(InvertedIndexQueryParamFactory::create_query_value<Type>((const T*)&_value,
+                                                                                 query_param));
         RETURN_IF_ERROR(iterator->read_from_inverted_index(name_with_type, query_param->get_value(),
                                                            query_type, num_rows, roaring));
 

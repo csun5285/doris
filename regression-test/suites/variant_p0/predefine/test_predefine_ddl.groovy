@@ -271,10 +271,9 @@ suite("test_predefine_ddl", "p0"){
         BUCKETS 1 PROPERTIES ( "replication_allocation" = "tag.location.default: 1", "disable_auto_compaction" = "true")"""
     } catch (Exception e) {
         log.info(e.getMessage())
-        assertTrue(e.getMessage().contains("is not supported for inverted index"))
         findException = true
     }
-    assertTrue(findException)
+    assertFalse(findException)
 
     findException = false
     try {

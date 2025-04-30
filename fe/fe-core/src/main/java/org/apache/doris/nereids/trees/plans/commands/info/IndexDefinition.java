@@ -106,7 +106,7 @@ public class IndexDefinition {
         return columnType.isDateLikeType() || columnType.isDecimalLikeType()
                 || columnType.isIntegralType() || columnType.isStringLikeType()
                 || columnType.isBooleanType() || columnType.isVariantType()
-                || columnType.isIPType();
+                || columnType.isIPType() || columnType.isFloatType() || columnType.isDoubleType();
     }
 
     /**
@@ -120,9 +120,7 @@ public class IndexDefinition {
             String indexColName = column.getName();
             caseSensitivityCols.add(indexColName);
             DataType colType = column.getType();
-            if (!(colType.isDateLikeType() || colType.isDecimalLikeType() || colType.isArrayType()
-                    || colType.isIntegralType() || colType.isStringLikeType()
-                    || colType.isBooleanType() || colType.isVariantType() || colType.isIPType())) {
+            if (!isSupportIdxType(colType)) {
                 // TODO add colType.isAggState()
                 throw new AnalysisException(colType + " is not supported in " + indexType.toString()
                         + " index. " + "invalid index: " + name);
