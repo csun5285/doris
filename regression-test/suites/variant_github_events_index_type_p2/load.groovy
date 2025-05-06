@@ -39,52 +39,6 @@ suite("test_variant_github_events_index_type_p2", "nonConcurrent,p2"){
         assertTrue(useTime <= OpTimeout, "wait_for_latest_op_on_table_finish timeout")
     }
 
-    def wait_for_build_index_on_partition_finish = { table_name, OpTimeout ->
-        for(int t = delta_time; t <= OpTimeout; t += delta_time){
-            alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}";"""
-            def expected_finished_num = alter_res.size();
-            def finished_num = 0;
-            for (int i = 0; i < expected_finished_num; i++) {
-                logger.info(table_name + " build index job state: " + alter_res[i][7] + i)
-                if (alter_res[i][7] == "FINISHED") {
-                    ++finished_num;
-                }
-            }
-            if (finished_num == expected_finished_num) {
-                sleep(10000) // wait change table state to normal
-                logger.info(table_name + " all build index jobs finished, detail: " + alter_res)
-                break
-            }
-            useTime = t
-            sleep(delta_time)
-        }
-        assertTrue(useTime <= OpTimeout, "wait_for_latest_build_index_on_partition_finish timeout")
-    }
-
-    def wait_for_last_build_index_on_table_finish = { table_name, OpTimeout ->
-        for(int t = delta_time; t <= OpTimeout; t += delta_time){
-            alter_res = sql """SHOW BUILD INDEX WHERE TableName = "${table_name}" ORDER BY JobId """
-
-            if (alter_res.size() == 0) {
-                logger.info(table_name + " last index job finished")
-                return "SKIPPED"
-            }
-            if (alter_res.size() > 0) {
-                def last_job_state = alter_res[alter_res.size()-1][7];
-                if (last_job_state == "FINISHED" || last_job_state == "CANCELLED") {
-                    sleep(10000) // wait change table state to normal
-                    logger.info(table_name + " last index job finished, state: " + last_job_state + ", detail: " + alter_res)
-                    return last_job_state;
-                }
-            }
-            useTime = t
-            sleep(delta_time)
-        }
-        logger.info("wait_for_last_build_index_on_table_finish debug: " + alter_res)
-        assertTrue(useTime <= OpTimeout, "wait_for_last_build_index_on_table_finish timeout")
-        return "wait_timeout"
-    }
-
     def load_json_data = {table_name, file_name ->
         // load the json data
         streamLoad {

@@ -285,8 +285,6 @@ public abstract class Type {
         variantSubTypes.add(DATETIMEV2);
         variantSubTypes.add(IPV4);
         variantSubTypes.add(IPV6);
-        variantSubTypes.add(CHAR);
-        variantSubTypes.add(VARCHAR);
         variantSubTypes.add(STRING);
         variantSubTypes.add(ARRAY);
         variantSubTypes.add(NULL);

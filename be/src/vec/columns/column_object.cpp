@@ -1141,6 +1141,7 @@ void ColumnObject::insert_range_from(const IColumn& src, size_t start, size_t le
             DCHECK(subcolumn != nullptr);
             subcolumn->insert_range_from(entry->data, start, length);
         } else {
+            CHECK(!entry->path.get_is_typed());
             src_path_and_subcoumn_for_sparse_column.emplace(entry->path.get_path(), entry->data);
         }
         ++idx_hint;
@@ -1945,6 +1946,7 @@ Status ColumnObject::pick_subcolumns_to_sparse_column(
         } else if (none_null_value_sizes.find(entry->path.get_path()) !=
                    none_null_value_sizes.end()) {
             VLOG_DEBUG << "pick " << entry->path.get_path() << " as sparse column";
+            CHECK(!entry->path.get_is_typed());
             remaing_subcolumns.emplace(entry->path.get_path(), entry->data);
         }
     }

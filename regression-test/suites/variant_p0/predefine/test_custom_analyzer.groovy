@@ -21,6 +21,8 @@ suite("test_variant_custom_analyzer", "p0") {
     def indexTbName1 = "test_custom_analyzer_1"
     def indexTbName2 = "test_custom_analyzer_2"
     def indexTbName3 = "test_custom_analyzer_3"
+    sql "set global_variant_max_subcolumns_count = 100"
+    sql """ set enable_match_without_inverted_index = false """
 
     sql """
         CREATE INVERTED INDEX TOKENIZER IF NOT EXISTS edge_ngram_phone_number_tokenizer
@@ -69,7 +71,7 @@ suite("test_variant_custom_analyzer", "p0") {
         );
     """
 
-    // sql """ select sleep(10) """
+    sql """ select sleep(10) """
 
     qt_tokenize_sql """ select tokenize("Србија Херцеговина Щучин гурзуф  Ψ4  Босна", '"analyzer"="keyword_lowercase"'); """
     qt_tokenize_sql """ select tokenize("Wasted…Again", '"analyzer"="keyword_lowercase"'); """

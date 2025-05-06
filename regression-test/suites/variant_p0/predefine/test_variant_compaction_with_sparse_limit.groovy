@@ -131,9 +131,9 @@ suite("test_compaction_variant_predefine_with_sparse_limit", "nonConcurrent") {
             insert2.call();
             trigger_and_wait_compaction(tableName, "cumulative")
             sql "set topn_opt_limit_threshold = 1"
-            qt_sql "select * from ${tableName} order by k limit 5;"
+            order_qt_select "select * from ${tableName} order by k, cast(v as string) limit 5;"
             sql "set topn_opt_limit_threshold = 10"
-            qt_sql "select * from ${tableName} order by k limit 5;"
+            order_qt_select "select * from ${tableName} order by k, cast(v as string) limit 5;"
         }
     } finally {
         // set back to default

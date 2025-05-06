@@ -106,7 +106,7 @@ suite("regression_test_variant_predefine_schema", "p0"){
                 'ipv6_':ipv6,
                 'float_':float,
                 'boolean_':boolean,
-                'varchar_':varchar
+                'varchar_': text
             > NULL
         ) ENGINE=OLAP DUPLICATE KEY(`id`) DISTRIBUTED BY HASH(`id`) BUCKETS 2
         PROPERTIES ( "replication_allocation" = "tag.location.default: 1", "variant_max_subcolumns_count" = "${count}");

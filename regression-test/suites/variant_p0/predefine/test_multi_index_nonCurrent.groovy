@@ -227,7 +227,7 @@ suite("test_variant_multi_index_nonCurrent", "p0, nonConcurrent") {
                 'ipv4_*':ipv4,
                 'ipv6_*':ipv6,
                 'largeint_*':largeint,
-                'char_*':varchar(30)
+                'char_*':text
             > NOT NULL,
         INDEX idx_a_b (var) USING INVERTED PROPERTIES("field_pattern"="array_decimal_*") COMMENT '',
         INDEX idx_a_c (var) USING INVERTED PROPERTIES("field_pattern"="array_ipv6_*") COMMENT '',
