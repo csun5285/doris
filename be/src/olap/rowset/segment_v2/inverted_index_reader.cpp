@@ -213,8 +213,14 @@ Status InvertedIndexReader::match_index_search(
             return Status::Error<ErrorCode::INVERTED_INDEX_INVALID_PARAMETERS>(
                     "query type " + query_type_to_string(query_type) + ", query is nullptr");
         }
-        query->add(query_info);
-        query->search(*term_match_bitmap);
+        {
+            SCOPED_RAW_TIMER(&stats->inverted_index_searcher_search_timer1);
+            query->add(query_info);
+        }
+        {
+            SCOPED_RAW_TIMER(&stats->inverted_index_searcher_search_timer2);
+            query->search(*term_match_bitmap);
+        }
     } catch (const CLuceneError& e) {
         return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>("CLuceneError occured: {}",
                                                                       e.what());
@@ -1132,8 +1138,24 @@ Status InvertedIndexIterator::read_from_inverted_index(
         }
     }
 
-    RETURN_IF_ERROR(reader->query(&_io_ctx, _stats, _runtime_state, name_with_type.first,
-                                  query_value, query_type, bit_map));
+    auto execute_query = [&]() {
+        return reader->query(&_io_ctx, _stats, _runtime_state, name_with_type.first, query_value,
+                             query_type, bit_map);
+    };
+
+    if (_runtime_state->query_options().enable_profile) {
+        InvertedIndexQueryStatistics query_stats;
+        {
+            SCOPED_RAW_TIMER(&query_stats.exec_time);
+            RETURN_IF_ERROR(execute_query());
+        }
+        query_stats.column_name = name_with_type.first;
+        query_stats.hit_rows = bit_map->cardinality();
+        _stats->inverted_index_stats.stats.emplace_back(query_stats);
+    } else {
+        RETURN_IF_ERROR(execute_query());
+    }
+
     return Status::OK();
 }
 

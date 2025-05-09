@@ -164,6 +164,10 @@ Status OlapScanLocalState::_init_profile() {
             ADD_TIMER(_segment_profile, "InvertedIndexSearcherOpenTime");
     _inverted_index_searcher_search_timer =
             ADD_TIMER(_segment_profile, "InvertedIndexSearcherSearchTime");
+    _inverted_index_searcher_search_timer1 =
+            ADD_TIMER(_segment_profile, "InvertedIndexSearcherSearchTime1");
+    _inverted_index_searcher_search_timer2 =
+            ADD_TIMER(_segment_profile, "InvertedIndexSearcherSearchTime2");
     _inverted_index_searcher_cache_hit_counter =
             ADD_COUNTER(_segment_profile, "InvertedIndexSearcherCacheHit", TUnit::UNIT);
     _inverted_index_searcher_cache_miss_counter =
@@ -218,6 +222,10 @@ Status OlapScanLocalState::_init_profile() {
     _segment_create_column_readers_timer =
             ADD_TIMER(_scanner_profile, "SegmentCreateColumnReadersTimer");
     _segment_load_index_timer = ADD_TIMER(_scanner_profile, "SegmentLoadIndexTimer");
+
+    _index_filter_profile = std::make_unique<RuntimeProfile>("IndexFilter");
+    _scanner_profile->add_child(_index_filter_profile.get(), true, nullptr);
+
     return Status::OK();
 }
 
