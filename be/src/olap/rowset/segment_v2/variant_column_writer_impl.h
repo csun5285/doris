@@ -65,9 +65,6 @@ public:
     Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows);
 
 private:
-    // subcolumn path from variant stats info to distinguish from sparse column
-    Status _get_subcolumn_paths_from_stats(std::set<std::string>& paths);
-
     Status _process_root_column(vectorized::ColumnObject* ptr,
                                 vectorized::OlapBlockDataConvertor* converter, size_t num_rows,
                                 int& column_id);

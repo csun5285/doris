@@ -168,9 +168,6 @@ VariantColumnWriterImpl::VariantColumnWriterImpl(const ColumnWriterOptions& opts
 }
 
 Status VariantColumnWriterImpl::init() {
-    // caculate stats info
-    std::set<std::string> subcolumn_paths;
-    RETURN_IF_ERROR(_get_subcolumn_paths_from_stats(subcolumn_paths));
     DCHECK(_tablet_column->variant_max_subcolumns_count() >= 0)
             << "max subcolumns count is: " << _tablet_column->variant_max_subcolumns_count();
     int count = _tablet_column->variant_max_subcolumns_count();
@@ -178,111 +175,10 @@ Status VariantColumnWriterImpl::init() {
         count = 0;
     }
     auto col = vectorized::ColumnObject::create(count);
-    if (_opts.rowset_ctx->write_type == DataWriteType::TYPE_SCHEMA_CHANGE) {
-        for (const auto& str_path : subcolumn_paths) {
-            DCHECK(col->add_sub_column(vectorized::PathInData(str_path), 0));
-        }
-    }
     _column = std::move(col);
     if (_tablet_column->is_nullable()) {
         _null_column = vectorized::ColumnUInt8::create(0);
     }
-    return Status::OK();
-}
-
-Status VariantColumnWriterImpl::_get_subcolumn_paths_from_stats(std::set<std::string>& paths) {
-    std::unordered_map<std::string, size_t> path_to_total_number_of_non_null_values;
-
-    // Merge and collect all stats info from all input rowsets/segments
-    for (RowsetReaderSharedPtr reader : _opts.input_rs_readers) {
-        SegmentCacheHandle segment_cache;
-        RETURN_IF_ERROR(SegmentLoader::instance()->load_segments(
-                std::static_pointer_cast<BetaRowset>(reader->rowset()), &segment_cache));
-        for (const auto& segment : segment_cache.get_segments()) {
-            ColumnReader* column_reader =
-                    DORIS_TRY(segment->get_column_reader(_tablet_column->unique_id()));
-            if (!column_reader) {
-                continue;
-            }
-            CHECK(column_reader->get_meta_type() == FieldType::OLAP_FIELD_TYPE_VARIANT);
-            const VariantStatistics* source_statistics =
-                    static_cast<const VariantColumnReader*>(column_reader)->get_stats();
-            if (!source_statistics) {
-                continue;
-            }
-            for (const auto& [path, size] : source_statistics->subcolumns_non_null_size) {
-                auto it = path_to_total_number_of_non_null_values.find(path);
-                if (it == path_to_total_number_of_non_null_values.end()) {
-                    it = path_to_total_number_of_non_null_values.emplace(path, 0).first;
-                }
-                it->second += size;
-            }
-            for (const auto& [path, size] : source_statistics->sparse_column_non_null_size) {
-                auto it = path_to_total_number_of_non_null_values.find(path);
-                if (it == path_to_total_number_of_non_null_values.end()) {
-                    it = path_to_total_number_of_non_null_values.emplace(path, 0).first;
-                }
-                it->second += size;
-            }
-        }
-    }
-
-    // Check if the number of all subcolumn paths exceeds the limit.
-    DCHECK(_tablet_column->variant_max_subcolumns_count() >= 0)
-            << "max subcolumns count is: " << _tablet_column->variant_max_subcolumns_count();
-    if (_tablet_column->variant_max_subcolumns_count() &&
-        path_to_total_number_of_non_null_values.size() >
-                _tablet_column->variant_max_subcolumns_count()) {
-        // Sort paths by total number of non null values.
-        std::vector<std::pair<size_t, std::string_view>> paths_with_sizes;
-        paths_with_sizes.reserve(path_to_total_number_of_non_null_values.size());
-        for (const auto& [path, size] : path_to_total_number_of_non_null_values) {
-            paths_with_sizes.emplace_back(size, path);
-        }
-        std::sort(paths_with_sizes.begin(), paths_with_sizes.end(), std::greater());
-        // Fill subcolumn_paths with first subcolumn paths in sorted list.
-        // reserve 1 for root column
-        for (const auto& [size, path] : paths_with_sizes) {
-            if (paths.size() < _tablet_column->variant_max_subcolumns_count()) {
-                VLOG_DEBUG << "pick " << path << " as subcolumn";
-                paths.emplace(path);
-            }
-            // // todo : Add all remaining paths into shared data statistics until we reach its max size;
-            // else if (new_statistics.sparse_data_paths_statistics.size() < Statistics::config::variant_max_sparse_column_statistics_size) {
-            //     new_statistics.sparse_data_paths_statistics.emplace(path, size);
-            // }
-        }
-        DBUG_EXECUTE_IF("variant_column_writer_impl._get_subcolumn_paths_from_stats", {
-            auto stats = DebugPoints::instance()->get_debug_param_or_default<std::string>(
-                    "variant_column_writer_impl._get_subcolumn_paths_from_stats", "stats", "");
-            auto subcolumns = DebugPoints::instance()->get_debug_param_or_default<std::string>(
-                    "variant_column_writer_impl._get_subcolumn_paths_from_stats", "subcolumns", "");
-            LOG(INFO) << "stats: " << stats;
-            LOG(INFO) << "subcolumns: " << subcolumns;
-            if (stats.empty()) {
-                return Status::Error<ErrorCode::INTERNAL_ERROR>("debug point stats is empty");
-            }
-            std::vector<std::string> sizes;
-            boost::split(sizes, stats, boost::algorithm::is_any_of(","));
-            CHECK_EQ(sizes.size(), paths_with_sizes.size()) << "stats not match " << stats;
-            for (int i = 0; i < sizes.size(); ++i) {
-                CHECK_EQ(fmt::format("{}", paths_with_sizes[i].first), sizes[i]);
-            }
-            std::set<std::string> subcolumns_set;
-            boost::split(subcolumns_set, subcolumns, boost::algorithm::is_any_of(","));
-            if (!std::equal(paths.begin(), paths.end(), subcolumns_set.begin(),
-                            subcolumns_set.end())) {
-                CHECK(false) << "subcolumns not match " << subcolumns;
-            }
-        })
-    } else {
-        // Use all subcolumn paths from all source columns.
-        for (const auto& [path, _] : path_to_total_number_of_non_null_values) {
-            VLOG_DEBUG << "pick " << path << " as subcolumn";
-            paths.emplace(path);
-        }
-    }
-
     return Status::OK();
 }
 

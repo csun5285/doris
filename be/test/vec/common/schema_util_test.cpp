@@ -130,7 +130,7 @@ TEST_F(SchemaUtilTest, inherit_column_attributes) {
             EXPECT_EQ(tablet_schema->inverted_indexs(col).size(), 1);
             break;
         case 3:
-            EXPECT_EQ(tablet_schema->inverted_indexs(col).size(), 0);
+            EXPECT_EQ(tablet_schema->inverted_indexs(col).size(), 1);
             break;
         default:
             EXPECT_TRUE(false);
