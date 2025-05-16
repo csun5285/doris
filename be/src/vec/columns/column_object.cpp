@@ -276,8 +276,10 @@ void ColumnObject::Subcolumn::insert(Field field, FieldInfo info) {
             }
         }
     }
-
-    if (type_changed || info.need_convert) {
+    // 1. type changed means encounter different type, we need to convert it to the least common type
+    // 2. need_convert means the type is not the same as the least common type, we need to convert it
+    // 3. if the type is json and the column dimension is not 0, which means array<jsonb>, then we need to convert it to jsonb
+    if (type_changed || info.need_convert || (base_type.is_json() && value_dim > 0)) {
         Field new_field;
         convert_field_to_type(field, *least_common_type.get(), &new_field);
         field = new_field;
