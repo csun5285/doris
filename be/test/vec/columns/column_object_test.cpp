@@ -815,4 +815,25 @@ TEST(ColumnVariantTest, empty_inset_range_from) {
     }
 }
 
+TEST(ColumnVariantTest, insert_null_to_decimal_column) {
+    ColumnObject::Subcolumn subcolumn(0, true /* is_nullable */, false /* is_root */);
+    Field null_field;
+    subcolumn.insert(null_field);
+    subcolumn.finalize();
+    EXPECT_EQ(subcolumn.data.size(), 1);
+    EXPECT_EQ(subcolumn.data[0]->size(), 1);
+    EXPECT_EQ(subcolumn.data_types.size(), 1);
+    EXPECT_EQ(subcolumn.least_common_type.get_base_type_id(), TypeIndex::Nothing);
+    Field decimal_field(DecimalField<Decimal128V2>(10, 2));
+    subcolumn.insert(decimal_field);
+    subcolumn.finalize();
+    EXPECT_EQ(subcolumn.get_non_null_value_size(), 1);
+    EXPECT_EQ(subcolumn.data.size(), 1);
+    EXPECT_EQ(subcolumn.data[0]->size(), 2);
+    EXPECT_EQ(subcolumn.data[0]->is_null_at(0), true);
+    EXPECT_EQ(subcolumn.data[0]->is_null_at(1), false);
+    EXPECT_EQ(subcolumn.data_types.size(), 1);
+    EXPECT_EQ(subcolumn.least_common_type.get_base_type_id(), TypeIndex::Decimal128V2);
+}
+
 } // namespace doris::vectorized
