@@ -406,7 +406,8 @@ TEST_F(SchemaUtilRowsetTest, collect_path_stats_and_get_compaction_schema) {
     EXPECT_TRUE(schema_util::check_path_stats(rowsets, out_rowset, _tablet).ok());
 }
 
-TEST_F(SchemaUtilRowsetTest, typed_path) {
+TabletSchemaSPtr create_compaction_schema_common(StorageEngine* _engine_ref,
+                                                 std::string _absolute_dir) {
     all_path_stats.clear();
     // 1.create tablet schema
     TabletSchemaPB schema_pb;
@@ -420,7 +421,14 @@ TEST_F(SchemaUtilRowsetTest, typed_path) {
 
     // 2. create tablet
     TabletMetaSharedPtr tablet_meta(new TabletMeta(tablet_schema));
-    _tablet = std::make_shared<Tablet>(*_engine_ref, tablet_meta, _data_dir.get());
+    EXPECT_TRUE(io::global_local_filesystem()->delete_directory(_absolute_dir).ok());
+    EXPECT_TRUE(io::global_local_filesystem()->create_directory(_absolute_dir).ok());
+    std::unique_ptr<DataDir> _data_dir = std::make_unique<DataDir>(*_engine_ref, _absolute_dir);
+    static_cast<void>(_data_dir->update_capacity());
+    Status st1 = _data_dir->init(true);
+    EXPECT_TRUE(st1.ok()) << st1.msg();
+    std::shared_ptr<Tablet> _tablet =
+            std::make_shared<Tablet>(*_engine_ref, tablet_meta, _data_dir.get());
     EXPECT_TRUE(_tablet->init().ok());
     EXPECT_TRUE(io::global_local_filesystem()->create_directory(_tablet->tablet_path()).ok());
 
@@ -470,4 +478,55 @@ TEST_F(SchemaUtilRowsetTest, typed_path) {
         EXPECT_TRUE(paths[3].ends_with("key2"));
         EXPECT_TRUE(paths[4].ends_with("key3"));
     }
+    return compaction_schema;
+}
+
+TEST_F(SchemaUtilRowsetTest, typed_path) {
+    std::string absolute_dir = _curreent_dir + std::string("/ut_dir/schema_util_rows2");
+    TabletSchemaSPtr compaction_schema = create_compaction_schema_common(_engine_ref, absolute_dir);
+    // 6. create variantSubColumnWriter
+    // 6.1. Create file writer
+    io::FileWriterPtr file_writer;
+    string new_tablet_path = absolute_dir + "/tmp_data/";
+    EXPECT_TRUE(io::global_local_filesystem()->delete_directory(new_tablet_path).ok());
+    EXPECT_TRUE(io::global_local_filesystem()->create_directory(new_tablet_path).ok());
+    auto file_path = local_segment_path(new_tablet_path, "0", 0);
+    auto st1 = io::global_local_filesystem()->create_file(file_path, &file_writer);
+    EXPECT_TRUE(st1.ok()) << st1.msg();
+    SegmentFooterPB footer;
+    ColumnWriterOptions opts;
+    opts.meta = footer.add_columns();
+    opts.compression_type = CompressionTypePB::LZ4;
+    opts.file_writer = file_writer.get();
+    opts.footer = &footer;
+    RowsetWriterContext rowset_ctx;
+    rowset_ctx.write_type = DataWriteType::TYPE_COMPACTION;
+    opts.rowset_ctx = &rowset_ctx;
+    opts.rowset_ctx->tablet_schema = compaction_schema;
+    // create sub column with pathinfo
+    std::cout << compaction_schema->dump_structure() << std::endl;
+    // this is v1.key1
+    TabletColumn column = compaction_schema->column(2);
+    _init_column_meta(opts.meta, 0, column, CompressionTypePB::LZ4);
+    std::unique_ptr<ColumnWriter> writer;
+    EXPECT_TRUE(
+            ColumnWriter::create_variant_writer(opts, &column, file_writer.get(), &writer).ok());
+    EXPECT_TRUE(writer->init().ok());
+    EXPECT_TRUE(assert_cast<VariantSubcolumnWriter*>(writer.get()) != nullptr);
+    auto variant_subcolumn_writer = assert_cast<VariantSubcolumnWriter*>(writer.get());
+    // then we can do some thing for sub_writer
+    // estimate buffer size
+    auto size = variant_subcolumn_writer->estimate_buffer_size();
+    std::cout << "size: " << size << std::endl;
+    // append data
+    auto insert_object = ColumnObject::create(true);
+    fill_varaint_column(insert_object, 1, 1);
+    std::cout << insert_object->debug_string() << std::endl;
+    std::unique_ptr<VariantColumnData> _variant_column_data = std::make_unique<VariantColumnData>();
+    _variant_column_data->column_data = insert_object;
+    _variant_column_data->row_pos = 0;
+    const uint8_t* data = (const uint8_t*)_variant_column_data.get();
+    EXPECT_TRUE(variant_subcolumn_writer->append_data(&data, 1));
+    // write null data
+    EXPECT_TRUE(variant_subcolumn_writer->write_data().ok());
 }

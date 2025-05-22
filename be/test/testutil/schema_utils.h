@@ -25,12 +25,13 @@ class SchemaUtils {
 public:
     static void construct_column(ColumnPB* column_pb, int32_t col_unique_id,
                                  const std::string& column_type, const std::string& column_name,
-                                 int variant_max_subcolumns_count = 3, bool is_key = false) {
+                                 int variant_max_subcolumns_count = 3, bool is_key = false,
+                                 bool is_nullable = false) {
         column_pb->set_unique_id(col_unique_id);
         column_pb->set_name(column_name);
         column_pb->set_type(column_type);
         column_pb->set_is_key(is_key);
-        column_pb->set_is_nullable(false);
+        column_pb->set_is_nullable(is_nullable);
         if (column_type == "VARIANT") {
             column_pb->set_variant_max_subcolumns_count(variant_max_subcolumns_count);
         }

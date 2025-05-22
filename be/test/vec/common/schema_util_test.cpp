@@ -101,6 +101,120 @@ void construct_subcolumn(TabletSchemaSPtr schema, const FieldType& type, int32_t
 //     subcolumns->emplace_back(std::move(subcol));
 // }
 
+TEST_F(SchemaUtilTest, TestInheritIndex) {
+    // 1. Test basic index inheritance for non-extracted column
+    std::vector<const TabletIndex*> parent_indexes;
+    TabletIndexes subcolumns_indexes;
+
+    // Create parent index
+    TabletIndexPB pb1;
+    pb1.set_index_id(1);
+    pb1.set_index_name("test_index");
+    pb1.set_index_type(IndexType::INVERTED);
+
+    TabletIndex parent_index;
+    parent_index.init_from_pb(pb1);
+    parent_indexes.push_back(&parent_index);
+
+    // Test index inheritance for normal column (non-extracted)
+    TabletColumn normal_column;
+    normal_column.set_type(FieldType::OLAP_FIELD_TYPE_STRING);
+    normal_column.set_name("test_col");
+    normal_column.set_unique_id(1);
+
+    bool result = schema_util::inherit_index(parent_indexes, subcolumns_indexes, normal_column);
+    EXPECT_FALSE(result);
+
+    // 2. Test index inheritance for extracted column
+    TabletColumn extracted_column;
+    extracted_column.set_type(FieldType::OLAP_FIELD_TYPE_STRING);
+    extracted_column.set_name("extracted_col");
+    extracted_column.set_unique_id(2);
+    extracted_column.set_parent_unique_id(1); // Set parent column id
+    vectorized::PathInData path("parent.path");
+    extracted_column.set_path_info(path);
+
+    result = schema_util::inherit_index(parent_indexes, subcolumns_indexes, extracted_column);
+    EXPECT_TRUE(result);
+    EXPECT_EQ(subcolumns_indexes.size(), 1);
+    EXPECT_EQ(subcolumns_indexes[0]->index_id(), 1);
+    EXPECT_EQ(subcolumns_indexes[0]->index_name(), "test_index");
+    EXPECT_EQ(subcolumns_indexes[0]->index_type(), IndexType::INVERTED);
+
+    // 3. Test index inheritance for array type with empty subcolumns
+    TabletColumn empty_array_column;
+    empty_array_column.set_type(FieldType::OLAP_FIELD_TYPE_ARRAY);
+    empty_array_column.set_name("empty_array");
+    vectorized::PathInData pat("parent.a");
+    empty_array_column.set_path_info(pat);
+    empty_array_column.set_unique_id(3);
+    // No subcolumns added, so get_sub_columns() will be empty
+
+    result = schema_util::inherit_index(parent_indexes, subcolumns_indexes, empty_array_column);
+    EXPECT_FALSE(result);
+
+    // 4. Test index inheritance for array type with non-empty subcolumns
+    TabletColumn array_column;
+    array_column.set_type(FieldType::OLAP_FIELD_TYPE_ARRAY);
+    array_column.set_name("array_with_subcolumns");
+    array_column.set_unique_id(4);
+    array_column.set_parent_unique_id(1); // Set parent column id
+    vectorized::PathInData path1("parent.a");
+    array_column.set_path_info(path1);
+
+    // Add subcolumn to array
+    TabletColumn sub_column;
+    sub_column.set_type(FieldType::OLAP_FIELD_TYPE_INT);
+    sub_column.set_name("sub_col");
+    sub_column.set_unique_id(5);
+    array_column.add_sub_column(sub_column);
+
+    result = schema_util::inherit_index(parent_indexes, subcolumns_indexes, array_column);
+    EXPECT_TRUE(result);
+    EXPECT_EQ(subcolumns_indexes.size(), 1);
+    EXPECT_EQ(subcolumns_indexes[0]->index_id(), 1);
+    EXPECT_EQ(subcolumns_indexes[0]->index_name(), "test_index");
+    EXPECT_EQ(subcolumns_indexes[0]->index_type(), IndexType::INVERTED);
+
+    // 4.1 Add String subcolumn to array
+    TabletColumn array_column1;
+    array_column1.set_type(FieldType::OLAP_FIELD_TYPE_ARRAY);
+    array_column1.set_name("array_with_subcolumns");
+    array_column1.set_unique_id(4);
+    array_column1.set_parent_unique_id(1); // Set parent column id
+    array_column1.set_path_info(path1);
+    TabletColumn sub_column1;
+    sub_column1.set_type(FieldType::OLAP_FIELD_TYPE_STRING);
+    sub_column1.set_name("sub_col1");
+    sub_column1.set_unique_id(6);
+    array_column1.add_sub_column(sub_column1);
+    result = schema_util::inherit_index(parent_indexes, subcolumns_indexes, array_column1);
+    EXPECT_TRUE(result);
+    EXPECT_EQ(subcolumns_indexes.size(), 1);
+    EXPECT_EQ(subcolumns_indexes[0]->index_id(), 1);
+    EXPECT_EQ(subcolumns_indexes[0]->index_name(), "test_index");
+    EXPECT_EQ(subcolumns_indexes[0]->index_type(), IndexType::INVERTED);
+
+    // 5. Test empty parent index list
+    std::vector<const TabletIndex*> empty_indexes;
+    TabletIndexes empty_subcolumns_indexes;
+
+    result = schema_util::inherit_index(empty_indexes, empty_subcolumns_indexes, normal_column);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(empty_subcolumns_indexes.size(), 0);
+
+    // 6. Test binary Type
+    TabletColumn hll_column;
+    hll_column.set_type(FieldType::OLAP_FIELD_TYPE_HLL);
+    hll_column.set_name("hll_col");
+    hll_column.set_unique_id(7);
+    hll_column.set_parent_unique_id(1); // Set parent column id
+    vectorized::PathInData decimal_path("parent.hll");
+    hll_column.set_path_info(decimal_path);
+    result = schema_util::inherit_index(parent_indexes, subcolumns_indexes, hll_column);
+    EXPECT_FALSE(result);
+}
+
 TEST_F(SchemaUtilTest, inherit_column_attributes) {
     TabletSchemaPB schema_pb;
     schema_pb.set_keys_type(KeysType::DUP_KEYS);
@@ -851,6 +965,32 @@ TEST_F(SchemaUtilTest, TestCastColumnEdgeCases) {
     status = schema_util::cast_column(variant_col, variant_type, &result2);
     EXPECT_TRUE(status.ok());
     EXPECT_FALSE(result2->is_nullable());
+}
+
+TEST_F(SchemaUtilTest, TestCastColumnWithExecuteFailure) {
+    // Create a complex type to simple type conversion scenario, this conversion usually fails
+    auto complex_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeIPv4>());
+    auto simple_type = std::make_shared<DataTypeJsonb>();
+
+    // Insert some test dataset
+    auto nested_array =
+            ColumnArray::create(ColumnIPv4::create(), ColumnArray::ColumnOffsets::create());
+    nested_array->insert(Array(IPv4(1)));
+    nested_array->insert(Array(IPv4(2)));
+
+    ColumnWithTypeAndName src_col;
+    src_col.type = complex_type;
+    src_col.column = nested_array->get_ptr();
+    src_col.name = "array_col";
+
+    // Try converting to a simple type, which should fail and return the default value
+    ColumnPtr result;
+    auto status = schema_util::cast_column(src_col, simple_type, &result);
+
+    // Check result
+    EXPECT_TRUE(status.ok());
+    EXPECT_EQ(result->size(), 2);
+    EXPECT_EQ(result->get_data_at(0).size, 26);
 }
 
 TEST_F(SchemaUtilTest, TestGetColumnByTypeEdgeCases) {

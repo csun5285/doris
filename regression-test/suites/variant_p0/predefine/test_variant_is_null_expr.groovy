@@ -16,7 +16,7 @@
 // under the License.
 
 
-suite("test_variant_is_null_expr", "p0") {
+suite("test_variant_is_null_expr", "p0, nonConcurrent") {
     // define a sql table
     def testTable = "test_variant_is_null_expr"
 

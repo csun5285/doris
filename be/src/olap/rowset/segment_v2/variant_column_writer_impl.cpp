@@ -88,10 +88,6 @@ Status _create_column_writer(uint32_t cid, const TabletColumn& column,
     opt->need_bloom_filter = column.is_bf_column();
     opt->need_bitmap_index = column.has_bitmap_index();
     const auto& parent_index = tablet_schema->inverted_indexs(column.parent_unique_id());
-    VLOG_DEBUG << "column: " << column.name()
-               << " need_inverted_index: " << opt->need_inverted_index
-               << " need_bloom_filter: " << opt->need_bloom_filter
-               << " need_bitmap_index: " << opt->need_bitmap_index;
 
     // init inverted index
     // parent_index denotes the index of the entire variant column
@@ -135,7 +131,6 @@ Status _create_column_writer(uint32_t cid, const TabletColumn& column,
 
 #undef DISABLE_INDEX_IF_FIELD_TYPE
 
-#undef CHECK_FIELD_TYPE
     RETURN_IF_ERROR(ColumnWriter::create(*opt, &column, opt->file_writer, writer));
     RETURN_IF_ERROR((*writer)->init());
 
@@ -218,7 +213,6 @@ Status VariantColumnWriterImpl::_process_root_column(vectorized::ColumnObject* p
 
     _opts.meta->set_num_rows(num_rows);
     return Status::OK();
-    return Status::OK();
 }
 
 Status VariantColumnWriterImpl::_process_subcolumns(vectorized::ColumnObject* ptr,
@@ -299,21 +293,6 @@ Status VariantColumnWriterImpl::_process_subcolumns(vectorized::ColumnObject* pt
                 &opts, none_null_value_size));
         _subcolumn_writers.push_back(std::move(writer));
         _subcolumn_opts.push_back(opts);
-
-        // set convertors
-        // converter->add_column_data_convertor(tablet_column);
-        // RETURN_IF_ERROR(converter->set_source_content_with_specifid_column(
-        //         {entry->data.get_finalized_column_ptr()->get_ptr(),
-        //          entry->data.get_least_common_type(), tablet_column.name()},
-        //         0, num_rows, current_column_id));
-        // auto [status, column] = converter->convert_column_data(current_column_id);
-        // if (!status.ok()) {
-        //     return status;
-        // }
-        // const uint8_t* nullmap = column->get_nullmap();
-        // RETURN_IF_ERROR(_subcolumn_writers[current_column_id - 1]->append(
-        //         nullmap, column->get_data(), num_rows));
-        // converter->clear_source_content();
         _subcolumn_opts[current_column_id - 1].meta->set_num_rows(num_rows);
 
         RETURN_IF_ERROR(convert_and_write_column(converter, tablet_column, current_type,
@@ -501,9 +480,8 @@ Status VariantColumnWriterImpl::write_data() {
     return Status::OK();
 }
 Status VariantColumnWriterImpl::write_ordinal_index() {
-    if (!is_finalized()) {
-        RETURN_IF_ERROR(finalize());
-    }
+    // write ordinal index after data has been written which should be finalized
+    assert(is_finalized());
     RETURN_IF_ERROR(_root_writer->write_ordinal_index());
     for (auto& column_writer : _subcolumn_writers) {
         RETURN_IF_ERROR(column_writer->write_ordinal_index());
@@ -627,10 +605,6 @@ Status VariantSubcolumnWriter::finalize() {
 
     // refresh opts and get writer with flush column
     vectorized::schema_util::inherit_column_attributes(parent_column, flush_column);
-    VLOG_DEBUG << "parent_column: " << parent_column.name()
-               << " flush_column: " << flush_column.name()
-               << " is_bf_column: " << parent_column.is_bf_column() << " "
-               << flush_column.is_bf_column();
     RETURN_IF_ERROR(_create_column_writer(0, flush_column, _opts.rowset_ctx->tablet_schema,
                                           _opts.inverted_index_file_writer, &_writer, _indexes,
                                           &opts, none_null_value_size));
@@ -660,17 +634,13 @@ Status VariantSubcolumnWriter::write_data() {
     return Status::OK();
 }
 Status VariantSubcolumnWriter::write_ordinal_index() {
-    if (!is_finalized()) {
-        RETURN_IF_ERROR(finalize());
-    }
+    assert(is_finalized());
     RETURN_IF_ERROR(_writer->write_ordinal_index());
     return Status::OK();
 }
 
 Status VariantSubcolumnWriter::write_zone_map() {
-    if (!is_finalized()) {
-        RETURN_IF_ERROR(finalize());
-    }
+    assert(is_finalized());
     if (_opts.need_zone_map) {
         RETURN_IF_ERROR(_writer->write_zone_map());
     }
@@ -681,18 +651,14 @@ Status VariantSubcolumnWriter::write_bitmap_index() {
     return Status::OK();
 }
 Status VariantSubcolumnWriter::write_inverted_index() {
-    if (!is_finalized()) {
-        RETURN_IF_ERROR(finalize());
-    }
+    assert(is_finalized());
     if (_opts.need_inverted_index) {
         RETURN_IF_ERROR(_writer->write_inverted_index());
     }
     return Status::OK();
 }
 Status VariantSubcolumnWriter::write_bloom_filter_index() {
-    if (!is_finalized()) {
-        RETURN_IF_ERROR(finalize());
-    }
+    assert(is_finalized());
     if (_opts.need_bloom_filter) {
         RETURN_IF_ERROR(_writer->write_bloom_filter_index());
     }
