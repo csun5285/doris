@@ -466,6 +466,11 @@ void SparseColumnExtractReader::_fill_path_column(vectorized::MutableColumnPtr& 
     if (dst->is_nullable()) {
         nullable_column = assert_cast<vectorized::ColumnNullable*>(dst.get());
     }
+
+    if (!check_and_get_column<vectorized::ColumnObject>(
+                vectorized::remove_nullable(dst->get_ptr()).get())) {
+        throw doris::Exception(doris::ErrorCode::INTERNAL_ERROR, "not a object column");
+    }
     vectorized::ColumnObject& var =
             nullable_column != nullptr
                     ? assert_cast<vectorized::ColumnObject&>(nullable_column->get_nested_column())
