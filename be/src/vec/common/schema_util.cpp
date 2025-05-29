@@ -48,6 +48,7 @@
 #include "olap/rowset/beta_rowset.h"
 #include "olap/rowset/rowset.h"
 #include "olap/rowset/rowset_fwd.h"
+#include "olap/rowset/segment_v2/variant_column_reader.h"
 #include "olap/rowset/segment_v2/variant_column_writer_impl.h"
 #include "olap/segment_loader.h"
 #include "olap/tablet.h"

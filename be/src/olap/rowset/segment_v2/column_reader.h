@@ -310,55 +310,6 @@ private:
     DorisCallOnce<Status> _set_dict_encoding_type_once;
 };
 
-class VariantColumnReader : public ColumnReader {
-public:
-    VariantColumnReader() = default;
-
-    Status init(const ColumnReaderOptions& opts, const SegmentFooterPB& footer, uint32_t column_id,
-                uint64_t num_rows, io::FileReaderSPtr file_reader);
-
-    Status new_iterator(ColumnIterator** iterator, const TabletColumn* col,
-                        const StorageReadOptions* opt) override;
-
-    const SubcolumnColumnReaders::Node* get_reader_by_path(
-            const vectorized::PathInData& relative_path) const;
-
-    ~VariantColumnReader() override = default;
-
-    FieldType get_meta_type() override { return FieldType::OLAP_FIELD_TYPE_VARIANT; }
-
-    const VariantStatistics* get_stats() const { return _statistics.get(); }
-
-    int64_t get_metadata_size() const override;
-
-    std::vector<const TabletIndex*> find_subcolumn_tablet_indexes(const std::string&);
-
-    bool exist_in_sparse_column(const vectorized::PathInData& path) const;
-
-    const SubcolumnColumnReaders* get_subcolumn_readers() const { return _subcolumn_readers.get(); }
-
-    std::vector<std::string> get_typed_paths() const;
-
-private:
-    // init for compaction read
-    Status _new_default_iter_with_same_nested(ColumnIterator** iterator, const TabletColumn& col);
-    Status _new_iterator_with_flat_leaves(ColumnIterator** iterator, const TabletColumn& col,
-                                          const StorageReadOptions* opts,
-                                          bool exceeded_sparse_column_limit,
-                                          bool existed_in_sparse_column);
-
-    Status _create_hierarchical_reader(ColumnIterator** reader, vectorized::PathInData path,
-                                       const SubcolumnColumnReaders::Node* node,
-                                       const SubcolumnColumnReaders::Node* root);
-    Status _create_sparse_merge_reader(ColumnIterator** iterator, const StorageReadOptions* opts,
-                                       const TabletColumn& target_col, ColumnIterator* inner_iter);
-    std::unique_ptr<SubcolumnColumnReaders> _subcolumn_readers;
-    std::unique_ptr<ColumnReader> _sparse_column_reader;
-    std::unique_ptr<VariantStatistics> _statistics;
-    // key: subcolumn path, value: subcolumn indexes
-    std::unordered_map<std::string, TabletIndexes> _variant_subcolumns_indexes;
-};
-
 // Base iterator to read one column data
 class ColumnIterator {
 public:
@@ -702,41 +653,6 @@ private:
     int32_t _segment_id = 0;
 };
 
-class VariantRootColumnIterator : public ColumnIterator {
-public:
-    VariantRootColumnIterator() = delete;
-
-    explicit VariantRootColumnIterator(FileColumnIterator* iter) { _inner_iter.reset(iter); }
-
-    ~VariantRootColumnIterator() override = default;
-
-    Status init(const ColumnIteratorOptions& opts) override { return _inner_iter->init(opts); }
-
-    Status seek_to_first() override { return _inner_iter->seek_to_first(); }
-
-    Status seek_to_ordinal(ordinal_t ord_idx) override {
-        return _inner_iter->seek_to_ordinal(ord_idx);
-    }
-
-    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst) {
-        bool has_null;
-        return next_batch(n, dst, &has_null);
-    }
-
-    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst, bool* has_null) override;
-
-    Status read_by_rowids(const rowid_t* rowids, const size_t count,
-                          vectorized::MutableColumnPtr& dst) override;
-
-    ordinal_t get_current_ordinal() const override { return _inner_iter->get_current_ordinal(); }
-
-private:
-    Status _process_root_column(vectorized::MutableColumnPtr& dst,
-                                vectorized::MutableColumnPtr& root_column,
-                                const vectorized::DataTypePtr& most_common_type);
-    std::unique_ptr<FileColumnIterator> _inner_iter;
-};
-
 // This iterator is used to read default value column
 class DefaultValueColumnIterator : public ColumnIterator {
 public:
@@ -795,61 +711,6 @@ private:
     int _scale;
     std::vector<char> _mem_value;
 
-    // current rowid
-    ordinal_t _current_rowid = 0;
-};
-
-// This iterator is used to read default value column
-class DefaultNestedColumnIterator : public ColumnIterator {
-public:
-    DefaultNestedColumnIterator(std::unique_ptr<ColumnIterator>&& sibling,
-                                DataTypePtr file_column_type)
-            : _sibling_iter(std::move(sibling)), _file_column_type(std::move(file_column_type)) {}
-
-    Status init(const ColumnIteratorOptions& opts) override {
-        if (_sibling_iter) {
-            return _sibling_iter->init(opts);
-        }
-        return Status::OK();
-    }
-
-    Status seek_to_first() override {
-        _current_rowid = 0;
-        if (_sibling_iter) {
-            return _sibling_iter->seek_to_first();
-        }
-        return Status::OK();
-    }
-
-    Status seek_to_ordinal(ordinal_t ord_idx) override {
-        _current_rowid = ord_idx;
-        if (_sibling_iter) {
-            return _sibling_iter->seek_to_ordinal(ord_idx);
-        }
-        return Status::OK();
-    }
-
-    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst);
-
-    Status next_batch(size_t* n, vectorized::MutableColumnPtr& dst, bool* has_null) override;
-
-    Status read_by_rowids(const rowid_t* rowids, const size_t count,
-                          vectorized::MutableColumnPtr& dst) override;
-
-    Status next_batch_of_zone_map(size_t* n, vectorized::MutableColumnPtr& dst) override {
-        return Status::NotSupported("Not supported next_batch_of_zone_map");
-    }
-
-    ordinal_t get_current_ordinal() const override {
-        if (_sibling_iter) {
-            return _sibling_iter->get_current_ordinal();
-        }
-        return _current_rowid;
-    }
-
-private:
-    std::unique_ptr<ColumnIterator> _sibling_iter;
-    std::shared_ptr<const vectorized::IDataType> _file_column_type;
     // current rowid
     ordinal_t _current_rowid = 0;
 };

@@ -21,6 +21,7 @@
 
 #include "common/status.h"
 #include "olap/rowset/segment_v2/column_writer.h"
+#include "olap/rowset/segment_v2/variant_statistics.h"
 #include "olap/tablet_schema.h"
 #include "vec/columns/column.h"
 #include "vec/common/schema_util.h"
@@ -35,15 +36,6 @@ namespace segment_v2 {
 
 class ColumnWriter;
 class ScalarColumnWriter;
-
-struct VariantStatistics {
-    // If reached the size of this, we should stop writing statistics for sparse data
-    std::map<std::string, int64_t> subcolumns_non_null_size;
-    std::map<std::string, int64_t> sparse_column_non_null_size;
-
-    void to_pb(VariantStatisticsPB* stats) const;
-    void from_pb(const VariantStatisticsPB& stats);
-};
 
 class VariantColumnWriterImpl {
 public:

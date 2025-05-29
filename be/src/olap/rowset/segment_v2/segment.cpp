@@ -51,6 +51,7 @@
 #include "olap/rowset/segment_v2/segment_iterator.h"
 #include "olap/rowset/segment_v2/segment_writer.h" // k_segment_magic_length
 #include "olap/rowset/segment_v2/stream_reader.h"
+#include "olap/rowset/segment_v2/variant_column_reader.h"
 #include "olap/rowset/segment_v2/variant_column_writer_impl.h"
 #include "olap/schema.h"
 #include "olap/short_key_index.h"

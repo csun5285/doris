@@ -29,6 +29,8 @@ using namespace vectorized;
 
 class VariantUtil {
 public:
+    using VariantStringCreator = std::function<void(ColumnString*, size_t)>;
+
     static doris::vectorized::Field get_field(std::string_view type) {
         static std::unordered_map<std::string_view, doris::vectorized::Field> field_map;
         if (field_map.empty()) {
@@ -244,7 +246,7 @@ public:
             json_str += "\"key1\":{";
 
             json_str += "\"key2\":" + std::to_string(88) + ",";
-            json_str += "\"key3\":\"" + std::to_string(88) + "\"";
+            json_str += R"("key3":")" + std::to_string(88) + "\"";
             json_str += "},";
             json_str += "\"key4\":" + std::to_string(88);
             json_str += "},";
@@ -290,6 +292,59 @@ public:
         config.enable_flatten_nested = false;
         parse_json_to_variant(*column_object, *column_string, config);
         return res;
+    }
+
+    static void fill_string_column_with_nested_data(auto& column_string, int size) {
+        // insert some nested type test data to json string:  {"a" : {"b" : [{"c" : {"d" : 123, "e": "a@b"}}]}, "x": "y"}
+        // {"a" : {"b" : [{"f" : {"d" : 123, "e": "a@b"}}]}, "z": "y"}
+        // which
+        // nested node path  : a.b(NESTED),
+        // tablet_column path_info   : a.b.c.d(SCALAR)
+        // parent path node          : a.b.c(TUPLE)
+        // leaf path_info      : a.b.c.d(SCALAR)
+        for (int i = 0; i < size; ++i) {
+            std::string inserted_jsonstr = R"({"a": {"b": [{"c": {"d": )" + std::to_string(i) +
+                                           R"(, "e": ")" + std::to_string(i) + R"("}}]}, "x": ")" +
+                                           std::to_string(i) + R"("})";
+            // add some rand key for sparse column with 'a.b' prefix : {"a" : {"b" : [{"c" : {"d" : 123, "e": "a@b", "f": 111}}]}, "x": "y"}
+            if (i % 17 == 0) {
+                inserted_jsonstr = R"({"a": {"b": [{"c": {"d": )" + std::to_string(i) +
+                                   R"(, "e": ")" + std::to_string(i) + R"(", "f": )" +
+                                   std::to_string(i) + R"(}}]}, "x": ")" + std::to_string(i) +
+                                   R"("})";
+            }
+            // add some rand key for spare column without prefix: {"a" : {"b" : [{"c" : {"d" : 123, "e": "a@b", "f": 111}}]}, "x": "y", "z": 11}
+            if (i % 177 == 0) {
+                inserted_jsonstr = R"({"a": {"b": [{"c": {"d": )" + std::to_string(i) +
+                                   R"(, "e": ")" + std::to_string(i) + R"("}}]}, "x": ")" +
+                                   std::to_string(i) + R"(", "z": )" + std::to_string(i) + R"("})";
+            }
+            // insert json string to variant column
+            vectorized::Field str(inserted_jsonstr);
+            column_string->insert_data(inserted_jsonstr.data(), inserted_jsonstr.size());
+        }
+    }
+
+    static void fill_variant_column(auto& variant_column, int size, int uid,
+                                    bool has_nested = false,
+                                    VariantStringCreator* callback_variant_creator = nullptr) {
+        auto type_string = std::make_shared<vectorized::DataTypeString>();
+        auto column = type_string->create_column();
+        auto column_string = assert_cast<ColumnString*>(column.get());
+        if (callback_variant_creator != nullptr) {
+            (*callback_variant_creator)(column_string, size);
+        } else if (has_nested) {
+            fill_string_column_with_nested_data(column_string, size);
+        } else {
+            std::unordered_map<int, std::string> inserted_jsonstr;
+            fill_string_column_with_test_data(column_string, size, &inserted_jsonstr);
+            assert(inserted_jsonstr.size() == size);
+        }
+        assert(column_string->size() == size);
+        vectorized::ParseConfig config;
+        // do not treat array with jsonb field
+        config.enable_flatten_nested = has_nested;
+        parse_json_to_variant(*variant_column, *column_string, config);
     }
 
     static schema_util::PathToNoneNullValues fill_object_column_with_nested_test_data(

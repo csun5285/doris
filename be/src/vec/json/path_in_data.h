@@ -62,6 +62,7 @@ public:
     PathInData() = default;
     explicit PathInData(std::string_view path_, bool is_typed_ = false);
     explicit PathInData(const Parts& parts_);
+    explicit PathInData(std::string_view path_, const Parts& parts_, bool is_typed_ = false);
     explicit PathInData(const std::vector<std::string>& paths);
     explicit PathInData(const std::string& root, const std::vector<std::string>& paths);
     PathInData(const PathInData& other);
