@@ -18,7 +18,7 @@
 #include "gtest/gtest.h"
 #include "olap/rowset/segment_v2/column_reader.h"
 #include "olap/rowset/segment_v2/hierarchical_data_reader.h"
-#include "olap/rowset/segment_v2/variant_column_reader.h"
+#include "olap/rowset/segment_v2/variant/variant_column_reader.h"
 #include "olap/rowset/segment_v2/variant_column_writer_impl.h"
 #include "olap/storage_engine.h"
 #include "testutil/schema_utils.h"
