@@ -121,6 +121,7 @@ void RegexpQuery::collect_matching_terms(const std::wstring& field_name,
     };
 
     int32_t count = 0;
+    int32_t total_iterations = 0;
     Term* term = nullptr;
     TermEnum* enumerator = nullptr;
     try {
@@ -133,6 +134,7 @@ void RegexpQuery::collect_matching_terms(const std::wstring& field_name,
             enumerator->next();
         }
         do {
+            total_iterations++;
             term = enumerator->term();
             if (term != nullptr) {
                 std::string input = lucene_wcstoutf8string(term->text(), term->textLength());
@@ -169,6 +171,17 @@ void RegexpQuery::collect_matching_terms(const std::wstring& field_name,
         enumerator->close();
         _CLDELETE(enumerator);
     })
+
+    if (total_iterations > 100) {
+        if (prefix) {
+            LOG(INFO) << "Prefix scan exceeded 20 iterations: "
+                      << "prefix=" << *prefix << ", total_iterations=" << total_iterations
+                      << ", matched_terms=" << count;
+        } else {
+            LOG(INFO) << "Full dictionary scan exceeded 20 iterations: "
+                      << "total_iterations=" << total_iterations << ", matched_terms=" << count;
+        }
+    }
 }
 
 } // namespace doris::segment_v2
