@@ -55,6 +55,16 @@ struct ColumnWithTypeAndName;
 const std::string SPARSE_COLUMN_PATH = "__DORIS_VARIANT_SPARSE__";
 namespace doris::vectorized::schema_util {
 using PathToNoneNullValues = std::unordered_map<std::string, int64_t>;
+using PathToDataTypes = std::unordered_map<PathInData, std::vector<DataTypePtr>, PathInData::Hash>;
+
+struct VariantExtendedInfo {
+    PathToNoneNullValues path_to_none_null_values; // key: path, value: number of none null values
+    std::unordered_set<std::string> sparse_paths;  // sparse paths in this variant column
+    std::unordered_set<std::string> typed_paths;   // typed paths in this variant column
+    std::unordered_set<vectorized::PathInData, vectorized::PathInData::Hash>
+            nested_paths;               // nested paths in this variant column
+    PathToDataTypes path_to_data_types; // key: path, value: data types
+};
 
 /// Returns number of dimensions in Array type. 0 if type is not array.
 size_t get_number_of_dimensions(const IDataType& type);
@@ -131,15 +141,18 @@ bool has_schema_index_diff(const TabletSchema* new_schema, const TabletSchema* o
 TabletColumn create_sparse_column(const TabletColumn& variant);
 
 // get the subpaths and sparse paths for the variant column
-void get_subpaths(const TabletSchema& schema, int32_t col_unique_id,
-                  const std::unordered_map<int32_t, PathToNoneNullValues>& path_stats,
-                  std::unordered_map<int32_t, TabletSchema::PathsSetInfo>& uid_to_paths_set_info);
+void get_subpaths(int32_t max_subcolumns_count, const PathToNoneNullValues& path_stats,
+                  TabletSchema::PathsSetInfo& paths_set_info);
 
-// collect path stats from the rowset
-Status collect_path_stats(
+// collect extended info from the variant column
+Status aggregate_variant_extended_info(
         const RowsetSharedPtr& rs,
-        std::unordered_map<int32_t, PathToNoneNullValues>& uid_to_path_stats,
-        std::unordered_map<int32_t, std::unordered_set<std::string>>& uid_to_typed_paths);
+        std::unordered_map<int32_t, VariantExtendedInfo>* uid_to_variant_extended_info);
+
+// collect path stats from the variant column
+Status aggregate_path_to_stats(
+        const RowsetSharedPtr& rs,
+        std::unordered_map<int32_t, PathToNoneNullValues>* uid_to_path_stats);
 
 // Build the temporary schema for compaction, this will reduce the memory usage of compacting variant columns
 Status get_compaction_schema(const std::vector<RowsetSharedPtr>& rowsets, TabletSchemaSPtr& target);

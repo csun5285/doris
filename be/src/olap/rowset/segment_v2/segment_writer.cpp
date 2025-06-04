@@ -1326,8 +1326,9 @@ void SegmentWriter::_maybe_calculate_variant_stats(
         size_t id,  // id is the offset of the column in the block
         size_t cid, // cid is the column id in TabletSchema
         size_t row_pos, size_t num_rows) {
-    // Only process sparse columns during compaction
-    if (!_tablet_schema->columns()[cid]->is_sparse_column() ||
+    // Only process sub columns and sparse columns during compaction
+    if (_tablet_schema->need_record_variant_extended_schema() ||
+        !_tablet_schema->columns()[cid]->need_record_variant_stats_in_compaction() ||
         _opts.write_type != DataWriteType::TYPE_COMPACTION) {
         return;
     }
@@ -1339,18 +1340,32 @@ void SegmentWriter::_maybe_calculate_variant_stats(
     for (auto& column : *_footer.mutable_columns()) {
         // Check if this is the target sparse column
         if (!column.has_column_path_info() ||
-            !column.column_path_info().path().ends_with(SPARSE_COLUMN_PATH) ||
             column.column_path_info().parrent_column_unique_id() != parent_unique_id) {
             continue;
         }
 
-        // Found matching column, calculate statistics
-        auto* stats = column.mutable_variant_statistics();
-        vectorized::schema_util::calculate_variant_stats(*block->get_by_position(id).column, stats,
-                                                         row_pos, num_rows);
-
-        VLOG_DEBUG << "sparse stats columns " << stats->sparse_column_non_null_size_size();
-        break;
+        // sprse column from variant column
+        if (column.column_path_info().path().ends_with(SPARSE_COLUMN_PATH)) {
+            // Found matching column, calculate statistics
+            auto* stats = column.mutable_variant_statistics();
+            vectorized::schema_util::calculate_variant_stats(*block->get_by_position(id).column,
+                                                             stats, row_pos, num_rows);
+            VLOG_DEBUG << "sparse stats columns " << stats->sparse_column_non_null_size_size();
+            break;
+        }
+        // sub column from variant column
+        else if (column.column_path_info().path() ==
+                 _tablet_schema->columns()[cid]->path_info_ptr()->get_path()) {
+            const auto& null_data = assert_cast<const vectorized::ColumnNullable&>(
+                                            *block->get_by_position(id).column)
+                                            .get_null_map_data();
+            const int8_t* start = (int8_t*)null_data.data() + row_pos;
+            // none null size in block + current none null size
+            size_t res = simd::count_zero_num(start, num_rows) + column.none_null_size();
+            column.set_none_null_size(res);
+            VLOG_DEBUG << "none null size " << res << " path: " << column.column_path_info().path();
+            break;
+        }
     }
 }
 

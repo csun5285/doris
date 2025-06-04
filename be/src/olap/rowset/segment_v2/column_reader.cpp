@@ -616,14 +616,35 @@ std::vector<const TabletIndex*> VariantColumnReader::find_subcolumn_tablet_index
     return indexes;
 }
 
-std::vector<std::string> VariantColumnReader::get_typed_paths() const {
-    std::vector<std::string> typed_paths;
-    for (const auto& entry : *_subcolumn_readers) {
-        if (entry->path.get_is_typed()) {
-            typed_paths.push_back(entry->path.get_path());
+void VariantColumnReader::get_subcolumns_types(
+        std::unordered_map<vectorized::PathInData, vectorized::DataTypes,
+                           vectorized::PathInData::Hash>* subcolumns_types) const {
+    for (const auto& subcolumn_reader : *_subcolumn_readers) {
+        // no need typed path and root path
+        if (!subcolumn_reader->path.get_is_typed() && !subcolumn_reader->path.empty()) {
+            auto& path_types = (*subcolumns_types)[subcolumn_reader->path];
+            path_types.push_back(subcolumn_reader->data.file_column_type);
         }
     }
-    return typed_paths;
+}
+
+std::vector<std::string> VariantColumnReader::get_typed_paths(
+        std::unordered_set<std::string>* typed_paths) const {
+    for (const auto& entry : *_subcolumn_readers) {
+        if (entry->path.get_is_typed()) {
+            typed_paths->insert(entry->path.get_path());
+        }
+    }
+}
+
+void VariantColumnReader::get_nested_paths(
+        std::unordered_set<vectorized::PathInData, vectorized::PathInData::Hash>* nested_paths)
+        const {
+    for (const auto& entry : *_subcolumn_readers) {
+        if (entry->path.has_nested_part()) {
+            nested_paths->insert(entry->path);
+        }
+    }
 }
 
 Status ColumnReader::create_variant(const ColumnReaderOptions& opts, const SegmentFooterPB& footer,

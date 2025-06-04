@@ -198,6 +198,11 @@ public:
     bool is_decimal() const { return _is_decimal; }
     PatternTypePB pattern_type() const { return _pattern_type; }
 
+    bool need_record_variant_stats_in_compaction() const {
+        return is_extracted_column() && !_column_path->get_is_typed() &&
+               !_column_path->has_nested_part();
+    }
+
     Status check_valid() const {
         if (type() != FieldType::OLAP_FIELD_TYPE_ARRAY &&
             type() != FieldType::OLAP_FIELD_TYPE_STRUCT &&
@@ -609,9 +614,10 @@ public:
 
     // all path in path_set_info are relative to the parent column
     struct PathsSetInfo {
-        std::unordered_map<std::string, SubColumnInfo> typed_path_set; // typed columns
-        PathSet sub_path_set;                                          // extracted columns
-        PathSet sparse_path_set;                                       // sparse columns
+        std::unordered_map<std::string, SubColumnInfo> typed_path_set;    // typed columns
+        std::unordered_map<std::string, TabletIndexes> subcolumn_indexes; // subcolumns indexes
+        PathSet sub_path_set;                                             // extracted columns
+        PathSet sparse_path_set;                                          // sparse columns
     };
 
     const PathsSetInfo& path_set_info(int32_t unique_id) const {

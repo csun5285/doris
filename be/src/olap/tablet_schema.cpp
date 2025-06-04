@@ -1561,7 +1561,7 @@ std::vector<const TabletIndex*> TabletSchema::inverted_indexs(const TabletColumn
         return result;
     }
     // variant's typed column has it's own index
-    else if (col.is_extracted_column()) {
+    else if (col.is_extracted_column() && col.path_info_ptr()->get_is_typed()) {
         std::string relative_path = col.path_info_ptr()->copy_pop_front().get_path();
         if (_path_set_info_map.find(col_unique_id) == _path_set_info_map.end()) {
             return result;
@@ -1575,6 +1575,21 @@ std::vector<const TabletIndex*> TabletSchema::inverted_indexs(const TabletColumn
             result.push_back(index.get());
         }
         return result;
+    }
+    // variant's subcolumns has it's own index
+    else if (col.is_extracted_column()) {
+        std::string relative_path = col.path_info_ptr()->copy_pop_front().get_path();
+        if (_path_set_info_map.find(col_unique_id) == _path_set_info_map.end()) {
+            return result;
+        }
+        const auto& path_set_info = _path_set_info_map.at(col_unique_id);
+        if (path_set_info.subcolumn_indexes.find(relative_path) ==
+            path_set_info.subcolumn_indexes.end()) {
+            return result;
+        }
+        for (const auto& index : path_set_info.subcolumn_indexes.at(relative_path)) {
+            result.push_back(index.get());
+        }
     }
     return result;
 }

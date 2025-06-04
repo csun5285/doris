@@ -292,6 +292,7 @@ TEST_F(SchemaUtilRowsetTest, check_path_stats_agg_delete) {
 }
 
 TEST_F(SchemaUtilRowsetTest, collect_path_stats_and_get_compaction_schema) {
+    all_path_stats.clear();
     // 1.create tablet schema
     TabletSchemaPB schema_pb;
     construct_column(schema_pb.add_column(), 0, "INT", "key", true);
@@ -322,21 +323,26 @@ TEST_F(SchemaUtilRowsetTest, collect_path_stats_and_get_compaction_schema) {
     }
 
     std::unordered_map<int32_t, schema_util::PathToNoneNullValues> path_stats;
-    std::unordered_map<int32_t, std::unordered_set<std::string>> typed_paths;
     for (const auto& rowset : rowsets) {
-        auto st = schema_util::collect_path_stats(rowset, path_stats, typed_paths);
+        auto st = schema_util::aggregate_path_to_stats(rowset, &path_stats);
         EXPECT_TRUE(st.ok()) << st.msg();
     }
 
     for (const auto& [uid, path_stats] : path_stats) {
         for (const auto& [path, size] : path_stats) {
-            EXPECT_EQ(all_path_stats[uid][path], size * 3);
+            EXPECT_EQ(all_path_stats[uid][path], size);
         }
     }
 
     // 4. get compaction schema
     TabletSchemaSPtr compaction_schema = tablet_schema;
     auto st = schema_util::get_compaction_schema(rowsets, compaction_schema);
+
+    for (const auto& column : compaction_schema->columns()) {
+        if (column->is_extracted_column()) {
+            EXPECT_FALSE(column->is_variant_type());
+        }
+    }
     EXPECT_TRUE(st.ok()) << st.msg();
 
     // 5. check compaction schema
@@ -446,9 +452,8 @@ TabletSchemaSPtr create_compaction_schema_common(StorageEngine* _engine_ref,
     }
 
     std::unordered_map<int32_t, schema_util::PathToNoneNullValues> path_stats;
-    std::unordered_map<int32_t, std::unordered_set<std::string>> typed_paths;
     for (const auto& rowset : rowsets) {
-        auto st = schema_util::collect_path_stats(rowset, path_stats, typed_paths);
+        auto st = schema_util::aggregate_path_to_stats(rowset, &path_stats);
         EXPECT_TRUE(st.ok()) << st.msg();
     }
 
@@ -481,7 +486,7 @@ TabletSchemaSPtr create_compaction_schema_common(StorageEngine* _engine_ref,
     return compaction_schema;
 }
 
-TEST_F(SchemaUtilRowsetTest, typed_path) {
+TEST_F(SchemaUtilRowsetTest, some_test_for_subcolumn_writer) {
     std::string absolute_dir = _curreent_dir + std::string("/ut_dir/schema_util_rows2");
     TabletSchemaSPtr compaction_schema = create_compaction_schema_common(_engine_ref, absolute_dir);
     // 6. create variantSubColumnWriter

@@ -80,7 +80,8 @@ Status _create_column_writer(uint32_t cid, const TabletColumn& column,
                              int64_t none_null_value_size) {
     _init_column_meta(opt->meta, cid, column, opt->compression_type);
     // no need to record none null value size for typed column
-    if (!column.path_info_ptr()->get_is_typed()) {
+    // no need to record none null value size for nested column
+    if (!column.path_info_ptr()->get_is_typed() && !column.path_info_ptr()->has_nested_part()) {
         // record none null value size for statistics
         opt->meta->set_none_null_size(none_null_value_size);
     }
@@ -224,8 +225,15 @@ Status VariantColumnWriterImpl::_process_subcolumns(vectorized::ColumnObject* pt
                 _tablet_column->name_lower_case() + "." + entry->path.get_path();
         const vectorized::DataTypePtr& final_data_type_from_object =
                 entry->data.get_least_common_type();
-        auto full_path = vectorized::PathInData(_tablet_column->name_lower_case() + "." +
-                                                entry->path.get_path());
+        vectorized::PathInData full_path;
+        if (entry->path.has_nested_part()) {
+            vectorized::PathInDataBuilder full_path_builder;
+            full_path = full_path_builder.append(_tablet_column->name_lower_case(), false)
+                                .append(entry->path.get_parts(), false)
+                                .build();
+        } else {
+            full_path = vectorized::PathInData(column_name);
+        }
         // set unique_id and parent_unique_id, will use unique_id to get iterator correct
         auto column = vectorized::schema_util::get_column_by_type(
                 final_data_type_from_object, column_name,
@@ -298,9 +306,6 @@ Status VariantColumnWriterImpl::_process_subcolumns(vectorized::ColumnObject* pt
         RETURN_IF_ERROR(convert_and_write_column(converter, tablet_column, current_type,
                                                  _subcolumn_writers[current_column_id - 1].get(),
                                                  current_column, ptr->rows(), current_column_id));
-
-        // get stastics
-        _statistics.subcolumns_non_null_size.emplace(entry->path.get_path(), none_null_value_size);
     }
     return Status::OK();
 }

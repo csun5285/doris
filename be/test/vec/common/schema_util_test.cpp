@@ -451,7 +451,7 @@ TEST_F(SchemaUtilTest, get_subpaths) {
 
     // get subpaths
     std::unordered_map<int32_t, TabletSchema::PathsSetInfo> uid_to_paths_set_info;
-    schema_util::get_subpaths(schema, 1, path_stats, uid_to_paths_set_info);
+    schema_util::get_subpaths(3, path_stats[1], uid_to_paths_set_info[1]);
 
     EXPECT_EQ(uid_to_paths_set_info[1].sub_path_set.size(), 3);
     EXPECT_EQ(uid_to_paths_set_info[1].sparse_path_set.size(), 2);
@@ -480,7 +480,7 @@ TEST_F(SchemaUtilTest, get_subpaths_equal_to_max) {
     path_stats[1] = {{"path1", 1000}, {"path2", 800}, {"path3", 500}};
 
     std::unordered_map<int32_t, TabletSchema::PathsSetInfo> uid_to_paths_set_info;
-    schema_util::get_subpaths(schema, 1, path_stats, uid_to_paths_set_info);
+    schema_util::get_subpaths(3, path_stats[1], uid_to_paths_set_info[1]);
 
     EXPECT_EQ(uid_to_paths_set_info[1].sub_path_set.size(), 3);
     EXPECT_EQ(uid_to_paths_set_info[1].sparse_path_set.size(), 0);
@@ -520,9 +520,9 @@ TEST_F(SchemaUtilTest, get_subpaths_multiple_variants) {
             {"path1", 1000}, {"path2", 800}, {"path3", 500}, {"path4", 300}, {"path5", 200}};
 
     std::unordered_map<int32_t, TabletSchema::PathsSetInfo> uid_to_paths_set_info;
-    schema_util::get_subpaths(schema, 1, path_stats, uid_to_paths_set_info);
-    schema_util::get_subpaths(schema, 2, path_stats, uid_to_paths_set_info);
-    schema_util::get_subpaths(schema, 3, path_stats, uid_to_paths_set_info);
+    schema_util::get_subpaths(3, path_stats[1], uid_to_paths_set_info[1]);
+    schema_util::get_subpaths(2, path_stats[2], uid_to_paths_set_info[2]);
+    schema_util::get_subpaths(4, path_stats[3], uid_to_paths_set_info[3]);
 
     EXPECT_EQ(uid_to_paths_set_info[1].sub_path_set.size(), 3);
     EXPECT_EQ(uid_to_paths_set_info[1].sparse_path_set.size(), 2);
@@ -571,7 +571,7 @@ TEST_F(SchemaUtilTest, get_subpaths_no_path_stats) {
     path_stats[2] = {{"path1", 1000}, {"path2", 800}};
 
     std::unordered_map<int32_t, TabletSchema::PathsSetInfo> uid_to_paths_set_info;
-    schema_util::get_subpaths(schema, 1, path_stats, uid_to_paths_set_info);
+    schema_util::get_subpaths(3, path_stats[2], uid_to_paths_set_info[2]);
 
     EXPECT_EQ(uid_to_paths_set_info[1].sub_path_set.size(), 0);
     EXPECT_EQ(uid_to_paths_set_info[1].sparse_path_set.size(), 0);
@@ -1633,4 +1633,161 @@ TEST_F(SchemaUtilTest, TestParseVariantColumnsWithNulls) {
 
     const auto& result_column = block.get_by_position(0).column;
     EXPECT_TRUE(result_column->is_nullable());
+}
+
+TEST_F(SchemaUtilTest, get_compaction_typed_columns) {
+    TabletColumn variant;
+    variant.set_unique_id(10);
+    variant.set_variant_max_subcolumns_count(3);
+
+    TabletColumn subcolumn;
+    subcolumn.set_name("profile.id.*");
+    subcolumn.set_type(FieldType::OLAP_FIELD_TYPE_INT);
+    variant.add_sub_column(subcolumn);
+
+    TabletColumn subcolumn2;
+    subcolumn2.set_name("profile.name.?");
+    subcolumn2.set_type(FieldType::OLAP_FIELD_TYPE_STRING);
+    variant.add_sub_column(subcolumn2);
+
+    TabletSchemaSPtr schema = std::make_shared<TabletSchema>();
+    schema->append_column(variant);
+
+    std::unordered_set<std::string> typed_paths;
+    typed_paths.insert("profile.id.name");
+    TabletSchemaSPtr output_schema = std::make_shared<TabletSchema>();
+    TabletColumnPtr parent_column = std::make_shared<TabletColumn>(variant);
+    TabletSchema::PathsSetInfo paths_set_info;
+    EXPECT_TRUE(schema_util::get_compaction_typed_columns(schema, typed_paths, parent_column,
+                                                          output_schema, paths_set_info)
+                        .ok());
+    EXPECT_EQ(output_schema->num_columns(), 1);
+    EXPECT_EQ(output_schema->column(0).type(), FieldType::OLAP_FIELD_TYPE_INT);
+    EXPECT_EQ(paths_set_info.typed_path_set.size(), 1);
+
+    typed_paths.insert("abc");
+    EXPECT_FALSE(schema_util::get_compaction_typed_columns(schema, typed_paths, parent_column,
+                                                           output_schema, paths_set_info)
+                         .ok());
+}
+
+TEST_F(SchemaUtilTest, get_compaction_nested_columns) {
+    TabletColumn variant;
+    variant.set_unique_id(20);
+    variant.set_variant_max_subcolumns_count(3);
+
+    TabletSchemaSPtr schema = std::make_shared<TabletSchema>();
+    schema->append_column(variant);
+
+    std::unordered_set<vectorized::PathInData, vectorized::PathInData::Hash> nested_paths;
+    vectorized::PathInData path1("profile.address");
+    vectorized::PathInData path2("profile.phone");
+    nested_paths.insert(path1);
+    nested_paths.insert(path2);
+
+    TabletSchemaSPtr output_schema = std::make_shared<TabletSchema>();
+    TabletSchema::PathsSetInfo paths_set_info;
+
+    doris::vectorized::schema_util::PathToDataTypes path_to_data_types;
+    path_to_data_types[path1] = {std::make_shared<vectorized::DataTypeInt32>(),
+                                 std::make_shared<vectorized::DataTypeString>()};
+    path_to_data_types[path2] = {std::make_shared<vectorized::DataTypeString>(),
+                                 std::make_shared<vectorized::DataTypeString>()};
+    TabletColumnPtr parent_column = std::make_shared<TabletColumn>(variant);
+
+    Status st = schema_util::get_compaction_nested_columns(
+            nested_paths, path_to_data_types, parent_column, output_schema, paths_set_info);
+
+    EXPECT_TRUE(st.ok());
+    EXPECT_EQ(output_schema->num_columns(), 2);
+    for (const auto& column : output_schema->columns()) {
+        // std::cout << "column name: " << column->name() << " type: " << (int)column->type() << std::endl;
+        if (column->name().ends_with("address")) {
+            EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_JSONB);
+        } else if (column->name().ends_with("phone")) {
+            EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_STRING);
+        }
+    }
+
+    std::unordered_set<vectorized::PathInData, vectorized::PathInData::Hash> bad_nested_paths;
+    bad_nested_paths.insert(vectorized::PathInData("not_exist"));
+    TabletSchemaSPtr bad_output_schema = std::make_shared<TabletSchema>();
+    TabletSchema::PathsSetInfo bad_paths_set_info;
+    Status st2 = schema_util::get_compaction_nested_columns(bad_nested_paths, path_to_data_types,
+                                                            parent_column, bad_output_schema,
+                                                            bad_paths_set_info);
+    EXPECT_FALSE(st2.ok());
+}
+
+TEST_F(SchemaUtilTest, get_compaction_subcolumns) {
+    TabletColumn variant;
+    variant.set_unique_id(30);
+    variant.set_variant_max_subcolumns_count(3);
+    variant.set_aggregation_method(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE);
+
+    TabletSchemaSPtr schema = std::make_shared<TabletSchema>();
+    schema->append_column(variant);
+
+    TabletColumnPtr parent_column = std::make_shared<TabletColumn>(variant);
+
+    TabletSchema::PathsSetInfo paths_set_info;
+    paths_set_info.sub_path_set.insert("a");
+    paths_set_info.sub_path_set.insert("b");
+    doris::vectorized::schema_util::PathToDataTypes path_to_data_types;
+    std::unordered_set<std::string> sparse_paths;
+    TabletSchemaSPtr output_schema = std::make_shared<TabletSchema>();
+
+    schema_util::get_compaction_subcolumns(paths_set_info, parent_column, schema,
+                                           path_to_data_types, sparse_paths, output_schema);
+    EXPECT_EQ(output_schema->num_columns(), 2);
+    for (const auto& column : output_schema->columns()) {
+        EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_VARIANT);
+    }
+
+    output_schema = std::make_shared<TabletSchema>();
+    path_to_data_types.clear();
+    path_to_data_types[vectorized::PathInData("a")] = {
+            std::make_shared<vectorized::DataTypeInt32>()};
+    path_to_data_types[vectorized::PathInData("b")] = {
+            std::make_shared<vectorized::DataTypeString>()};
+    schema_util::get_compaction_subcolumns(paths_set_info, parent_column, schema,
+                                           path_to_data_types, sparse_paths, output_schema);
+    EXPECT_EQ(output_schema->num_columns(), 2);
+    bool found_int = false, found_str = false;
+    for (const auto& column : output_schema->columns()) {
+        if (column->name().ends_with("a")) {
+            EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_INT);
+            found_int = true;
+        } else if (column->name().ends_with("b")) {
+            EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_STRING);
+            found_str = true;
+        }
+    }
+    EXPECT_TRUE(found_int && found_str);
+
+    output_schema = std::make_shared<TabletSchema>();
+    sparse_paths.insert("a");
+    schema_util::get_compaction_subcolumns(paths_set_info, parent_column, schema,
+                                           path_to_data_types, sparse_paths, output_schema);
+    EXPECT_EQ(output_schema->num_columns(), 2);
+    for (const auto& column : output_schema->columns()) {
+        if (column->name().ends_with("a")) {
+            EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_VARIANT);
+        } else if (column->name().ends_with("b")) {
+            EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_STRING);
+        }
+    }
+
+    output_schema = std::make_shared<TabletSchema>();
+    sparse_paths.clear();
+
+    for (int i = 0; i < config::variant_max_sparse_column_statistics_size + 1; ++i) {
+        sparse_paths.insert("dummy" + std::to_string(i));
+    }
+    schema_util::get_compaction_subcolumns(paths_set_info, parent_column, schema,
+                                           path_to_data_types, sparse_paths, output_schema);
+    EXPECT_EQ(output_schema->num_columns(), 2);
+    for (const auto& column : output_schema->columns()) {
+        EXPECT_EQ(column->type(), FieldType::OLAP_FIELD_TYPE_VARIANT);
+    }
 }

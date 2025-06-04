@@ -337,7 +337,14 @@ public:
 
     const SubcolumnColumnReaders* get_subcolumn_readers() const { return _subcolumn_readers.get(); }
 
-    std::vector<std::string> get_typed_paths() const;
+    void get_subcolumns_types(
+            std::unordered_map<vectorized::PathInData, vectorized::DataTypes,
+                               vectorized::PathInData::Hash>* subcolumns_types) const;
+
+    void get_typed_paths(std::unordered_set<std::string>* typed_paths) const;
+
+    void get_nested_paths(std::unordered_set<vectorized::PathInData, vectorized::PathInData::Hash>*
+                                  nested_paths) const;
 
 private:
     // init for compaction read
