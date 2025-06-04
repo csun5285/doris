@@ -40,15 +40,6 @@ PathInData::PathInData(std::string_view path_, bool is_typed_) : path(path_), is
     size_t size = static_cast<size_t>(end - begin);
     parts.emplace_back(std::string_view {begin, size}, false, 0.);
 }
-
-PathInData::PathInData(std::string_view path_, const Parts& parts_, bool is_typed_) {
-    path = path_;
-    is_typed = is_typed_;
-    for (const auto& part : parts_) {
-        parts.emplace_back(part);
-    }
-}
-
 PathInData::PathInData(const Parts& parts_) {
     build_path(parts_);
     build_parts(parts_);

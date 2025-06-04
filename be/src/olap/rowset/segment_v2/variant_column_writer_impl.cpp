@@ -224,10 +224,8 @@ Status VariantColumnWriterImpl::_process_subcolumns(vectorized::ColumnObject* pt
                 _tablet_column->name_lower_case() + "." + entry->path.get_path();
         const vectorized::DataTypePtr& final_data_type_from_object =
                 entry->data.get_least_common_type();
-        vectorized::PathInDataBuilder full_path_builder;
-        auto full_path = full_path_builder.append(_tablet_column->name_lower_case(), false)
-                                 .append(entry->path.get_parts(), false)
-                                 .build();
+        auto full_path = vectorized::PathInData(_tablet_column->name_lower_case() + "." +
+                                                entry->path.get_path());
         // set unique_id and parent_unique_id, will use unique_id to get iterator correct
         auto column = vectorized::schema_util::get_column_by_type(
                 final_data_type_from_object, column_name,
@@ -361,6 +359,20 @@ Status VariantColumnWriterImpl::_process_sparse_column(
     _statistics.to_pb(sparse_writer_opts.meta->mutable_variant_statistics());
     sparse_writer_opts.meta->set_num_rows(num_rows);
     return Status::OK();
+}
+
+void VariantStatistics::to_pb(VariantStatisticsPB* stats) const {
+    for (const auto& [path, value] : sparse_column_non_null_size) {
+        stats->mutable_sparse_column_non_null_size()->emplace(path, value);
+    }
+    LOG(INFO) << "num subcolumns " << subcolumns_non_null_size.size() << ", num sparse columns "
+              << sparse_column_non_null_size.size();
+}
+
+void VariantStatistics::from_pb(const VariantStatisticsPB& stats) {
+    for (const auto& [path, value] : stats.sparse_column_non_null_size()) {
+        sparse_column_non_null_size[path] = value;
+    }
 }
 
 Status VariantColumnWriterImpl::finalize() {
