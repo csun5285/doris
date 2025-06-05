@@ -134,6 +134,8 @@ struct FileCacheProfileReporter {
                 profile, "InvertedIndexBytesScannedFromRemote", TUnit::BYTES, cache_profile, 1);
         inverted_index_local_io_timer = ADD_CHILD_TIMER_WITH_LEVEL(
                 profile, "InvertedIndexLocalIOUseTimer", cache_profile, 1);
+        inverted_index_remote_io_timer = ADD_CHILD_TIMER_WITH_LEVEL(
+                profile, "InvertedIndexRemoteIOUseTimer", cache_profile, 1);
         inverted_index_io_timer =
                 ADD_CHILD_TIMER_WITH_LEVEL(profile, "InvertedIndexIOTimer", cache_profile, 1);
         inverted_index_wait_timer =

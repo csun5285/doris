@@ -174,11 +174,11 @@ void RegexpQuery::collect_matching_terms(const std::wstring& field_name,
 
     if (total_iterations > 100) {
         if (prefix) {
-            LOG(INFO) << "Prefix scan exceeded 20 iterations: "
+            LOG(INFO) << "Prefix scan exceeded 100 iterations: "
                       << "prefix=" << *prefix << ", total_iterations=" << total_iterations
                       << ", matched_terms=" << count;
         } else {
-            LOG(INFO) << "Full dictionary scan exceeded 20 iterations: "
+            LOG(INFO) << "Full dictionary scan exceeded 100 iterations: "
                       << "total_iterations=" << total_iterations << ", matched_terms=" << count;
         }
     }
