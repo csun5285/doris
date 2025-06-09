@@ -151,7 +151,7 @@ TEST(ColumnVariantTest, basic_finalize) {
     auto variant = VariantUtil::construct_basic_varint_column();
     // 4. finalize
     EXPECT_TRUE(variant->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(variant->size(), 10);
 
     // check finalized subcolumn
@@ -179,7 +179,7 @@ TEST(ColumnVariantTest, basic_deserialize) {
 
     // 4. finalize
     EXPECT_TRUE(variant->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(variant->size(), 10);
 
     const auto& [path, value] = variant->get_sparse_data_paths_and_values();
@@ -209,7 +209,7 @@ TEST(ColumnVariantTest, basic_deserialize) {
 TEST(ColumnVariantTest, basic_inset_range_from) {
     auto src = VariantUtil::construct_basic_varint_column();
     EXPECT_TRUE(src->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(src->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(src->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(src->size(), 10);
 
     // dst is an empty column, has 5 subcolumn + 1 root
@@ -430,7 +430,7 @@ TEST(ColumnVariantTest, advanced_finalize) {
 
     // 4. finalize
     EXPECT_TRUE(variant->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(variant->size(), 15);
 
     // check finalized subcolumn
@@ -469,7 +469,7 @@ TEST(ColumnVariantTest, advanced_deserialize) {
 
     // 4. finalize
     EXPECT_TRUE(variant->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(variant->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(variant->size(), 15);
 
     const auto& [path, value] = variant->get_sparse_data_paths_and_values();
@@ -526,7 +526,7 @@ TEST(ColumnVariantTest, advanced_deserialize) {
 TEST(ColumnVariantTest, advanced_insert_range_from) {
     auto src = VariantUtil::construct_advanced_varint_column();
     EXPECT_TRUE(src->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(src->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(src->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(src->size(), 15);
 
     auto dst = VariantUtil::construct_dst_varint_column();
@@ -649,7 +649,7 @@ TEST(ColumnVariantTest, advanced_insert_range_from) {
 TEST(ColumnVariantTest, empty_inset_range_from) {
     auto src = VariantUtil::construct_varint_column_only_subcolumns();
     EXPECT_TRUE(src->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(src->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(src->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(src->size(), 6);
 
     // dst is an empty column
@@ -684,7 +684,7 @@ TEST(ColumnVariantTest, empty_inset_range_from) {
 
     EXPECT_TRUE(
             src_contains_seven_subcolumns->finalize(ColumnObject::FinalizeMode::WRITE_MODE).ok());
-    EXPECT_TRUE(src_contains_seven_subcolumns->pick_subcolumns_to_sparse_column({}).ok());
+    EXPECT_TRUE(src_contains_seven_subcolumns->pick_subcolumns_to_sparse_column({}, false).ok());
     EXPECT_EQ(src_contains_seven_subcolumns->size(), 5);
 
     // subcolumn->subcolumn          v.a v.b v.c v.f v.e
@@ -737,7 +737,8 @@ TEST(ColumnVariantTest, empty_inset_range_from) {
                         ->finalize(ColumnObject::FinalizeMode::WRITE_MODE)
                         .ok());
     EXPECT_TRUE(
-            src_contains_subcoumns_and_sparse_columns->pick_subcolumns_to_sparse_column({}).ok());
+            src_contains_subcoumns_and_sparse_columns->pick_subcolumns_to_sparse_column({}, false)
+                    .ok());
     EXPECT_EQ(src_contains_subcoumns_and_sparse_columns->size(), 10);
 
     // subcolumn->subcolumn          v.a v.b v.c v.f v.e

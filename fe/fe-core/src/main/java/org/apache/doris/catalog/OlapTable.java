@@ -24,6 +24,7 @@ import org.apache.doris.analysis.ColumnDef;
 import org.apache.doris.analysis.CreateMaterializedViewStmt;
 import org.apache.doris.analysis.DataSortInfo;
 import org.apache.doris.analysis.Expr;
+import org.apache.doris.analysis.IndexDef;
 import org.apache.doris.analysis.SlotDescriptor;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.backup.Status;
@@ -74,6 +75,7 @@ import org.apache.doris.thrift.TCompressionType;
 import org.apache.doris.thrift.TFetchOption;
 import org.apache.doris.thrift.TInvertedIndexFileStorageFormat;
 import org.apache.doris.thrift.TOlapTable;
+import org.apache.doris.thrift.TPatternType;
 import org.apache.doris.thrift.TPrimitiveType;
 import org.apache.doris.thrift.TSortType;
 import org.apache.doris.thrift.TStorageFormat;
@@ -2397,26 +2399,6 @@ public class OlapTable extends Table implements MTMVRelatedTableIf, GsonPostProc
         return false;
     }
 
-    public void setVariantMaxSubcolumnsCount(int maxSubcoumnsCount) {
-        List<Column> columns = getBaseSchema(true);
-        boolean hasVariantType = false;
-        for (Column column : columns) {
-            Type type = column.getType();
-            if (type.isVariantType()) {
-                hasVariantType = true;
-                VariantType scType = (VariantType) type;
-                scType.setVariantMaxSubcolumnsCount(maxSubcoumnsCount);
-            }
-        }
-        if (hasVariantType) {
-            getOrCreatTableProperty().setVariantMaxSubcolumnsCount(maxSubcoumnsCount);
-        }
-    }
-
-    public int getVariantMaxSubcolumnsCount() {
-        return getOrCreatTableProperty().getVariantMaxSubcolumnsCount();
-    }
-
     public int getBaseSchemaVersion() {
         MaterializedIndexMeta baseIndexMeta = indexIdToMeta.get(baseIndexId);
         return baseIndexMeta.getSchemaVersion();
@@ -3416,5 +3398,65 @@ public class OlapTable extends Table implements MTMVRelatedTableIf, GsonPostProc
     @VisibleForTesting
     protected void addIndexNameToIdForUnitTest(String name, long id) {
         indexNameToId.put(name, id);
+    }
+
+    public Pair<Integer, Integer> getMinMaxVariantSubcolumnsCount() {
+        int minVariantSubcolumnsCount = Integer.MAX_VALUE;
+        int maxVariantSubcolumnsCount = -1;
+        for (Column column : getBaseSchema()) {
+            if (column.getType().isVariantType()) {
+                minVariantSubcolumnsCount =
+                                    Math.min(minVariantSubcolumnsCount, column.getVariantMaxSubcolumnsCount());
+                maxVariantSubcolumnsCount =
+                                    Math.max(maxVariantSubcolumnsCount, column.getVariantMaxSubcolumnsCount());
+            }
+        }
+        return Pair.of(minVariantSubcolumnsCount, maxVariantSubcolumnsCount);
+    }
+
+    public Index getInvertedIndex(Column column, List<String> subPath) {
+        if (subPath == null || subPath.isEmpty()) {
+            for (Index index : indexes.getIndexes()) {
+                if (index.getIndexType() == IndexDef.IndexType.INVERTED) {
+                    List<String> columns = index.getColumns();
+                    if (columns != null && !columns.isEmpty() && column.getName().equals(columns.get(0))) {
+                        return index;
+                    }
+                }
+            }
+        }
+
+        // subPath is not empty, means it is a variant column, find the field pattern from children
+        String subPathString = String.join(".", subPath);
+        String fieldPattern = "";
+        for (Column child : column.getChildren()) {
+            String childName = child.getName();
+            if (child.getFieldPatternType() == TPatternType.MATCH_NAME_GLOB) {
+                try {
+                    java.nio.file.PathMatcher matcher = java.nio.file.FileSystems.getDefault()
+                            .getPathMatcher("glob:" + childName);
+                    if (matcher.matches(java.nio.file.Paths.get(subPathString))) {
+                        fieldPattern = childName;
+                    }
+                } catch (Exception e) {
+                    continue;
+                }
+            } else if (child.getFieldPatternType() == TPatternType.MATCH_NAME) {
+                if (childName.equals(subPathString)) {
+                    fieldPattern = childName;
+                }
+            }
+        }
+
+        for (Index index : indexes.getIndexes()) {
+            if (index.getIndexType() == IndexDef.IndexType.INVERTED) {
+                List<String> columns = index.getColumns();
+                if (columns != null && !columns.isEmpty() && column.getName().equals(columns.get(0))
+                                        && fieldPattern.equals(index.getInvertedIndexFieldPattern())) {
+                    return index;
+                }
+            }
+        }
+        return null;
     }
 }

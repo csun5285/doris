@@ -20,6 +20,8 @@ suite("test_variant_is_null_expr", "p0, nonConcurrent") {
     // define a sql table
     def testTable = "test_variant_is_null_expr"
 
+    sql """ set global_variant_enable_typed_paths_to_sparse = false """
+
     sql """ DROP TABLE IF EXISTS ${testTable} """ 
     sql """
         CREATE TABLE ${testTable} (
@@ -52,6 +54,7 @@ suite("test_variant_is_null_expr", "p0, nonConcurrent") {
           GetDebugPoint().enableDebugPointForAllBEs(checkpoints_name, [filtered_rows: expectedFilteredRows])
           sql "set experimental_enable_parallel_scan = false"
           sql " set inverted_index_skip_threshold = 0 "
+          sql " set enable_common_expr_pushdown = true "
           sql "sync"
           sql "${sqlQuery}"
       } finally {

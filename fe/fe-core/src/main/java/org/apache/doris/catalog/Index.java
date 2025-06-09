@@ -167,6 +167,18 @@ public class Index implements Writable {
         return InvertedIndexUtil.getInvertedIndexParserStopwords(properties);
     }
 
+    public String getInvertedIndexFieldPattern() {
+        return InvertedIndexUtil.getInvertedIndexFieldPattern(properties);
+    }
+
+    public boolean getInvertedIndexSupportPhrase() {
+        return InvertedIndexUtil.getInvertedIndexSupportPhrase(properties);
+    }
+
+    public String getCustomAnalyzer() {
+        return InvertedIndexUtil.getCustomAnalyzer(properties);
+    }
+
     public boolean isLightIndexChangeSupported() {
         return indexType == IndexDef.IndexType.INVERTED;
     }

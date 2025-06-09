@@ -463,6 +463,10 @@ void TabletMeta::init_column_from_tcolumn(uint32_t unique_id, const TColumn& tco
             column->set_pattern_type(PatternTypePB::MATCH_NAME_GLOB);
         }
     }
+    if (tcolumn.__isset.variant_enable_typed_paths_to_sparse) {
+        column->set_variant_enable_typed_paths_to_sparse(
+                tcolumn.variant_enable_typed_paths_to_sparse);
+    }
 }
 
 Status TabletMeta::create_from_file(const string& file_path) {

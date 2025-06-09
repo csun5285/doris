@@ -23,6 +23,7 @@ suite("test_variant_custom_analyzer", "p0") {
     def indexTbName3 = "test_custom_analyzer_3"
     sql "set global_variant_max_subcolumns_count = 100"
     sql """ set enable_match_without_inverted_index = false """
+    sql """ set global_variant_enable_typed_paths_to_sparse = false """
 
     sql """
         CREATE INVERTED INDEX TOKENIZER IF NOT EXISTS edge_ngram_phone_number_tokenizer

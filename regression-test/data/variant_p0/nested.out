@@ -184,6 +184,7 @@ v.xx	tinyint	Yes	false	\N	NONE
 12	{"nested":[{"yyy":"11111"}, {"ax1111":"1111"}, {"axxxb":100,"xxxy111":111}, {"aaa":"11","ddsss":1024}, {"xx":10}]}
 13	{"nested":[{"yyy":"11111"}, {"ax1111":"1111"}, {"axxxb":100,"xxxy111":111}, {"aaa":"11","ddsss":1024}, {"xx":10}]}
 
+<<<<<<< HEAD
 -- !explode_sql --
 
 -- !explode_sql --
@@ -192,3 +193,5 @@ v.xx	tinyint	Yes	false	\N	NONE
 -- !explode_sql --
 2	10
 
+=======
+>>>>>>> a64f4a96abf ([enhance](variant) typed_paths_to sparse column)

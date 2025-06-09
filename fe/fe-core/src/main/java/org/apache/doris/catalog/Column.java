@@ -508,6 +508,14 @@ public class Column implements GsonPostProcessable {
         return type instanceof ScalarType ? ((ScalarType) type).getScalarScale() : -1;
     }
 
+    public int getVariantMaxSubcolumnsCount() {
+        return type.isVariantType() ? ((VariantType) type).getVariantMaxSubcolumnsCount() : -1;
+    }
+
+    public boolean getVariantEnableTypedPathsToSparse() {
+        return type.isVariantType() ? ((VariantType) type).getEnableTypedPathsToSparse() : false;
+    }
+
     public AggregateType getAggregationType() {
         return this.aggregationType;
     }
@@ -547,6 +555,10 @@ public class Column implements GsonPostProcessable {
 
     public void setFieldPatternType(TPatternType type) {
         fieldPatternType = type;
+    }
+
+    public TPatternType getFieldPatternType() {
+        return fieldPatternType;
     }
 
     public String getDefaultValue() {
@@ -619,12 +631,9 @@ public class Column implements GsonPostProcessable {
         tColumnType.setLen(this.getStrLen());
         tColumnType.setPrecision(this.getPrecision());
         tColumnType.setScale(this.getScale());
+        tColumnType.setVariantMaxSubcolumnsCount(this.getVariantMaxSubcolumnsCount());
 
         tColumnType.setIndexLen(this.getOlapColumnIndexSize());
-        if (this.getType().isVariantType()) {
-            VariantType variantType = (VariantType) this.getType();
-            tColumnType.setVariantMaxSubcolumnsCount(variantType.getVariantMaxSubcolumnsCount());
-        }
 
         tColumn.setColumnType(tColumnType);
         if (null != this.aggregationType) {
@@ -651,6 +660,7 @@ public class Column implements GsonPostProcessable {
             tColumn.setBeExecVersion(Config.be_exec_version);
         }
         tColumn.setClusterKeyId(this.clusterKeyId);
+        tColumn.setVariantEnableTypedPathsToSparse(this.getVariantEnableTypedPathsToSparse());
         // ATTN:
         // Currently, this `toThrift()` method is only used from CreateReplicaTask.
         // And CreateReplicaTask does not need `defineExpr` field.
@@ -867,6 +877,7 @@ public class Column implements GsonPostProcessable {
         } else if (this.type.isVariantType()) {
             VariantType variantType = (VariantType) this.getType();
             builder.setVariantMaxSubcolumnsCount(variantType.getVariantMaxSubcolumnsCount());
+            builder.setVariantEnableTypedPathsToSparse(this.getVariantEnableTypedPathsToSparse());
             // variant may contain predefined structured fields
             addChildren(builder);
         }

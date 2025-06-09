@@ -131,12 +131,16 @@ suite("regression_test_variant_github_events_p2", "nonConcurrent,p2"){
     sql """
         CREATE TABLE IF NOT EXISTS ${table_name} (
             k bigint,
-            v variant
+            v variant<properties("variant_max_subcolumns_count" = "${rand_subcolumns_count}")>
             -- INDEX idx_var(v) USING INVERTED PROPERTIES("parser" = "english") COMMENT ''
         )
         DUPLICATE KEY(`k`)
         DISTRIBUTED BY HASH(k) BUCKETS 4 
+<<<<<<< HEAD
         properties("replication_num" = "1", "disable_auto_compaction" = "true", "variant_enable_flatten_nested" = "false", "variant_max_subcolumns_count" = "${rand_subcolumns_count}");
+=======
+        properties("replication_num" = "1", "disable_auto_compaction" = "true", "variant_enable_flatten_nested" = "true");
+>>>>>>> a64f4a96abf ([enhance](variant) typed_paths_to sparse column)
     """
     
     // 2015
@@ -179,11 +183,15 @@ suite("regression_test_variant_github_events_p2", "nonConcurrent,p2"){
     sql """
      CREATE TABLE IF NOT EXISTS github_events2 (
             k bigint,
-            v variant not null
+            v variant<properties("variant_max_subcolumns_count" = "${rand_subcolumns_count}")> not null
         )
         UNIQUE KEY(`k`)
         DISTRIBUTED BY HASH(k) BUCKETS 4 
+<<<<<<< HEAD
         properties("replication_num" = "1", "disable_auto_compaction" = "false", "variant_enable_flatten_nested" = "false", "bloom_filter_columns" = "v", "variant_max_subcolumns_count" = "${rand_subcolumns_count}");
+=======
+        properties("replication_num" = "1", "disable_auto_compaction" = "false", "variant_enable_flatten_nested" = "true", "bloom_filter_columns" = "v");
+>>>>>>> a64f4a96abf ([enhance](variant) typed_paths_to sparse column)
         """
     sql """insert into github_events2 select * from github_events order by k"""
     sql """select v['payload']['commits'] from github_events order by k ;"""

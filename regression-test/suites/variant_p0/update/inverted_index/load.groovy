@@ -52,7 +52,7 @@ suite("update_test_index_load", "nonConcurrent,p0") {
         sql """
             CREATE TABLE IF NOT EXISTS ${create_table_name} (
                 k bigint,
-                v variant NOT NULL,
+                v variant<properties("variant_max_subcolumns_count" = "9999")> NOT NULL,
                 INDEX idx(v) USING INVERTED PROPERTIES("parser"="standard")
             )
             DUPLICATE KEY(`k`)
@@ -61,8 +61,7 @@ suite("update_test_index_load", "nonConcurrent,p0") {
             "replication_num" = "1",
             "disable_auto_compaction" = "true",
             "bloom_filter_columns" = "v",
-            "inverted_index_storage_format" = ${format},
-             "variant_max_subcolumns_count" = "9999"
+            "inverted_index_storage_format" = ${format}
             );
         """
 

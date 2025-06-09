@@ -52,14 +52,13 @@ suite("test_compaction_sparse_column", "p1,nonConcurrent") {
         sql """
             CREATE TABLE ${tableName} (
                 k bigint,
-                v variant
+                v variant<properties("variant_max_subcolumns_count" = "3")>
             )
             DUPLICATE KEY(`k`)
             DISTRIBUTED BY HASH(`k`) BUCKETS 1
             PROPERTIES (
                  "replication_num" = "1",
-                 "disable_auto_compaction" = "true",
-                 "variant_max_subcolumns_count" = "3"
+                 "disable_auto_compaction" = "true"
             );
         """
 
@@ -215,6 +214,5 @@ suite("test_compaction_sparse_column", "p1,nonConcurrent") {
         // try_sql("DROP TABLE IF EXISTS ${tableName}")
         GetDebugPoint().disableDebugPointForAllBEs("variant_column_writer_impl._get_subcolumn_paths_from_stats")
         set_be_config.call("write_buffer_size", "209715200")
-        // set_be_config.call("variant_max_subcolumns_count", "5")
     }
 }
