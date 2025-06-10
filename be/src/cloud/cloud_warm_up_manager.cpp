@@ -173,7 +173,18 @@ void CloudWarmUpManager::handle_jobs() {
             timespec time;
             time.tv_sec = UnixSeconds() + WAIT_TIME_SECONDS;
             if (!wait->timed_wait(time)) {
-                LOG_WARNING("Warm up tablet {} take a long time", tablet_meta->tablet_id());
+                LOG_WARNING(
+                        "Warm up tablet {} take a long time, num_rows {}, tablet_local_size {}, "
+                        "tablet_remote_size {}, tablet_local_index_size {}, "
+                        "tablet_local_segment_size {}, tablet_remote_index_size {}, "
+                        "tablet_remote_segment_size {}, version_count {}, stale_version_count {}",
+                        tablet_meta->tablet_id(), tablet_meta->num_rows(),
+                        tablet_meta->tablet_local_size(), tablet_meta->tablet_remote_size(),
+                        tablet_meta->tablet_local_index_size(),
+                        tablet_meta->tablet_local_segment_size(),
+                        tablet_meta->tablet_remote_index_size(),
+                        tablet_meta->tablet_remote_segment_size(), tablet_meta->version_count(),
+                        tablet_meta->stale_version_count());
             }
         }
         {
