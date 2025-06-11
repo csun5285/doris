@@ -227,6 +227,11 @@ public:
 
     static void recycle_cached_data(const std::vector<RowsetSharedPtr>& rowsets);
 
+    bool need_remove_unused_rowsets();
+
+    void add_unused_rowsets(const std::vector<RowsetSharedPtr>& rowsets);
+    void remove_unused_rowsets();
+
 private:
     // FIXME(plat1ko): No need to record base size if rowsets are ordered by version
     void update_base_size(const Rowset& rs);
@@ -274,6 +279,10 @@ private:
 
     // Schema will be merged from all rowsets when sync_rowsets
     TabletSchemaSPtr _merged_tablet_schema;
+
+    // unused_rowsets, [start_version, end_version]
+    std::mutex _gc_mutex;
+    std::unordered_map<RowsetId, RowsetSharedPtr> _unused_rowsets;
 };
 
 using CloudTabletSPtr = std::shared_ptr<CloudTablet>;
