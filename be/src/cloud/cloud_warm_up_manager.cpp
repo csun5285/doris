@@ -77,6 +77,8 @@ void CloudWarmUpManager::handle_jobs() {
             LOG_WARNING("Warm up job is null");
             continue;
         }
+        std::shared_ptr<bthread::CountdownEvent> wait =
+                std::make_shared<bthread::CountdownEvent>(0);
         for (int64_t tablet_id : cur_job->tablet_ids) {
             if (_cur_job_id == 0) { // The job is canceled
                 break;
@@ -92,8 +94,6 @@ void CloudWarmUpManager::handle_jobs() {
                 LOG_WARNING("Warm up error ").tag("tablet_id", tablet_id).error(st);
                 continue;
             }
-            std::shared_ptr<bthread::CountdownEvent> wait =
-                    std::make_shared<bthread::CountdownEvent>(0);
             auto tablet_meta = tablet->tablet_meta();
             auto rs_metas = snapshot_rs_metas(tablet.get());
             for (auto& [_, rs] : rs_metas) {
@@ -170,22 +170,11 @@ void CloudWarmUpManager::handle_jobs() {
                     }
                 }
             }
-            timespec time;
-            time.tv_sec = UnixSeconds() + WAIT_TIME_SECONDS;
-            if (!wait->timed_wait(time)) {
-                LOG_WARNING(
-                        "Warm up tablet {} take a long time, num_rows {}, tablet_local_size {}, "
-                        "tablet_remote_size {}, tablet_local_index_size {}, "
-                        "tablet_local_segment_size {}, tablet_remote_index_size {}, "
-                        "tablet_remote_segment_size {}, version_count {}, stale_version_count {}",
-                        tablet_meta->tablet_id(), tablet_meta->num_rows(),
-                        tablet_meta->tablet_local_size(), tablet_meta->tablet_remote_size(),
-                        tablet_meta->tablet_local_index_size(),
-                        tablet_meta->tablet_local_segment_size(),
-                        tablet_meta->tablet_remote_index_size(),
-                        tablet_meta->tablet_remote_segment_size(), tablet_meta->version_count(),
-                        tablet_meta->stale_version_count());
-            }
+        }
+        timespec time;
+        time.tv_sec = UnixSeconds() + WAIT_TIME_SECONDS;
+        if (!wait->timed_wait(time)) {
+            LOG_WARNING("Warm up {} tablets take a long time", cur_job->tablet_ids.size());
         }
         {
             std::unique_lock lock(_mtx);

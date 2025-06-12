@@ -272,7 +272,11 @@ void CloudTablet::add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_
                                             {
                                                     .expiration_time = expiration_time,
                                             },
-                                    .download_done {},
+                                    .download_done {[](Status st) {
+                                        if (!st) {
+                                            LOG_WARNING("add rowset warm up error ").error(st);
+                                        }
+                                    }},
                             });
 
                     auto download_idx_file = [&](const io::Path& idx_path) {
@@ -284,7 +288,11 @@ void CloudTablet::add_rowsets(std::vector<RowsetSharedPtr> to_add, bool version_
                                         {
                                                 .expiration_time = expiration_time,
                                         },
-                                .download_done {},
+                                .download_done {[](Status st) {
+                                    if (!st) {
+                                        LOG_WARNING("add rowset warm up error ").error(st);
+                                    }
+                                }},
                         };
                         _engine.file_cache_block_downloader().submit_download_task(std::move(meta));
                     };
