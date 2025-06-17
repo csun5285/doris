@@ -1116,6 +1116,7 @@ DECLARE_Bool(enable_file_cache_query_limit);
 DECLARE_Int32(file_cache_enter_disk_resource_limit_mode_percent);
 DECLARE_Int32(file_cache_exit_disk_resource_limit_mode_percent);
 DECLARE_mBool(enable_evict_file_cache_in_advance);
+DECLARE_mInt32(block_file_cache_monitor_interval_sec);
 DECLARE_mInt32(file_cache_enter_need_evict_cache_in_advance_percent);
 DECLARE_mInt32(file_cache_exit_need_evict_cache_in_advance_percent);
 DECLARE_mInt32(file_cache_evict_in_advance_interval_ms);
@@ -1143,6 +1144,8 @@ DECLARE_mInt64(file_cache_background_gc_interval_ms);
 
 DECLARE_Int32(file_cache_downloader_thread_num_min);
 DECLARE_Int32(file_cache_downloader_thread_num_max);
+
+DECLARE_mBool(enable_reader_dryrun_when_download_file_cache);
 
 // inverted index searcher cache
 // cache entry stay time after lookup

@@ -1080,6 +1080,7 @@ DEFINE_Bool(enable_file_cache_query_limit, "false");
 DEFINE_mInt32(file_cache_enter_disk_resource_limit_mode_percent, "88");
 DEFINE_mInt32(file_cache_exit_disk_resource_limit_mode_percent, "80");
 DEFINE_mBool(enable_evict_file_cache_in_advance, "true");
+DEFINE_mInt32(block_file_cache_monitor_interval_sec, "20");
 DEFINE_mInt32(file_cache_enter_need_evict_cache_in_advance_percent, "78");
 DEFINE_mInt32(file_cache_exit_need_evict_cache_in_advance_percent, "75");
 DEFINE_mInt32(file_cache_evict_in_advance_interval_ms, "1000");
@@ -1099,6 +1100,7 @@ DEFINE_mInt64(cache_lock_held_long_tail_threshold_us, "30000000");
 DEFINE_mBool(enable_file_cache_keep_base_compaction_output, "false");
 DEFINE_mInt64(file_cache_remove_block_qps_limit, "1000");
 DEFINE_mInt64(file_cache_background_gc_interval_ms, "100");
+DEFINE_mBool(enable_reader_dryrun_when_download_file_cache, "true");
 
 DEFINE_mInt32(index_cache_entry_stay_time_after_lookup_s, "1800");
 DEFINE_mInt32(inverted_index_cache_stale_sweep_time_sec, "600");

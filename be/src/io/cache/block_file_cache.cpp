@@ -1773,7 +1773,7 @@ void BlockFileCache::check_need_evict_cache_in_advance() {
 }
 
 void BlockFileCache::run_background_monitor() {
-    int64_t interval_time_seconds = 20;
+    int64_t interval_time_seconds = config::block_file_cache_monitor_interval_sec;
     while (!_close) {
         TEST_SYNC_POINT_CALLBACK("BlockFileCache::set_sleep_time", &interval_time_seconds);
         check_disk_resource_limit();

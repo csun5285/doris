@@ -7188,9 +7188,245 @@ TEST_F(BlockFileCacheTest, validate_get_or_set_crash) {
     SyncPoint::get_instance()->disable_processing();
     SyncPoint::get_instance()->clear_all_call_backs();
 
-    //if (fs::exists(cache_base_path)) {
-    //    fs::remove_all(cache_base_path);
-    //}
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+}
+
+extern bvar::Adder<uint64_t> g_skip_local_cache_io_sum_bytes;
+
+TEST_F(BlockFileCacheTest, reader_dryrun_when_download_file_cache) {
+    bool org = config::enable_reader_dryrun_when_download_file_cache;
+    config::enable_reader_dryrun_when_download_file_cache = true;
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 6291456;
+    settings.query_queue_elements = 6;
+    settings.index_queue_size = 1048576;
+    settings.index_queue_elements = 1;
+    settings.disposable_queue_size = 1048576;
+    settings.disposable_queue_elements = 1;
+    settings.capacity = 8388608;
+    settings.max_file_block_size = 1048576;
+    settings.max_query_cache_size = 0;
+    io::CacheContext context;
+    ReadStatistics rstats;
+    context.stats = &rstats;
+    context.query_id = query_id;
+    ASSERT_TRUE(FileCacheFactory::instance()->create_file_cache(cache_base_path, settings).ok());
+    FileReaderSPtr local_reader;
+    ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
+    io::FileReaderOptions opts;
+    opts.cache_type = io::cache_type_from_string("file_block_cache");
+    opts.is_doris_table = true;
+    CachedRemoteFileReader reader(local_reader, opts);
+    auto key = io::BlockFileCache::hash("tmp_file");
+    EXPECT_EQ(reader._cache_hash, key);
+    EXPECT_EQ(local_reader->path().native(), reader.path().native());
+    EXPECT_EQ(local_reader->size(), reader.size());
+    EXPECT_FALSE(reader.closed());
+    EXPECT_EQ(local_reader->path().native(), reader.get_remote_reader()->path().native());
+    {
+        std::string buffer;
+        buffer.resize(64_kb);
+        IOContext io_ctx;
+        RuntimeProfile profile("file_cache_test");
+        FileCacheProfileReporter reporter(&profile);
+        FileCacheStatistics stats;
+        io_ctx.file_cache_stats = &stats;
+        io_ctx.is_dryrun = true;
+        size_t bytes_read {0};
+        ASSERT_TRUE(reader.read_at(32222, Slice(buffer.data(), buffer.size()), &bytes_read, &io_ctx)
+                            .ok());
+        EXPECT_TRUE(std::all_of(buffer.begin(), buffer.end(), [](char c) { return c == '\0'; }));
+        reporter.update(&stats);
+    }
+    {
+        std::string buffer;
+        buffer.resize(64_kb);
+        IOContext io_ctx;
+        RuntimeProfile profile("file_cache_test");
+        FileCacheProfileReporter reporter(&profile);
+        FileCacheStatistics stats;
+        io_ctx.file_cache_stats = &stats;
+        io_ctx.is_dryrun = true;
+        size_t bytes_read {0};
+        ASSERT_TRUE(reader.read_at(32222, Slice(buffer.data(), buffer.size()), &bytes_read, &io_ctx)
+                            .ok());
+
+        EXPECT_TRUE(std::all_of(buffer.begin(), buffer.end(), [](char c) { return c == '\0'; }));
+        reporter.update(&stats);
+    }
+    EXPECT_EQ(g_skip_local_cache_io_sum_bytes.get_value(), 65536);
+
+    EXPECT_TRUE(reader.close().ok());
+    EXPECT_TRUE(reader.closed());
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    FileCacheFactory::instance()->_caches.clear();
+    FileCacheFactory::instance()->_path_to_cache.clear();
+    FileCacheFactory::instance()->_capacity = 0;
+    config::enable_reader_dryrun_when_download_file_cache = org;
+}
+
+TEST_F(BlockFileCacheTest, cached_remote_file_reader_ttl_index) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 6291456;
+    settings.query_queue_elements = 6;
+    settings.index_queue_size = 1048576;
+    settings.index_queue_elements = 1;
+    settings.disposable_queue_size = 1048576;
+    settings.disposable_queue_elements = 1;
+    settings.capacity = 8388608;
+    settings.max_file_block_size = 1048576;
+    settings.max_query_cache_size = 0;
+    io::CacheContext context;
+    ReadStatistics rstats;
+    context.stats = &rstats;
+    context.query_id = query_id;
+    ASSERT_TRUE(FileCacheFactory::instance()->create_file_cache(cache_base_path, settings).ok());
+    BlockFileCache* cache = FileCacheFactory::instance()->get_by_path(cache_base_path);
+
+    for (int i = 0; i < 100; i++) {
+        if (cache->get_async_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    FileReaderSPtr local_reader;
+    ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
+    io::FileReaderOptions opts;
+    opts.cache_type = io::cache_type_from_string("file_block_cache");
+    opts.is_doris_table = true;
+    CachedRemoteFileReader reader(local_reader, opts);
+    auto key = io::BlockFileCache::hash("tmp_file");
+    EXPECT_EQ(reader._cache_hash, key);
+    EXPECT_EQ(local_reader->path().native(), reader.path().native());
+    EXPECT_EQ(local_reader->size(), reader.size());
+    EXPECT_FALSE(reader.closed());
+    EXPECT_EQ(local_reader->path().native(), reader.get_remote_reader()->path().native());
+    {
+        std::string buffer;
+        buffer.resize(64_kb);
+        IOContext io_ctx;
+        FileCacheStatistics stats;
+        io_ctx.file_cache_stats = &stats;
+        io_ctx.is_index_data = true;
+        int64_t cur_time = UnixSeconds();
+        io_ctx.expiration_time = cur_time + 120;
+        size_t bytes_read {0};
+        EXPECT_TRUE(
+                reader.read_at(0, Slice(buffer.data(), buffer.size()), &bytes_read, &io_ctx).ok());
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    LOG(INFO) << "ttl:" << cache->_ttl_queue.cache_size;
+    LOG(INFO) << "index:" << cache->_index_queue.cache_size;
+    LOG(INFO) << "normal:" << cache->_normal_queue.cache_size;
+    LOG(INFO) << "disp:" << cache->_disposable_queue.cache_size;
+    EXPECT_EQ(cache->_ttl_queue.cache_size, 1048576);
+    EXPECT_EQ(cache->_index_queue.cache_size, 0);
+
+    EXPECT_TRUE(reader.close().ok());
+    EXPECT_TRUE(reader.closed());
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    FileCacheFactory::instance()->_caches.clear();
+    FileCacheFactory::instance()->_path_to_cache.clear();
+    FileCacheFactory::instance()->_capacity = 0;
+}
+
+TEST_F(BlockFileCacheTest, cached_remote_file_reader_normal_index) {
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    fs::create_directories(cache_base_path);
+    TUniqueId query_id;
+    query_id.hi = 1;
+    query_id.lo = 1;
+    io::FileCacheSettings settings;
+    settings.query_queue_size = 6291456;
+    settings.query_queue_elements = 6;
+    settings.index_queue_size = 1048576;
+    settings.index_queue_elements = 1;
+    settings.disposable_queue_size = 1048576;
+    settings.disposable_queue_elements = 1;
+    settings.capacity = 8388608;
+    settings.max_file_block_size = 1048576;
+    settings.max_query_cache_size = 0;
+    io::CacheContext context;
+    ReadStatistics rstats;
+    context.stats = &rstats;
+    context.query_id = query_id;
+    ASSERT_TRUE(FileCacheFactory::instance()->create_file_cache(cache_base_path, settings).ok());
+    BlockFileCache* cache = FileCacheFactory::instance()->get_by_path(cache_base_path);
+
+    for (int i = 0; i < 100; i++) {
+        if (cache->get_async_open_success()) {
+            break;
+        };
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    FileReaderSPtr local_reader;
+    ASSERT_TRUE(global_local_filesystem()->open_file(tmp_file, &local_reader));
+    io::FileReaderOptions opts;
+    opts.cache_type = io::cache_type_from_string("file_block_cache");
+    opts.is_doris_table = true;
+    CachedRemoteFileReader reader(local_reader, opts);
+    auto key = io::BlockFileCache::hash("tmp_file");
+    EXPECT_EQ(reader._cache_hash, key);
+    EXPECT_EQ(local_reader->path().native(), reader.path().native());
+    EXPECT_EQ(local_reader->size(), reader.size());
+    EXPECT_FALSE(reader.closed());
+    EXPECT_EQ(local_reader->path().native(), reader.get_remote_reader()->path().native());
+
+    {
+        std::string buffer;
+        buffer.resize(64_kb);
+        IOContext io_ctx;
+        FileCacheStatistics stats;
+        io_ctx.file_cache_stats = &stats;
+        io_ctx.is_index_data = true;
+        // int64_t cur_time = UnixSeconds();
+        // io_ctx.expiration_time = cur_time + 120;
+        size_t bytes_read {0};
+        EXPECT_TRUE(
+                reader.read_at(0, Slice(buffer.data(), buffer.size()), &bytes_read, &io_ctx).ok());
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    LOG(INFO) << "ttl:" << cache->_ttl_queue.cache_size;
+    LOG(INFO) << "index:" << cache->_index_queue.cache_size;
+    LOG(INFO) << "normal:" << cache->_normal_queue.cache_size;
+    LOG(INFO) << "disp:" << cache->_disposable_queue.cache_size;
+    EXPECT_EQ(cache->_ttl_queue.cache_size, 0);
+    EXPECT_EQ(cache->_index_queue.cache_size, 1048576);
+
+    EXPECT_TRUE(reader.close().ok());
+    EXPECT_TRUE(reader.closed());
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    if (fs::exists(cache_base_path)) {
+        fs::remove_all(cache_base_path);
+    }
+    FileCacheFactory::instance()->_caches.clear();
+    FileCacheFactory::instance()->_path_to_cache.clear();
+    FileCacheFactory::instance()->_capacity = 0;
 }
 
 } // namespace doris::io
