@@ -682,6 +682,11 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrIface {
             MetricRepo.COUNTER_TXN_SUCCESS.increase(1L);
             MetricRepo.HISTO_TXN_EXEC_LATENCY.update(txnState.getCommitTime() - txnState.getPrepareTime());
         }
+
+        // logout transaction id and latency.
+        long latency = txnState.getCommitTime() - txnState.getPrepareTime();
+        LOG.info("Transaction committed. transactionId: {}, latency: {} ms", transactionId, latency);
+
         afterCommitTxnResp(commitTxnResponse);
         return txnState;
     }
