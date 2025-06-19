@@ -2077,6 +2077,15 @@ public class CloudGlobalTransactionMgr implements GlobalTransactionMgrIface {
         }
     }
 
+    @Override
+    public int getQueueLength() {
+        int count = 0;
+        for (Map.Entry<Long, AtomicInteger> entry : waitToCommitTxnCountMap.entrySet()) {
+            count += entry.getValue().get();
+        }
+        return count;
+    }
+
     private void decreaseWaitingLockCount(List<Table> tableList) {
         for (int i = 0; i < tableList.size(); i++) {
             long tableId = tableList.get(i).getId();

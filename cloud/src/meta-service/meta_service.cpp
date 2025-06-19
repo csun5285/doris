@@ -55,6 +55,7 @@
 #include "cpp/sync_point.h"
 #include "keys.h"
 #include "meta-service/codec.h"
+#include "meta-service/delete_bitmap_lock_white_list.h"
 #include "meta-service/doris_txn.h"
 #include "meta-service/keys.h"
 #include "meta-service/meta_service_helper.h"
@@ -76,6 +77,8 @@ MetaServiceImpl::MetaServiceImpl(std::shared_ptr<TxnKv> txn_kv,
     rate_limiter_ = rate_limiter;
     rate_limiter_->init(this);
     txn_lazy_committer_ = std::make_shared<TxnLazyCommitter>(txn_kv_);
+    delete_bitmap_lock_white_list_ = std::make_shared<DeleteBitmapLockWhiteList>();
+    delete_bitmap_lock_white_list_->init();
 }
 
 MetaServiceImpl::~MetaServiceImpl() = default;
@@ -1747,11 +1750,14 @@ void MetaServiceImpl::get_tablet_stats(::google::protobuf::RpcController* contro
 }
 
 static bool check_delete_bitmap_lock(MetaServiceCode& code, std::string& msg, std::stringstream& ss,
-                                     std::unique_ptr<Transaction>& txn, int64_t table_id,
-                                     int64_t lock_id, int64_t lock_initiator, std::string& lock_key,
-                                     DeleteBitmapUpdateLockPB& lock_info) {
+                                     std::unique_ptr<Transaction>& txn, std::string& instance_id,
+                                     int64_t table_id, int64_t lock_id, int64_t lock_initiator,
+                                     std::string& lock_key, DeleteBitmapUpdateLockPB& lock_info,
+                                     std::string use_version, std::string log = "") {
     std::string lock_val;
-    LOG(INFO) << "check_delete_bitmap_lock, table_id=" << table_id << " key=" << hex(lock_key);
+    LOG(INFO) << "check_delete_bitmap_lock, table_id=" << table_id << " lock_id=" << lock_id
+              << " initiator=" << lock_initiator << " key=" << hex(lock_key) << log
+              << " use_version=" << use_version;
     auto err = txn->get(lock_key, &lock_val);
     TEST_SYNC_POINT_CALLBACK("check_delete_bitmap_lock.inject_get_lock_key_err", &err);
     if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
@@ -1777,19 +1783,46 @@ static bool check_delete_bitmap_lock(MetaServiceCode& code, std::string& msg, st
         code = MetaServiceCode::LOCK_EXPIRED;
         return false;
     }
-    bool found = false;
-    for (auto initiator : lock_info.initiators()) {
-        if (lock_initiator == initiator) {
-            found = true;
-            break;
+    if (use_version == "v2" && lock_id == COMPACTION_DELETE_BITMAP_LOCK_ID) {
+        std::string tablet_compaction_key =
+                mow_tablet_compaction_key({instance_id, table_id, lock_initiator});
+        std::string tablet_compaction_val;
+        err = txn->get(tablet_compaction_key, &tablet_compaction_val);
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+            ss << "tablet compaction key not found, table_id=" << table_id << " lock_id" << lock_id
+               << " initiator=" << lock_initiator;
+            msg = ss.str();
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return false;
+        }
+        if (err != TxnErrorCode::TXN_OK) {
+            ss << "failed to get tablet compaction info, err=" << err;
+            msg = ss.str();
+            code = cast_as<ErrCategory::READ>(err);
+            return false;
+        }
+        // not check expired time
+        return true;
+    } else {
+        bool found = false;
+        for (auto initiator : lock_info.initiators()) {
+            if (lock_initiator == initiator) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            msg = "lock initiator not exist";
+            code = MetaServiceCode::LOCK_EXPIRED;
+            return false;
         }
     }
-    if (!found) {
-        msg = "lock initiator not exist";
-        code = MetaServiceCode::LOCK_EXPIRED;
-        return false;
-    }
     return true;
+}
+
+void MetaServiceImpl::get_delete_bitmap_lock_version(std::string& use_version,
+                                                     std::string& instance_id) {
+    use_version = delete_bitmap_lock_white_list_->get_delete_bitmap_lock_version(instance_id);
 }
 
 static bool process_pending_delete_bitmap(MetaServiceCode& code, std::string& msg,
@@ -1948,6 +1981,8 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
         LOG(WARNING) << msg << ", cloud_unique_id=" << request->cloud_unique_id();
         return;
     }
+    std::string use_version =
+            delete_bitmap_lock_white_list_->get_delete_bitmap_lock_version(instance_id);
     RPC_RATE_LIMIT(update_delete_bitmap)
 
     uint64_t fdb_txn_size = 0;
@@ -1963,12 +1998,14 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     }
 
     bool unlock = request->has_unlock() ? request->unlock() : false;
+    std::string log = ", update delete bitmap for tablet " + std::to_string(tablet_id);
     if (!unlock) {
         // 1. Check whether the lock expires
         std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
         DeleteBitmapUpdateLockPB lock_info;
-        if (!check_delete_bitmap_lock(code, msg, ss, txn, table_id, request->lock_id(),
-                                      request->initiator(), lock_key, lock_info)) {
+        if (!check_delete_bitmap_lock(code, msg, ss, txn, instance_id, table_id, request->lock_id(),
+                                      request->initiator(), lock_key, lock_info, use_version,
+                                      log)) {
             LOG(WARNING) << "failed to check delete bitmap lock, table_id=" << table_id
                          << " request lock_id=" << request->lock_id()
                          << " request initiator=" << request->initiator() << " msg " << msg;
@@ -2076,8 +2113,9 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
                 std::string lock_key =
                         meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
                 DeleteBitmapUpdateLockPB lock_info;
-                if (!check_delete_bitmap_lock(code, msg, ss, txn, table_id, request->lock_id(),
-                                              request->initiator(), lock_key, lock_info)) {
+                if (!check_delete_bitmap_lock(code, msg, ss, txn, instance_id, table_id,
+                                              request->lock_id(), request->initiator(), lock_key,
+                                              lock_info, use_version, log)) {
                     LOG(WARNING) << "failed to check delete bitmap lock, table_id=" << table_id
                                  << " request lock_id=" << request->lock_id()
                                  << " request initiator=" << request->initiator() << " msg " << msg;
@@ -2100,6 +2138,9 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
     total_txn_put_bytes += txn->put_bytes();
     total_txn_size += txn->approximate_bytes();
     if (err != TxnErrorCode::TXN_OK) {
+        if (err == TxnErrorCode::TXN_CONFLICT) {
+            g_bvar_delete_bitmap_lock_txn_put_conflict_counter << 1;
+        }
         code = cast_as<ErrCategory::COMMIT>(err);
         ss << "failed to update delete bitmap, err=" << err << " tablet_id=" << tablet_id
            << " lock_id=" << request->lock_id() << " initiator=" << request->initiator()
@@ -2117,7 +2158,8 @@ void MetaServiceImpl::update_delete_bitmap(google::protobuf::RpcController* cont
               << " total_value_count=" << total_value_count << " unlock=" << unlock
               << " total_txn_put_keys=" << total_txn_put_keys
               << " total_txn_put_bytes=" << total_txn_put_bytes
-              << " total_txn_size=" << total_txn_size;
+              << " total_txn_size=" << total_txn_size << " instance_id=" << instance_id
+              << " use_version=" << use_version;
 }
 
 void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* controller,
@@ -2306,27 +2348,488 @@ void MetaServiceImpl::get_delete_bitmap(google::protobuf::RpcController* control
     }
 }
 
-void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcController* controller,
+static bool put_mow_tablet_compaction_key(MetaServiceCode& code, std::string& msg,
+                                          std::unique_ptr<Transaction>& txn,
+                                          std::string& instance_id, int64_t table_id,
+                                          int64_t lock_id, int64_t initiator, int64_t expiration,
+                                          std::string& current_lock_msg) {
+    std::string tablet_compaction_key =
+            mow_tablet_compaction_key({instance_id, table_id, initiator});
+    std::string tablet_compaction_val;
+    MowTabletCompactionPB mow_tablet_compaction;
+    mow_tablet_compaction.set_expiration(expiration);
+    mow_tablet_compaction.SerializeToString(&tablet_compaction_val);
+    if (tablet_compaction_val.empty()) {
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        msg = "MowTabletCompactionPB serialization error";
+        return false;
+    }
+    txn->put(tablet_compaction_key, tablet_compaction_val);
+    LOG(INFO) << "xxx put tablet compaction key=" << hex(tablet_compaction_key)
+              << " table_id=" << table_id << " lock_id=" << lock_id << " initiator=" << initiator
+              << " expiration=" << expiration << ", " << current_lock_msg;
+    return true;
+}
+
+static bool put_delete_bitmap_update_lock_key(MetaServiceCode& code, std::string& msg,
+                                              std::unique_ptr<Transaction>& txn, int64_t table_id,
+                                              int64_t lock_id, int64_t initiator,
+                                              std::string& lock_key,
+                                              DeleteBitmapUpdateLockPB& lock_info,
+                                              std::string& current_lock_msg) {
+    std::string lock_val;
+    lock_info.SerializeToString(&lock_val);
+    if (lock_val.empty()) {
+        code = MetaServiceCode::PROTOBUF_SERIALIZE_ERR;
+        msg = "DeleteBitmapUpdateLockPB serialization error";
+        return false;
+    }
+    txn->put(lock_key, lock_val);
+    LOG(INFO) << "xxx put lock_key=" << hex(lock_key) << " table_id=" << table_id
+              << " lock_id=" << lock_id << " initiator=" << initiator
+              << " initiators_size=" << lock_info.initiators_size() << ", " << current_lock_msg;
+    return true;
+}
+
+bool MetaServiceImpl::get_mow_tablet_stats_and_meta(MetaServiceCode& code, std::string& msg,
                                                     const GetDeleteBitmapUpdateLockRequest* request,
                                                     GetDeleteBitmapUpdateLockResponse* response,
-                                                    ::google::protobuf::Closure* done) {
-    RPC_PREPROCESS(get_delete_bitmap_update_lock);
-    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
-    if (cloud_unique_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "cloud unique id not set";
-        return;
+                                                    std::string& instance_id, std::string& lock_key,
+                                                    std::string lock_use_version) {
+    bool require_tablet_stats =
+            request->has_require_compaction_stats() ? request->require_compaction_stats() : false;
+    if (!require_tablet_stats) return true;
+    // this request is from fe when it commits txn for MOW table, we send the compaction stats
+    // along with the GetDeleteBitmapUpdateLockResponse which will be sent to BE later to let
+    // BE eliminate unnecessary sync_rowsets() calls if possible
+    // 1. hold the delete bitmap update lock in MS(update lock_info.lock_id to current load's txn id)
+    // 2. read tablets' stats
+    // 3. check whether we still hold the delete bitmap update lock
+    // these steps can be done in different fdb txns
+
+    StopWatch read_stats_sw;
+    std::unique_ptr<Transaction> txn;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
+    if (err != TxnErrorCode::TXN_OK) {
+        code = cast_as<ErrCategory::CREATE>(err);
+        msg = "failed to init txn";
+        return false;
+    }
+    auto table_id = request->table_id();
+    std::stringstream ss;
+    if (!config::enable_batch_get_mow_tablet_stats_and_meta) {
+        for (const auto& tablet_idx : request->tablet_indexes()) {
+            // 1. get compaction cnts
+            TabletStatsPB tablet_stat;
+            std::string stats_key =
+                    stats_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                      tablet_idx.partition_id(), tablet_idx.tablet_id()});
+            std::string stats_val;
+            TxnErrorCode err = txn->get(stats_key, &stats_val);
+            TEST_SYNC_POINT_CALLBACK(
+                    "get_delete_bitmap_update_lock.get_compaction_cnts_inject_error", &err);
+            if (err == TxnErrorCode::TXN_TOO_OLD) {
+                code = MetaServiceCode::OK;
+                err = txn_kv_->create_txn(&txn);
+                if (err != TxnErrorCode::TXN_OK) {
+                    code = cast_as<ErrCategory::CREATE>(err);
+                    ss << "failed to init txn when get tablet stats";
+                    msg = ss.str();
+                    return false;
+                }
+                err = txn->get(stats_key, &stats_val);
+            }
+            if (err != TxnErrorCode::TXN_OK) {
+                code = cast_as<ErrCategory::READ>(err);
+                msg = fmt::format("failed to get tablet stats, err={} tablet_id={}", err,
+                                  tablet_idx.tablet_id());
+                return false;
+            }
+            if (!tablet_stat.ParseFromArray(stats_val.data(), stats_val.size())) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = fmt::format("marformed tablet stats value, key={}", hex(stats_key));
+                return false;
+            }
+            response->add_base_compaction_cnts(tablet_stat.base_compaction_cnt());
+            response->add_cumulative_compaction_cnts(tablet_stat.cumulative_compaction_cnt());
+            response->add_cumulative_points(tablet_stat.cumulative_point());
+
+            // 2. get tablet states
+            std::string tablet_meta_key =
+                    meta_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                     tablet_idx.partition_id(), tablet_idx.tablet_id()});
+            std::string tablet_meta_val;
+            err = txn->get(tablet_meta_key, &tablet_meta_val);
+            if (err != TxnErrorCode::TXN_OK) {
+                ss << "failed to get tablet meta"
+                   << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
+                   << " instance_id=" << instance_id << " tablet_id=" << tablet_idx.tablet_id()
+                   << " key=" << hex(tablet_meta_key) << " err=" << err;
+                msg = ss.str();
+                code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
+                                                              : cast_as<ErrCategory::READ>(err);
+                return false;
+            }
+            doris::TabletMetaCloudPB tablet_meta;
+            if (!tablet_meta.ParseFromString(tablet_meta_val)) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "malformed tablet meta";
+                return false;
+            }
+            response->add_tablet_states(
+                    static_cast<std::underlying_type_t<TabletStatePB>>(tablet_meta.tablet_state()));
+        }
+    } else {
+        // 1. get compaction cnts
+        std::vector<std::string> stats_tablet_keys;
+        for (const auto& tablet_idx : request->tablet_indexes()) {
+            stats_tablet_keys.push_back(
+                    stats_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                      tablet_idx.partition_id(), tablet_idx.tablet_id()}));
+        }
+        std::vector<std::optional<std::string>> stats_tablet_values;
+        err = txn->batch_get(&stats_tablet_values, stats_tablet_keys);
+        TEST_SYNC_POINT_CALLBACK("get_delete_bitmap_update_lock.get_compaction_cnts_inject_error",
+                                 &err);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
+            msg = fmt::format("failed to get tablet stats, err={} table_id={} lock_id={}", err,
+                              table_id, request->lock_id());
+            return false;
+        }
+        for (size_t i = 0; i < stats_tablet_keys.size(); i++) {
+            if (!stats_tablet_values[i].has_value()) {
+                code = cast_as<ErrCategory::READ>(err);
+                msg = fmt::format("failed to get tablet stats, err={} tablet_id={}", err,
+                                  request->tablet_indexes(i).tablet_id());
+                return false;
+            }
+            TabletStatsPB tablet_stat;
+            if (!tablet_stat.ParseFromString(stats_tablet_values[i].value())) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = fmt::format("marformed tablet stats value");
+                return false;
+            }
+            response->add_base_compaction_cnts(tablet_stat.base_compaction_cnt());
+            response->add_cumulative_compaction_cnts(tablet_stat.cumulative_compaction_cnt());
+            response->add_cumulative_points(tablet_stat.cumulative_point());
+        }
+        stats_tablet_keys.clear();
+        stats_tablet_values.clear();
+        DCHECK(request->tablet_indexes_size() == response->base_compaction_cnts_size());
+        DCHECK(request->tablet_indexes_size() == response->cumulative_compaction_cnts_size());
+        DCHECK(request->tablet_indexes_size() == response->cumulative_points_size());
+
+        // 2. get tablet states
+        std::vector<std::string> tablet_meta_keys;
+        for (const auto& tablet_idx : request->tablet_indexes()) {
+            tablet_meta_keys.push_back(
+                    meta_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
+                                     tablet_idx.partition_id(), tablet_idx.tablet_id()}));
+        }
+        std::vector<std::optional<std::string>> tablet_meta_values;
+        err = txn->batch_get(&tablet_meta_values, tablet_meta_keys);
+        if (err == TxnErrorCode::TXN_TOO_OLD) {
+            code = MetaServiceCode::OK;
+            err = txn_kv_->create_txn(&txn);
+            if (err != TxnErrorCode::TXN_OK) {
+                code = cast_as<ErrCategory::CREATE>(err);
+                ss << "failed to init txn when get tablet meta";
+                msg = ss.str();
+                return false;
+            }
+            err = txn->batch_get(&tablet_meta_values, tablet_meta_keys);
+        }
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::READ>(err);
+            msg = fmt::format("failed to get tablet meta, err={} table_id={} lock_id={}", err,
+                              table_id, request->lock_id());
+            return false;
+        }
+        for (size_t i = 0; i < tablet_meta_keys.size(); i++) {
+            if (!tablet_meta_values[i].has_value()) {
+                code = cast_as<ErrCategory::READ>(err);
+                msg = fmt::format("failed to get tablet meta, err={} tablet_id={}", err,
+                                  request->tablet_indexes(i).tablet_id());
+                return false;
+            }
+            doris::TabletMetaCloudPB tablet_meta;
+            if (!tablet_meta.ParseFromString(tablet_meta_values[i].value())) {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = fmt::format("marformed tablet meta value");
+                return false;
+            }
+            response->add_tablet_states(
+                    static_cast<std::underlying_type_t<TabletStatePB>>(tablet_meta.tablet_state()));
+        }
+        DCHECK(request->tablet_indexes_size() == response->tablet_states_size());
     }
 
-    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
-    if (instance_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "empty instance_id";
-        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
-        return;
+    read_stats_sw.pause();
+    LOG(INFO) << fmt::format(
+            "table_id={}, tablet_idxes.size()={}, read tablet compaction cnts and tablet states "
+            "cost={} ms",
+            table_id, request->tablet_indexes().size(), read_stats_sw.elapsed_us() / 1000);
+
+    DeleteBitmapUpdateLockPB lock_info_tmp;
+    if (!check_delete_bitmap_lock(code, msg, ss, txn, instance_id, table_id, request->lock_id(),
+                                  request->initiator(), lock_key, lock_info_tmp,
+                                  lock_use_version)) {
+        LOG(WARNING) << "failed to check delete bitmap lock after get tablet stats and tablet "
+                        "states, table_id="
+                     << table_id << " request lock_id=" << request->lock_id()
+                     << " request initiator=" << request->initiator() << " code=" << code
+                     << " msg=" << msg;
+        return false;
+    }
+    return true;
+}
+
+void MetaServiceImpl::get_delete_bitmap_update_lock_v2(
+        google::protobuf::RpcController* controller,
+        const GetDeleteBitmapUpdateLockRequest* request,
+        GetDeleteBitmapUpdateLockResponse* response, ::google::protobuf::Closure* done,
+        std::string& instance_id, MetaServiceCode& code, std::string& msg, std::stringstream& ss) {
+    VLOG_DEBUG << "get delete bitmap update lock in v2 for table=" << request->table_id()
+               << ",lock id=" << request->lock_id() << ",initiator=" << request->initiator();
+    auto table_id = request->table_id();
+    std::string lock_key = meta_delete_bitmap_update_lock_key({instance_id, table_id, -1});
+    bool first_retry = true;
+    int64_t retry = 0;
+    while (retry <= 1) {
+        retry++;
+        response->Clear();
+        std::unique_ptr<Transaction> txn;
+        TxnErrorCode err = txn_kv_->create_txn(&txn);
+        if (err != TxnErrorCode::TXN_OK) {
+            code = cast_as<ErrCategory::CREATE>(err);
+            msg = "failed to init txn";
+            return;
+        }
+        std::string lock_val;
+        DeleteBitmapUpdateLockPB lock_info;
+        err = txn->get(lock_key, &lock_val);
+        if (err != TxnErrorCode::TXN_OK && err != TxnErrorCode::TXN_KEY_NOT_FOUND) {
+            ss << "failed to get delete bitmap update lock, instance_id=" << instance_id
+               << " table_id=" << table_id << " key=" << hex(lock_key) << " err=" << err;
+            msg = ss.str();
+            code = MetaServiceCode::KV_TXN_GET_ERR;
+            return;
+        }
+        using namespace std::chrono;
+        int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+        int64_t expiration = now + request->expiration();
+        bool lock_key_not_found = false;
+        if (err == TxnErrorCode::TXN_KEY_NOT_FOUND) {
+            lock_key_not_found = true;
+            std::string current_lock_msg = "lock key not found";
+            lock_info.set_lock_id(request->lock_id());
+            // compaction does not use this expiration, only used when upgrade ms
+            lock_info.set_expiration(expiration);
+            if (request->lock_id() != COMPACTION_DELETE_BITMAP_LOCK_ID) {
+                lock_info.add_initiators(request->initiator());
+            } else {
+                // in normal case, this should remove 0 kvs
+                // but when upgrade ms, if there are ms with old and new versions, it works
+                std::string tablet_compaction_key_begin =
+                        mow_tablet_compaction_key({instance_id, table_id, 0});
+                std::string tablet_compaction_key_end =
+                        mow_tablet_compaction_key({instance_id, table_id, INT64_MAX});
+                txn->remove(tablet_compaction_key_begin, tablet_compaction_key_end);
+                LOG(INFO) << "remove mow tablet compaction kv, begin="
+                          << hex(tablet_compaction_key_begin)
+                          << " end=" << hex(tablet_compaction_key_end) << " table_id=" << table_id;
+                if (!put_mow_tablet_compaction_key(code, msg, txn, instance_id, table_id,
+                                                   request->lock_id(), request->initiator(),
+                                                   expiration, current_lock_msg)) {
+                    return;
+                }
+            }
+            if (!put_delete_bitmap_update_lock_key(code, msg, txn, table_id, request->lock_id(),
+                                                   request->initiator(), lock_key, lock_info,
+                                                   current_lock_msg)) {
+                return;
+            }
+        } else if (err == TxnErrorCode::TXN_OK) {
+            if (!lock_info.ParseFromString(lock_val)) [[unlikely]] {
+                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                msg = "failed to parse DeleteBitmapUpdateLockPB";
+                return;
+            }
+            if (lock_info.lock_id() != COMPACTION_DELETE_BITMAP_LOCK_ID) {
+                if (lock_info.expiration() > 0 && lock_info.expiration() < now) {
+                    LOG(INFO) << "delete bitmap lock expired, continue to process. lock_id="
+                              << lock_info.lock_id() << " table_id=" << table_id
+                              << " expiration=" << lock_info.expiration() << " now=" << now
+                              << " initiator_size=" << lock_info.initiators_size();
+                    lock_info.clear_initiators();
+                } else if (lock_info.lock_id() != request->lock_id()) {
+                    ss << "already be locked by lock_id=" << lock_info.lock_id()
+                       << " expiration=" << lock_info.expiration() << " now=" << now
+                       << ", request lock_id=" << request->lock_id() << " table_id=" << table_id
+                       << " initiator=" << request->initiator();
+                    msg = ss.str();
+                    code = MetaServiceCode::LOCK_CONFLICT;
+                    return;
+                }
+                std::string current_lock_msg =
+                        "original lock_id=" + std::to_string(lock_info.lock_id());
+                lock_info.set_lock_id(request->lock_id());
+                // compaction does not use the expiration, only used when upgrade ms
+                lock_info.set_expiration(expiration);
+                if (request->lock_id() != COMPACTION_DELETE_BITMAP_LOCK_ID) {
+                    bool found = false;
+                    for (auto initiator : lock_info.initiators()) {
+                        if (request->initiator() == initiator) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        lock_info.add_initiators(request->initiator());
+                    }
+                } else {
+                    lock_key_not_found = true;
+                    // in normal case, this should remove 0 kvs
+                    // but when upgrade ms, if there are ms with old and new versions, it works
+                    std::string tablet_compaction_key_begin =
+                            mow_tablet_compaction_key({instance_id, table_id, 0});
+                    std::string tablet_compaction_key_end =
+                            mow_tablet_compaction_key({instance_id, table_id, INT64_MAX});
+                    txn->remove(tablet_compaction_key_begin, tablet_compaction_key_end);
+                    LOG(INFO) << "remove mow tablet compaction kv, begin="
+                              << hex(tablet_compaction_key_begin)
+                              << " end=" << hex(tablet_compaction_key_end)
+                              << " table_id=" << table_id;
+                    if (!put_mow_tablet_compaction_key(code, msg, txn, instance_id, table_id,
+                                                       request->lock_id(), request->initiator(),
+                                                       expiration, current_lock_msg)) {
+                        return;
+                    }
+                }
+                if (!put_delete_bitmap_update_lock_key(code, msg, txn, table_id, request->lock_id(),
+                                                       request->initiator(), lock_key, lock_info,
+                                                       current_lock_msg)) {
+                    return;
+                }
+            } else {
+                if (request->lock_id() == COMPACTION_DELETE_BITMAP_LOCK_ID) {
+                    std::string current_lock_msg = "locked by lock_id=-1";
+                    if (!put_mow_tablet_compaction_key(code, msg, txn, instance_id, table_id,
+                                                       request->lock_id(), request->initiator(),
+                                                       expiration, current_lock_msg)) {
+                        return;
+                    }
+                } else {
+                    // check if compaction key is expired
+                    bool has_unexpired_compaction = false;
+                    int64_t unexpired_expiration = 0;
+                    std::string key0 = mow_tablet_compaction_key({instance_id, table_id, 0});
+                    std::string key1 = mow_tablet_compaction_key({instance_id, table_id + 1, 0});
+                    MowTabletCompactionPB mow_tablet_compaction;
+                    std::unique_ptr<RangeGetIterator> it;
+                    int64_t expired_compaction_num = 0;
+                    do {
+                        err = txn->get(key0, key1, &it);
+                        if (err != TxnErrorCode::TXN_OK) {
+                            code = cast_as<ErrCategory::READ>(err);
+                            ss << "internal error, failed to get mow tablet compaction, err="
+                               << err;
+                            msg = ss.str();
+                            LOG(WARNING) << msg;
+                            return;
+                        }
+
+                        while (it->has_next() && !has_unexpired_compaction) {
+                            auto [k, v] = it->next();
+                            if (!mow_tablet_compaction.ParseFromArray(v.data(), v.size()))
+                                    [[unlikely]] {
+                                code = MetaServiceCode::PROTOBUF_PARSE_ERR;
+                                msg = "failed to parse MowTabletCompactionPB";
+                                return;
+                            }
+                            if (mow_tablet_compaction.expiration() > 0 &&
+                                mow_tablet_compaction.expiration() < now) {
+                                LOG(INFO) << "remove mow tablet compaction lock. table_id="
+                                          << table_id << " lock_id=" << lock_info.lock_id()
+                                          << " expiration=" << mow_tablet_compaction.expiration()
+                                          << " now=" << now << " key=" << hex(k);
+                                txn->remove(k);
+                                expired_compaction_num++;
+                            } else {
+                                has_unexpired_compaction = true;
+                                unexpired_expiration = mow_tablet_compaction.expiration();
+                            }
+                        }
+                        key0 = it->next_begin_key(); // Update to next smallest key for iteration
+                    } while (it->more() && !has_unexpired_compaction);
+                    if (has_unexpired_compaction) {
+                        // TODO print initiator
+                        ss << "already be locked by lock_id=" << lock_info.lock_id()
+                           << " expiration=" << unexpired_expiration << " now=" << now
+                           << ". request lock_id=" << request->lock_id() << " table_id=" << table_id
+                           << " initiator=" << request->initiator();
+                        msg = ss.str();
+                        code = MetaServiceCode::LOCK_CONFLICT;
+                        return;
+                    }
+                    // all compaction is expired
+                    lock_info.set_lock_id(request->lock_id());
+                    lock_info.set_expiration(expiration);
+                    lock_info.clear_initiators();
+                    lock_info.add_initiators(request->initiator());
+                    std::string current_lock_msg =
+                            std::to_string(expired_compaction_num) + " compaction is expired";
+                    if (!put_delete_bitmap_update_lock_key(code, msg, txn, table_id,
+                                                           request->lock_id(), request->initiator(),
+                                                           lock_key, lock_info, current_lock_msg)) {
+                        return;
+                    }
+                }
+            }
+        }
+
+        err = txn->commit();
+        TEST_SYNC_POINT_CALLBACK("get_delete_bitmap_update_lock:commit:conflict", &first_retry,
+                                 &err);
+        if (err == TxnErrorCode::TXN_OK) {
+            break;
+        } else if (err == TxnErrorCode::TXN_CONFLICT && lock_key_not_found &&
+                   request->lock_id() == COMPACTION_DELETE_BITMAP_LOCK_ID &&
+                   config::delete_bitmap_enable_retry_txn_conflict && first_retry) {
+            // if err is TXN_CONFLICT, and the lock id is -1, do a fast retry
+            if (err == TxnErrorCode::TXN_CONFLICT) {
+                g_bvar_delete_bitmap_lock_txn_put_conflict_counter << 1;
+            }
+            LOG(INFO) << "fast retry to get_delete_bitmap_update_lock, tablet_id="
+                      << request->table_id() << " lock_id=" << request->lock_id()
+                      << ", initiator=" << request->initiator() << ", err=" << err;
+            first_retry = false;
+            continue;
+        } else {
+            if (err == TxnErrorCode::TXN_CONFLICT) {
+                g_bvar_delete_bitmap_lock_txn_put_conflict_counter << 1;
+            }
+            code = cast_as<ErrCategory::COMMIT>(err);
+            ss << "failed to get_delete_bitmap_update_lock, lock_id=" << request->lock_id()
+               << ", initiator=" << request->initiator() << ", err=" << err;
+            msg = ss.str();
+            return;
+        }
     }
 
-    RPC_RATE_LIMIT(get_delete_bitmap_update_lock)
+    if (!get_mow_tablet_stats_and_meta(code, msg, request, response, instance_id, lock_key, "v2")) {
+        return;
+    }
+}
+
+void MetaServiceImpl::get_delete_bitmap_update_lock_v1(
+        google::protobuf::RpcController* controller,
+        const GetDeleteBitmapUpdateLockRequest* request,
+        GetDeleteBitmapUpdateLockResponse* response, ::google::protobuf::Closure* done,
+        std::string& instance_id, MetaServiceCode& code, std::string& msg, std::stringstream& ss) {
+    VLOG_DEBUG << "get delete bitmap update lock in v1 for table=" << request->table_id()
+               << ",lock id=" << request->lock_id() << ",initiator=" << request->initiator();
     std::unique_ptr<Transaction> txn;
     TxnErrorCode err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
@@ -2399,125 +2902,97 @@ void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcControl
         return;
     }
 
-    bool require_tablet_stats =
-            request->has_require_compaction_stats() ? request->require_compaction_stats() : false;
-    if (!require_tablet_stats) return;
-    // this request is from fe when it commits txn for MOW table, we send the compaction stats
-    // along with the GetDeleteBitmapUpdateLockResponse which will be sent to BE later to let
-    // BE eliminate unnecessary sync_rowsets() calls if possible
+    if (!get_mow_tablet_stats_and_meta(code, msg, request, response, instance_id, lock_key, "v1")) {
+        return;
+    };
+}
 
-    // 1. hold the delete bitmap update lock in MS(update lock_info.lock_id to current load's txn id)
-    // 2. read tablets' stats
-    // 3. check whether we still hold the delete bitmap update lock
-    // these steps can be done in different fdb txns
-
-    StopWatch read_stats_sw;
-    err = txn_kv_->create_txn(&txn);
+void MetaServiceImpl::remove_delete_bitmap_update_lock_v2(
+        google::protobuf::RpcController* controller,
+        const RemoveDeleteBitmapUpdateLockRequest* request,
+        RemoveDeleteBitmapUpdateLockResponse* response, ::google::protobuf::Closure* done,
+        std::string& instance_id, MetaServiceCode& code, std::string& msg, std::stringstream& ss) {
+    VLOG_DEBUG << "remove delete bitmap update lock in v2 for table=" << request->table_id()
+               << ",lock id=" << request->lock_id() << ",initiator=" << request->initiator();
+    std::unique_ptr<Transaction> txn;
+    TxnErrorCode err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
         code = cast_as<ErrCategory::CREATE>(err);
         msg = "failed to init txn";
         return;
     }
-
-    for (const auto& tablet_idx : request->tablet_indexes()) {
-        // 1. get compaction cnts
-        TabletStatsPB tablet_stat;
-        std::string stats_key =
-                stats_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
-                                  tablet_idx.partition_id(), tablet_idx.tablet_id()});
-        std::string stats_val;
-        TxnErrorCode err = txn->get(stats_key, &stats_val);
-        TEST_SYNC_POINT_CALLBACK("get_delete_bitmap_update_lock.get_compaction_cnts_inject_error",
-                                 &err);
-        if (err == TxnErrorCode::TXN_TOO_OLD) {
-            code = MetaServiceCode::OK;
-            err = txn_kv_->create_txn(&txn);
-            if (err != TxnErrorCode::TXN_OK) {
-                code = cast_as<ErrCategory::CREATE>(err);
-                ss << "failed to init txn when get tablet stats";
-                msg = ss.str();
+    if (request->lock_id() == COMPACTION_DELETE_BITMAP_LOCK_ID) {
+        std::string tablet_compaction_key =
+                mow_tablet_compaction_key({instance_id, request->table_id(), request->initiator()});
+        txn->remove(tablet_compaction_key);
+        LOG(INFO) << "remove tablet compaction lock, table_id=" << request->table_id()
+                  << " lock_id=" << request->lock_id() << " initiator=" << request->initiator()
+                  << " key=" << hex(tablet_compaction_key);
+    } else {
+        std::string lock_key =
+                meta_delete_bitmap_update_lock_key({instance_id, request->table_id(), -1});
+        std::string lock_val;
+        DeleteBitmapUpdateLockPB lock_info;
+        if (!check_delete_bitmap_lock(code, msg, ss, txn, instance_id, request->table_id(),
+                                      request->lock_id(), request->initiator(), lock_key, lock_info,
+                                      "v2", ", remove lock")) {
+            LOG(WARNING) << "failed to check delete bitmap tablet lock"
+                         << " table_id=" << request->table_id()
+                         << " tablet_id=" << request->tablet_id()
+                         << " request lock_id=" << request->lock_id()
+                         << " request initiator=" << request->initiator() << " msg " << msg;
+            return;
+        }
+        bool modify_initiators = false;
+        auto initiators = lock_info.mutable_initiators();
+        for (auto iter = initiators->begin(); iter != initiators->end(); iter++) {
+            if (*iter == request->initiator()) {
+                initiators->erase(iter);
+                modify_initiators = true;
+                break;
+            }
+        }
+        if (!modify_initiators) {
+            LOG(INFO) << "initiators don't have initiator=" << request->initiator()
+                      << ",initiators_size=" << lock_info.initiators_size() << ",just return";
+            return;
+        } else if (initiators->empty()) {
+            LOG(INFO) << "remove delete bitmap lock, table_id=" << request->table_id()
+                      << " lock_id=" << request->lock_id() << " key=" << hex(lock_key);
+            txn->remove(lock_key);
+        } else {
+            lock_info.SerializeToString(&lock_val);
+            if (lock_val.empty()) {
+                LOG(WARNING) << "failed to seiralize lock_info, table_id=" << request->table_id()
+                             << " key=" << hex(lock_key);
                 return;
             }
-            err = txn->get(stats_key, &stats_val);
+            LOG(INFO) << "remove delete bitmap lock initiator, table_id=" << request->table_id()
+                      << ", key=" << hex(lock_key) << " lock_id=" << request->lock_id()
+                      << " initiator=" << request->initiator()
+                      << " initiators_size=" << lock_info.initiators_size();
+            txn->put(lock_key, lock_val);
         }
-        if (err != TxnErrorCode::TXN_OK) {
-            code = cast_as<ErrCategory::READ>(err);
-            msg = fmt::format("failed to get tablet stats, err={} tablet_id={}", err,
-                              tablet_idx.tablet_id());
-            return;
-        }
-        if (!tablet_stat.ParseFromArray(stats_val.data(), stats_val.size())) {
-            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            msg = fmt::format("marformed tablet stats value, key={}", hex(stats_key));
-            return;
-        }
-        response->add_base_compaction_cnts(tablet_stat.base_compaction_cnt());
-        response->add_cumulative_compaction_cnts(tablet_stat.cumulative_compaction_cnt());
-        response->add_cumulative_points(tablet_stat.cumulative_point());
-
-        // 2. get tablet states
-        std::string tablet_meta_key =
-                meta_tablet_key({instance_id, tablet_idx.table_id(), tablet_idx.index_id(),
-                                 tablet_idx.partition_id(), tablet_idx.tablet_id()});
-        std::string tablet_meta_val;
-        err = txn->get(tablet_meta_key, &tablet_meta_val);
-        if (err != TxnErrorCode::TXN_OK) {
-            ss << "failed to get tablet meta"
-               << (err == TxnErrorCode::TXN_KEY_NOT_FOUND ? " (not found)" : "")
-               << " instance_id=" << instance_id << " tablet_id=" << tablet_idx.tablet_id()
-               << " key=" << hex(tablet_meta_key) << " err=" << err;
-            msg = ss.str();
-            code = err == TxnErrorCode::TXN_KEY_NOT_FOUND ? MetaServiceCode::TABLET_NOT_FOUND
-                                                          : cast_as<ErrCategory::READ>(err);
-            return;
-        }
-        doris::TabletMetaCloudPB tablet_meta;
-        if (!tablet_meta.ParseFromString(tablet_meta_val)) {
-            code = MetaServiceCode::PROTOBUF_PARSE_ERR;
-            msg = "malformed tablet meta";
-            return;
-        }
-        response->add_tablet_states(
-                static_cast<std::underlying_type_t<TabletStatePB>>(tablet_meta.tablet_state()));
     }
-
-    read_stats_sw.pause();
-    LOG(INFO) << fmt::format(
-            "tablet_idxes.size()={}, read tablet compaction cnts and tablet states cost={} ms",
-            request->tablet_indexes().size(), read_stats_sw.elapsed_us() / 1000);
-
-    DeleteBitmapUpdateLockPB lock_info_tmp;
-    if (!check_delete_bitmap_lock(code, msg, ss, txn, table_id, request->lock_id(),
-                                  request->initiator(), lock_key, lock_info_tmp)) {
-        LOG(WARNING) << "failed to check delete bitmap lock after get tablet stats and tablet "
-                        "states, table_id="
-                     << table_id << " request lock_id=" << request->lock_id()
-                     << " request initiator=" << request->initiator() << " code=" << code
-                     << " msg=" << msg;
+    err = txn->commit();
+    if (err != TxnErrorCode::TXN_OK) {
+        if (err == TxnErrorCode::TXN_CONFLICT) {
+            g_bvar_delete_bitmap_lock_txn_remove_conflict_by_fail_counter << 1;
+        }
+        code = cast_as<ErrCategory::COMMIT>(err);
+        ss << "failed to remove delete bitmap tablet lock , err=" << err;
+        msg = ss.str();
+        return;
     }
 }
 
-void MetaServiceImpl::remove_delete_bitmap_update_lock(
+void MetaServiceImpl::remove_delete_bitmap_update_lock_v1(
         google::protobuf::RpcController* controller,
         const RemoveDeleteBitmapUpdateLockRequest* request,
-        RemoveDeleteBitmapUpdateLockResponse* response, ::google::protobuf::Closure* done) {
-    RPC_PREPROCESS(remove_delete_bitmap_update_lock);
-    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
-    if (cloud_unique_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "cloud unique id not set";
-        return;
-    }
-
-    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
-    if (instance_id.empty()) {
-        code = MetaServiceCode::INVALID_ARGUMENT;
-        msg = "empty instance_id";
-        LOG(INFO) << msg << ", cloud_unique_id=" << cloud_unique_id;
-        return;
-    }
-
-    RPC_RATE_LIMIT(remove_delete_bitmap_update_lock)
+        RemoveDeleteBitmapUpdateLockResponse* response, ::google::protobuf::Closure* done,
+        std::string& instance_id, MetaServiceCode& code, std::string& msg, std::stringstream& ss) {
+    VLOG_DEBUG << "remove delete bitmap update lock in v1 for table=" << request->table_id()
+               << ",lock id=" << request->lock_id() << ",initiator=" << request->initiator();
     std::unique_ptr<Transaction> txn;
     TxnErrorCode err = txn_kv_->create_txn(&txn);
     if (err != TxnErrorCode::TXN_OK) {
@@ -2529,8 +3004,9 @@ void MetaServiceImpl::remove_delete_bitmap_update_lock(
             meta_delete_bitmap_update_lock_key({instance_id, request->table_id(), -1});
     std::string lock_val;
     DeleteBitmapUpdateLockPB lock_info;
-    if (!check_delete_bitmap_lock(code, msg, ss, txn, request->table_id(), request->lock_id(),
-                                  request->initiator(), lock_key, lock_info)) {
+    if (!check_delete_bitmap_lock(code, msg, ss, txn, instance_id, request->table_id(),
+                                  request->lock_id(), request->initiator(), lock_key, lock_info,
+                                  "v1")) {
         LOG(WARNING) << "failed to check delete bitmap tablet lock"
                      << " table_id=" << request->table_id() << " tablet_id=" << request->tablet_id()
                      << " request lock_id=" << request->lock_id()
@@ -2573,6 +3049,68 @@ void MetaServiceImpl::remove_delete_bitmap_update_lock(
         ss << "failed to remove delete bitmap tablet lock , err=" << err;
         msg = ss.str();
         return;
+    }
+}
+
+void MetaServiceImpl::get_delete_bitmap_update_lock(google::protobuf::RpcController* controller,
+                                                    const GetDeleteBitmapUpdateLockRequest* request,
+                                                    GetDeleteBitmapUpdateLockResponse* response,
+                                                    ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(get_delete_bitmap_update_lock);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        return;
+    }
+    RPC_RATE_LIMIT(get_delete_bitmap_update_lock)
+    std::string use_version =
+            delete_bitmap_lock_white_list_->get_delete_bitmap_lock_version(instance_id);
+    LOG(INFO) << "get_delete_bitmap_update_lock instance_id=" << instance_id
+              << " use_version=" << use_version;
+    if (use_version == "v2") {
+        get_delete_bitmap_update_lock_v2(controller, request, response, done, instance_id, code,
+                                         msg, ss);
+    } else {
+        get_delete_bitmap_update_lock_v1(controller, request, response, done, instance_id, code,
+                                         msg, ss);
+    }
+}
+
+void MetaServiceImpl::remove_delete_bitmap_update_lock(
+        google::protobuf::RpcController* controller,
+        const RemoveDeleteBitmapUpdateLockRequest* request,
+        RemoveDeleteBitmapUpdateLockResponse* response, ::google::protobuf::Closure* done) {
+    RPC_PREPROCESS(remove_delete_bitmap_update_lock);
+    std::string cloud_unique_id = request->has_cloud_unique_id() ? request->cloud_unique_id() : "";
+    if (cloud_unique_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "cloud unique id not set";
+        return;
+    }
+    instance_id = get_instance_id(resource_mgr_, cloud_unique_id);
+    if (instance_id.empty()) {
+        code = MetaServiceCode::INVALID_ARGUMENT;
+        msg = "empty instance_id";
+        return;
+    }
+    RPC_RATE_LIMIT(remove_delete_bitmap_update_lock)
+    std::string use_version =
+            delete_bitmap_lock_white_list_->get_delete_bitmap_lock_version(instance_id);
+    LOG(INFO) << "remove_delete_bitmap_update_lock instance_id=" << instance_id
+              << " use_version=" << use_version;
+    if (use_version == "v2") {
+        remove_delete_bitmap_update_lock_v2(controller, request, response, done, instance_id, code,
+                                            msg, ss);
+    } else {
+        remove_delete_bitmap_update_lock_v1(controller, request, response, done, instance_id, code,
+                                            msg, ss);
     }
 }
 
