@@ -69,6 +69,7 @@ bvar::Adder<uint64_t> g_file_cache_recycle_cache_requested_index_num(
         "file_cache_recycle_cache_requested_index_num");
 bvar::Status<int64_t> g_file_cache_warm_up_rowset_last_call_unix_ts(
         "file_cache_warm_up_rowset_last_call_unix_ts", 0);
+bvar::Adder<uint64_t> g_file_cache_warm_up_long_tail_num("file_cache_warm_up_long_tail_num");
 
 CloudWarmUpManager::CloudWarmUpManager(CloudStorageEngine& engine) : _engine(engine) {
     _download_thread = std::thread(&CloudWarmUpManager::handle_jobs, this);
@@ -237,8 +238,27 @@ void CloudWarmUpManager::handle_jobs() {
         }
         timespec time;
         time.tv_sec = UnixSeconds() + WAIT_TIME_SECONDS;
-        if (!wait->timed_wait(time)) {
+        if (wait->timed_wait(time)) {
             LOG_WARNING("Warm up {} tablets take a long time", cur_job->tablet_ids.size());
+            g_file_cache_warm_up_long_tail_num << 1;
+            std::stringstream ss;
+            for (int64_t tablet_id : cur_job->tablet_ids) {
+                auto res = _engine.tablet_mgr().get_tablet(tablet_id);
+                if (!res.has_value()) {
+                    LOG_WARNING("Warm up error ").tag("tablet_id", tablet_id).error(res.error());
+                    continue;
+                }
+                auto tablet = res.value();
+                auto st = tablet->sync_rowsets();
+                if (!st) {
+                    LOG_WARNING("Warm up error ").tag("tablet_id", tablet_id).error(st);
+                    continue;
+                }
+                auto tablet_meta = tablet->tablet_meta();
+                ss << " " << tablet_id << ":localsize=" << tablet_meta->tablet_local_size()
+                   << ",remotesize=" << tablet_meta->tablet_remote_size();
+            }
+            LOG(WARNING) << ss.str();
         }
         {
             std::unique_lock lock(_mtx);
