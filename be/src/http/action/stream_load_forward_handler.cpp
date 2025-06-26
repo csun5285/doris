@@ -19,8 +19,8 @@
 
 #include <event2/buffer.h>
 #include <event2/http.h>
-#include <event2/keyvalq_struct.h>
 #include <event2/http_struct.h>
+#include <event2/keyvalq_struct.h>
 
 #include "common/config.h"
 #include "common/logging.h"
@@ -114,8 +114,8 @@ void StreamLoadForwardHandler::handle(HttpRequest* req) {
         while (!ctx->request_data_chunks.empty()) {
             const auto& bb = ctx->request_data_chunks.front();
             if (evbuffer_add(output, bb->ptr, bb->limit) != 0) {
-                LOG(WARNING) << "Failed to add buffered data to output buffer, chunk size: " 
-                             << bb->limit << ", total size: " << ctx->total_request_size 
+                LOG(WARNING) << "Failed to add buffered data to output buffer, chunk size: "
+                             << bb->limit << ", total size: " << ctx->total_request_size
                              << ", path: " << req->raw_path();
                 HttpChannel::send_reply(req, HttpStatus::INTERNAL_SERVER_ERROR,
                                         "Failed to prepare forward data");
@@ -129,16 +129,14 @@ void StreamLoadForwardHandler::handle(HttpRequest* req) {
                             build_forward_url(req).c_str()) != 0) {
         LOG(WARNING) << "Failed to make forward request to " << ctx->target_host << ":"
                      << ctx->target_port << ", path: " << req->raw_path();
-        HttpChannel::send_reply(
-                req, HttpStatus::INTERNAL_SERVER_ERROR,
-                "Failed to forward request to target server: " + ctx->target_host + ":" +
-                        std::to_string(ctx->target_port));
+        HttpChannel::send_reply(req, HttpStatus::INTERNAL_SERVER_ERROR,
+                                "Failed to forward request to target server: " + ctx->target_host +
+                                        ":" + std::to_string(ctx->target_port));
         return;
     }
 
-    LOG(INFO) << "StreamLoadForward request sent - data size: " 
-              << ctx->total_request_size << ", target: " 
-              << ctx->target_host << ":" << ctx->target_port 
+    LOG(INFO) << "StreamLoadForward request sent - data size: " << ctx->total_request_size
+              << ", target: " << ctx->target_host << ":" << ctx->target_port
               << ", path: " << req->raw_path();
 }
 
@@ -280,7 +278,8 @@ void StreamLoadForwardHandler::send_complete_response(struct evhttp_request* req
 void StreamLoadForwardHandler::copy_response_headers(struct evkeyvalq* input_headers,
                                                      struct evkeyvalq* output_headers) {
     // Copy headers from upstream, excluding specific ones we manage ourselves
-    for (struct evkeyval* header = input_headers->tqh_first; header != nullptr; header = header->next.tqe_next) {
+    for (struct evkeyval* header = input_headers->tqh_first; header != nullptr;
+         header = header->next.tqe_next) {
         if (strcasecmp(header->key, "Transfer-Encoding") == 0 ||
             strcasecmp(header->key, "Content-Length") == 0 ||
             strcasecmp(header->key, "Date") == 0 || strcasecmp(header->key, "Server") == 0 ||
@@ -374,7 +373,8 @@ void StreamLoadForwardHandler::setup_forward_headers(HttpRequest* req,
     struct evkeyvalq* output_headers = evhttp_request_get_output_headers(forward_req);
 
     // Copy all headers from original request, except Host, Transfer-Encoding, and Content-Length
-    for (struct evkeyval* header = input_headers->tqh_first; header != nullptr; header = header->next.tqe_next) {
+    for (struct evkeyval* header = input_headers->tqh_first; header != nullptr;
+         header = header->next.tqe_next) {
         // Skip headers that conflict with libevent's automatic handling
         if (strcasecmp(header->key, "Host") == 0 ||
             strcasecmp(header->key, "Transfer-Encoding") == 0 ||
