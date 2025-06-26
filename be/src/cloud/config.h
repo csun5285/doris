@@ -121,5 +121,7 @@ DECLARE_mInt64(meta_service_rpc_reconnect_interval_ms);
 
 DECLARE_mInt64(warmup_tablet_replica_info_cache_ttl_sec);
 
+DECLARE_mInt64(warm_up_rowset_slow_log_ms);
+
 #include "common/compile_check_end.h"
 } // namespace doris::config
