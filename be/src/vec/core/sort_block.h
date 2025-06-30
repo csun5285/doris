@@ -47,7 +47,8 @@ template <typename T>
 class ColumnDecimal;
 template <typename>
 class ColumnVector;
-} // namespace doris::vectorized
+} // namespace vectorized
+} // namespace doris
 
 namespace doris::vectorized {
 

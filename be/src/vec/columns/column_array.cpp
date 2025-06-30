@@ -317,8 +317,8 @@ size_t ColumnArray::get_max_row_byte_size() const {
     return sizeof(size_t) + max_size;
 }
 
-void ColumnArray::serialize_vec_with_null_map(StringRef* keys, size_t num_rows,
-                                              const UInt8* null_map) const {
+void ColumnArray::serialize_vec_with_null_map(std::vector<StringRef>& keys, size_t num_rows,
+                                              const uint8_t* null_map) const {
     DCHECK(null_map != nullptr);
     DCHECK(!data->is_variable_length() || data->is_column_string() || data->is_column_string64());
 
@@ -383,7 +383,7 @@ void ColumnArray::serialize_vec_with_null_map(StringRef* keys, size_t num_rows,
     }
 }
 
-void ColumnArray::deserialize_vec_with_null_map(StringRef* keys, const size_t num_rows,
+void ColumnArray::deserialize_vec_with_null_map(std::vector<StringRef>& keys, const size_t num_rows,
                                                 const uint8_t* null_map) {
     DCHECK(!data->is_variable_length() || data->is_column_string() || data->is_column_string64());
     auto item_sz = remove_nullable(get_data().get_ptr())->get_max_row_byte_size();
@@ -418,7 +418,7 @@ void ColumnArray::deserialize_vec_with_null_map(StringRef* keys, const size_t nu
     }
 }
 
-void ColumnArray::deserialize_vec(StringRef* keys, const size_t num_rows) {
+void ColumnArray::deserialize_vec(std::vector<StringRef>& keys, const size_t num_rows) {
     auto item_sz = remove_nullable(get_data().get_ptr())->get_max_row_byte_size();
     for (size_t i = 0; i != num_rows; ++i) {
         const auto* original_ptr = keys[i].data;
