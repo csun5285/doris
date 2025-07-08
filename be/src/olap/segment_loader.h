@@ -175,6 +175,8 @@ public:
         if (last_segment->healthy_status().ok()) {
             return nullptr;
         }
+        LOG(INFO) << "Pop unhealthy segment: " << last_segment->id()
+                  << ", status: " << last_segment->healthy_status().to_string();
         segments.pop_back();
         return last_segment;
     }
