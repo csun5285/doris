@@ -36,7 +36,7 @@ import java.nio.ByteBuffer;
 // MySQL protocol util
 public class MysqlProto {
     private static final Logger LOG = LogManager.getLogger(MysqlProto.class);
-    public static final boolean SERVER_USE_SSL = Config.enable_ssl;
+    public static final boolean SERVER_USE_SSL = Config.enable_tls;
 
 
     private static String parseUser(ConnectContext context, byte[] scramble, String user) {
