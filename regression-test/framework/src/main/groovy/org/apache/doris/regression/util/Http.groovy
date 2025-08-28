@@ -34,10 +34,69 @@ import groovy.util.logging.Slf4j
 
 import java.nio.charset.Charset
 
+import javax.net.ssl.*
+import java.security.KeyStore
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+
+import org.apache.doris.regression.suite.SuiteContext
+
 @Slf4j
 class Http {
 
     final static Logger logger = LoggerFactory.getLogger(this.class)
+
+    static Boolean enableTls = false
+    static String tlsVerifyMode = "strict"
+    static String trustStorePath = null
+    static String trustStorePassword = null
+    static String keyStorePath = null
+    static String keyStorePassword = null
+
+    static void configure(Boolean enableTLS=false, String mode = "strict", 
+                          String caPath = null, String caPassword = null, 
+                          String keyPath = null, String keyPassword = null) {
+        enableTls = enableTLS
+        tlsVerifyMode = mode
+        trustStorePath = caPath
+        trustStorePassword = caPassword
+        keyStorePath = keyPath
+        keyStorePassword = keyPassword
+        initSSLContext()
+    }
+
+    private static void initSSLContext() {
+        SSLContext sslContext = SSLContext.getInstance("TLS")
+        def trustManagers = null
+        def keyManagers = null
+        if (tlsVerifyMode == "none") {
+            // 跳过证书校验
+            trustManagers = [ [ checkClientTrusted: { c, a -> },
+                                checkServerTrusted: { c, a -> },
+                                getAcceptedIssuers: { [] as X509Certificate[] } ] as X509TrustManager ] as TrustManager[]
+        } else {
+            def trustStore = KeyStore.getInstance("JKS")
+            trustStore.load(new FileInputStream(trustStorePath), trustStorePassword.toCharArray())
+            def tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+            tmf.init(trustStore)
+            trustManagers = tmf.trustManagers
+
+            if(tlsVerifyMode == "strict" && keyStorePath) {
+                def keyStore = KeyStore.getInstance("PKCS12")
+                keyStore.load(new FileInputStream(keyStorePath), keyStorePassword.toCharArray())
+                def kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+                kmf.init(keyStore, keyStorePassword.toCharArray())
+                keyManagers = kmf.keyManagers
+            }
+        }
+        sslContext.init(keyManagers, trustManagers, new SecureRandom())
+        HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
+
+        if (tlsVerifyMode == 'none') {
+            // 关闭 Hostname 验证
+            HttpsURLConnection.setDefaultHostnameVerifier({ hostname, session -> true })
+        }
+    }
 
     static void checkHttpResult(Object result, NodeType type) {
         if (type == NodeType.FE) {
@@ -48,6 +107,9 @@ class Http {
     }
 
     static Object GET(url, isJson = false) {
+        if (enableTls) {
+            url = url.replace("http://", "https://")
+        }
         def conn = new URL(url).openConnection()
         conn.setRequestMethod('GET')
         conn.setRequestProperty('Authorization', 'Basic cm9vdDo=') //token for root
@@ -65,6 +127,9 @@ class Http {
     }
 
     static Object POST(url, data = null, isJson = false) {
+        if (enableTls) {
+            url = url.replace("http://", "https://")
+        }
         def conn = new URL(url).openConnection()
         conn.setRequestMethod('POST')
         conn.setRequestProperty('Authorization', 'Basic cm9vdDo=') //token for root
@@ -100,6 +165,9 @@ class Http {
         BufferedWriter out = null
         BufferedReader inB = null
         try {
+            if (enableTls) {
+                url = url.replace("http://", "https://")
+            }
             conn = (HttpURLConnection) (new URL(url.replaceAll('／','/'))).openConnection()
             conn.setRequestMethod('POST')
             conn.setDoOutput(true)
@@ -134,6 +202,9 @@ class Http {
         BufferedReader inB = null
         StringBuilder result = new StringBuilder('')
         try {
+            if (enableTls) {
+                url = url.replace("http://", "https://")
+            }
             URL realUrl = new URL(url)
             URLConnection conn = realUrl.openConnection()
             conn.setRequestProperty('Content-Type', 'application/json;charset=UTF-8')
@@ -163,6 +234,9 @@ class Http {
         CloseableHttpClient httpClient = null
         CloseableHttpResponse response = null
         try {
+            if (enableTls) {
+                url = url.replace("http://", "https://")
+            }
             httpClient = HttpClients.createDefault()
             HttpPost httppost = new HttpPost(url)
             httppost.setHeader('Content-Type', 'application/json;charset=UTF-8')

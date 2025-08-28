@@ -38,6 +38,15 @@ import org.apache.http.impl.client.HttpClients
 import org.apache.http.util.EntityUtils
 import org.junit.Assert
 
+import javax.net.ssl.HostnameVerifier
+import org.apache.http.conn.ssl.NoopHostnameVerifier
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory
+import org.apache.http.ssl.SSLContexts
+import javax.net.ssl.*
+import java.security.KeyStore
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+
 @Slf4j
 class StreamLoadAction implements SuiteAction {
     public InetSocketAddress address
@@ -56,6 +65,16 @@ class StreamLoadAction implements SuiteAction {
     boolean directToBe = false
     boolean twoPhaseCommit = false
 
+    boolean enableTLS = false
+    String keyStorePath
+    String keyStorePassword
+    String keyStoreType = "PKCS12"
+    String trustStorePath
+    String trustStorePassword
+    String trustStoreType = "JKS"
+    boolean sslHostnameVerify = false
+    String tlsVerifyMode = "strict"
+
     StreamLoadAction(SuiteContext context) {
         this.address = context.getFeHttpAddress()
         this.user = context.config.feHttpUser
@@ -67,6 +86,18 @@ class StreamLoadAction implements SuiteAction {
         this.context = context
         this.headers = new LinkedHashMap<>()
         this.headers.put('label', UUID.randomUUID().toString())
+
+        // mTLS config from regression-conf.groovy -> context.config.otherConfigs
+        def oc = context.config.otherConfigs ?: [:]
+        this.enableTLS = (oc.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false
+        this.keyStorePath = oc.get("keyStorePath")
+        this.keyStorePassword = oc.get("keyStorePassword")
+        this.keyStoreType = oc.get("keyStoreType") ?: 'PKCS12'
+        this.trustStorePath = oc.get("trustStorePath")
+        this.trustStorePassword = oc.get("trustStorePassword")
+        this.trustStoreType = oc.get("trustStoreType") ?: 'JKS'
+        this.tlsVerifyMode = oc.get("tlsVerifyMode") ?: 'strict'
+        this.sslHostnameVerify = ('none'.equalsIgnoreCase(this.tlsVerifyMode)) ? false : true
     }
 
     void db(String db) {
@@ -172,16 +203,18 @@ class StreamLoadAction implements SuiteAction {
         Throwable ex = null
         long startTime = System.currentTimeMillis()
         def isHttpStream = headers.containsKey("version")
+        def httpType = enableTLS ? "https" : "http"
         try {
             def uri = ""
             if (isHttpStream) {
-                uri = "http://${address.hostString}:${address.port}/api/_http_stream"
+                uri = "${httpType}://${address.hostString}:${address.port}/api/_http_stream"
             } else if (twoPhaseCommit) {
-                uri = "http://${address.hostString}:${address.port}/api/${db}/_stream_load_2pc"
+                uri = "${httpType}://${address.hostString}:${address.port}/api/${db}/_stream_load_2pc"
             } else {
-                uri = "http://${address.hostString}:${address.port}/api/${db}/${table}/_stream_load"
+                uri = "${httpType}://${address.hostString}:${address.port}/api/${db}/${table}/_stream_load"
             }
-            HttpClients.createDefault().withCloseable { client ->
+
+            buildHttpClient().withCloseable { client ->
                 RequestBuilder requestBuilder = prepareRequestHeader(RequestBuilder.put(uri))
                 HttpEntity httpEntity = prepareHttpEntity(client)
                 if (!directToBe) {
@@ -197,10 +230,51 @@ class StreamLoadAction implements SuiteAction {
         }
         long endTime = System.currentTimeMillis()
 
-        log.info("Stream load elapsed ${endTime - startTime} ms, is http stream: ${isHttpStream}, " +
-                " response: ${responseText}" + ex.toString())
+        log.info("Stream load elapsed ${endTime - startTime} ms, is http stream: ${isHttpStream}, response: ${responseText}${ex ? (', ex=' + ex.toString()) : ''}")
         checkResult(responseText, ex, startTime, endTime)
     }
+
+    private CloseableHttpClient buildHttpClient() {
+        if (!enableTLS) {
+            return HttpClients.createDefault()
+        }
+        KeyStore ts = null
+        KeyStore ks = null
+        if (tlsVerifyMode == 'none') {
+            ts = [ [ checkClientTrusted: { c, a -> },
+                    checkServerTrusted: { c, a -> },
+                    getAcceptedIssuers: { [] as X509Certificate[] } ] as X509TrustManager ] as TrustManager[]
+        } else {
+            // 载入客户端 keystore（含私钥+客户端证书链）
+            ts = KeyStore.getInstance(trustStoreType)
+            ts.load(new FileInputStream(trustStorePath), trustStorePassword?.toCharArray())
+            if (tlsVerifyMode == 'strict') {
+                // 载入 truststore（含 CA/中间证书，用于校验服务端证书链）
+                ks = KeyStore.getInstance(keyStoreType)
+                ks.load(new FileInputStream(keyStorePath), keyStorePassword?.toCharArray())
+            }
+        }
+
+        SSLContext sslContext = SSLContexts.custom()
+                .loadKeyMaterial(ks, keyStorePassword?.toCharArray())
+                .loadTrustMaterial(ts, null)
+                .build()
+
+        HostnameVerifier verifier = sslHostnameVerify ? SSLConnectionSocketFactory.getDefaultHostnameVerifier()
+                                                      : NoopHostnameVerifier.INSTANCE
+
+        SSLConnectionSocketFactory sslsf = new SSLConnectionSocketFactory(
+                sslContext,
+                new String[] {"TLSv1.2", "TLSv1.3"},
+                null,
+                verifier
+        )
+
+        return HttpClients.custom()
+                .setSSLSocketFactory(sslsf)
+                .build()
+    }
+
 
     private String httpGetString(CloseableHttpClient client, String url) {
         return client.execute(RequestBuilder.get(url).build()).withCloseable { resp ->

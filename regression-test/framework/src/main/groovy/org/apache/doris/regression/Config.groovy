@@ -206,7 +206,8 @@ class Config {
             String stageIamUserId,
             String clusterDir, 
             String kafkaBrokerList, 
-            String cloudVersion) {
+            String cloudVersion
+            ) {
         this.s3Source = s3Source
         this.caseNamePrefix = caseNamePrefix
         this.defaultDb = defaultDb
@@ -967,8 +968,16 @@ class Config {
             // We better delete all the usage of defaultDb in suites later, and all suites should use their own db, not the defaultDb.
             log.warn("create default db failed ${defaultDb}".toString())
         }
-
-        jdbcUrl = buildUrlWithDb(jdbcUrl, dbName)
+        
+        if ((otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ){
+            String keyStorePath = otherConfigs.get("keyStorePath")
+            String keyStorePassword = otherConfigs.get("keyStorePassword")
+            String trustStorePath =  otherConfigs.get("trustStorePath")
+            String trustStorePassword = otherConfigs.get("trustStorePassword")
+            jdbcUrl = buildUrlWithDb(jdbcUrl, dbName, keyStorePath, keyStorePassword, trustStorePath, trustStorePassword)
+        } else {
+            jdbcUrl = buildUrlWithDb(jdbcUrl, dbName)
+        }
         log.info("Reset jdbcUrl to ${jdbcUrl}".toString())
     }
 
@@ -1034,7 +1043,8 @@ class Config {
     }
 
     String getConnectionUrlByDbName(String dbName) {
-        return buildUrlWithDb(jdbcUrl, dbName)
+        def connection = buildUrlWithDb(jdbcUrl, dbName)
+        return connection
     }
 
     Connection getConnectionByArrowFlightSqlDbName(String dbName) {
@@ -1150,6 +1160,13 @@ class Config {
         return urlWithDb
     }
 
+    public static String buildUrlWithDb (String jdbcUrl, String dbName, String keyStorePath, String keyStorePassword, String trustStorePath, String trustStorePassword) {
+        String urlWithDb = buildUrlWithDbImpl(jdbcUrl, dbName);
+        urlWithDb = addTlsUrl(urlWithDb, keyStorePath, keyStorePassword, trustStorePath, trustStorePassword);
+        urlWithDb = addTimeoutUrl(urlWithDb);
+        return urlWithDb
+    }
+
     public static String buildUrlWithDb(String host, int queryPort, String dbName) {
         def url = String.format(
             "jdbc:mysql://%s:%s/?useLocalSessionState=true&allowLoadLocalInfile=false",
@@ -1177,6 +1194,28 @@ class Config {
             // e.g: jdbc:mysql://locahost:8080/dbname
         } else {
             return url + '?' + sslUrl
+        }
+    }
+
+    private static String addTlsUrl(String url, String keyStorePath, String keyStorePassword, String trustStorePath, String trustStorePassword) {
+        // ssl-mode = PREFERRED
+        String useSsl = "true"
+        String requireSsl = "true"
+        String useSslconfig = "useSSL=" + useSsl + "&requireSSL=" + requireSsl + "&verifyServerCertificate=true"
+        String clientCAKey = "clientCertificateKeyStoreUrl=file:" + keyStorePath
+        String clientCAPwd = "clientCertificateKeyStorePassword=" + keyStorePassword
+        String trustCAKey = "trustCertificateKeyStoreUrl=file:" + trustStorePath
+        String trustCAPwd = "trustCertificateKeyStorePassword=" + trustStorePassword
+        String tlsUrl = useSslconfig + "&" + clientCAKey + "&" + clientCAPwd + "&" +  trustCAKey + "&" + trustCAPwd
+        // e.g: jdbc:mysql://locahost:8080/dbname?
+        if (url.charAt(url.length() - 1) == '?') {
+            return url + tlsUrl
+            // e.g: jdbc:mysql://locahost:8080/dbname?a=b
+        } else if (url.contains('?')) {
+            return url + '&' + tlsUrl
+            // e.g: jdbc:mysql://locahost:8080/dbname
+        } else {
+            return url + '?' + tlsUrl
         }
     }
 

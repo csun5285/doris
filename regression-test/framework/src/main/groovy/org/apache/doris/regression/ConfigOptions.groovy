@@ -98,6 +98,12 @@ class ConfigOptions {
     static Option clusterDirOpt
     static Option kafkaBrokerListOpt
     static Option cloudVersionOpt
+    static Option enableTLSOpt
+    static Option clientCAKeyStoreUrlOpt
+    static Option clientCAKeyStorePasswordOpt
+    static Option trustCACertOpt
+    static Option trustCAKeyStoreUrlOpt
+    static Option trustCAKeyStorePasswordOpt
 
     static CommandLine initCommands(String[] args) {
         helpOption = Option.builder("h")

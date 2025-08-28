@@ -44,6 +44,17 @@ suite("test_schema_api") {
 
     //exist table
     def url = String.format("http://%s/api/%s/%s/_schema", context.config.feHttpAddress, thisDb, tbName)
+    Boolean enableTLS = (context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false
+    if (enableTLS) {
+        Http.configure(enableTLS, 
+            context.config.otherConfigs.get("tlsVerifyMode"),
+            context.config.otherConfigs.get("trustStorePath"),
+            context.config.otherConfigs.get("trustStorePassword"),
+            context.config.otherConfigs.get("keyStorePath"),
+            context.config.otherConfigs.get("keyStorePassword")
+        )
+    }
+    logger.info("url: ${url}")
     def result = Http.GET(url, true)
     assertTrue(result.code == 0)
     assertEquals(result.msg, "success")
@@ -58,3 +69,4 @@ suite("test_schema_api") {
     assertTrue(result2.data.contains("Unknown catalog"))
 
 }
+

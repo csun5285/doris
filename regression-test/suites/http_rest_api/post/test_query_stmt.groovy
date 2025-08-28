@@ -16,13 +16,62 @@
 // under the License.
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import javax.net.ssl.*
+import java.security.KeyStore
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 
 /**
 *   @Params url is "/xxx", data is request body
 *   @Return response body
 */
 def http_post = { url, data = null ->
-    def dst = "http://"+ context.config.feHttpAddress
+    def protocol = (context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ? "https" : "http"
+    def dst = "${protocol}://"+ context.config.feHttpAddress
+
+    // 配置 SSLContext
+    if ((context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ){
+        def tlsVerifyMode = context.config.otherConfigs.get("tlsVerifyMode").toLowerCase()
+        SSLContext sslContext = SSLContext.getInstance("TLS")
+        def trustManagers = null
+        def keyManagers = null
+
+        if (tlsVerifyMode == 'none') {
+            trustManagers = [ [ checkClientTrusted: { c, a -> },
+                                checkServerTrusted: { c, a -> },
+                                getAcceptedIssuers: { [] as X509Certificate[] } ] as X509TrustManager ] as TrustManager[]
+        } else {
+            // 加载 TrustStore (CA 证书)
+            def trustStorePath = context.config.otherConfigs.get("trustStorePath")
+            def trustStorePwd = context.config.otherConfigs.get("trustStorePassword")
+
+            def trustStore = KeyStore.getInstance(context.config.otherConfigs.get("keyStoreType"))
+            trustStore.load(new FileInputStream(trustStorePath), trustStorePwd.toCharArray())
+            def tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+            tmf.init(trustStore)
+            trustManagers = tmf.trustManagers
+
+            if (tlsVerifyMode == 'strict') {
+                // 加载客户端证书 (mTLS)
+                def keyStorePath = context.config.otherConfigs.get("keyStorePath")
+                def keyStorePwd = context.config.otherConfigs.get("keyStorePassword")
+
+                def keyStore = KeyStore.getInstance(context.config.otherConfigs.get("keyStoreType"))
+                keyStore.load(new FileInputStream(keyStorePath), keyStorePwd.toCharArray())
+                def kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
+                kmf.init(keyStore, keyStorePwd.toCharArray())
+                keyManagers = kmf.keyManagers
+            }
+        }
+        sslContext.init(keyManagers, trustManagers, new SecureRandom())
+        HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
+
+        if ( tlsVerifyMode == "none") {
+            // 关闭 Hostname 验证
+            HttpsURLConnection.setDefaultHostnameVerifier({ hostname, session -> true })
+        }
+    }
+
     def conn = new URL(dst + url).openConnection()
     conn.setRequestMethod("POST")
     conn.setRequestProperty("Content-Type", "application/json")
@@ -108,3 +157,4 @@ suite("test_query_stmt") {
     def resValue = http_post(url, stmt5)
     assertTrue(resValue.contains("CREATE TABLE"))
 }
+
