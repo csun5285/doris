@@ -160,7 +160,7 @@ Suite.metaClass.curl = { String method, String url, String body = null, Integer 
     Integer sleepTime = 5000; // Sleep time in milliseconds
 
     String cmd
-    if (!url.toLowerCase().startsWith("http://")) {
+    if (!url.toLowerCase().startsWith("http://") && !url.toLowerCase().startsWith("https://")) {
         url="http://${url}"
     }
     if (method == "POST" && body != null) {
@@ -169,7 +169,10 @@ Suite.metaClass.curl = { String method, String url, String body = null, Integer 
         cmd = String.format("curl --max-time %d -X %s %s", timeoutSec, method, url).toString()
     }
     if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false) {
-        cmd = cmd.replace("http://", "https://") + String.format(" --cert %s --key %s --cacert %s", context.config.otherConfigs.get("trustCert"), context.config.otherConfigs.get("trustCAKey"), context.config.otherConfigs.get("trustCACert"))
+        if (!cmd.contains("https")){
+            cmd = cmd.replace("http://", "https://")
+        }
+        cmd += String.format(" --cert %s --key %s --cacert %s", context.config.otherConfigs.get("trustCert"), context.config.otherConfigs.get("trustCAKey"), context.config.otherConfigs.get("trustCACert"))
     }
     logger.info("curl cmd: " + cmd)
     def process

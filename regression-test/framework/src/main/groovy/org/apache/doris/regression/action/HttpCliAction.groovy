@@ -58,6 +58,9 @@ class HttpCliAction implements SuiteAction {
     static String trustStorePassword = null
     static String keyStorePath = null
     static String keyStorePassword = null
+    static String keyStoreType = null
+    static String trustStoreType = null
+
 
     private SSLConnectionSocketFactory sslSocketFactory
     private CloseableHttpClient httpClient
@@ -68,8 +71,10 @@ class HttpCliAction implements SuiteAction {
         this.tlsVerifyMode = context.config.otherConfigs.get("tlsVerifyMode")?.toString()?.toLowerCase() ?: "none"
         this.trustStorePath = context.config.otherConfigs.get("trustStorePath")?.toString() ?: null
         this.trustStorePassword = context.config.otherConfigs.get("trustStorePassword")?.toString() ?: null
+        this.trustStoreType = context.config.otherConfigs.get("trustStoreType") ?: 'JKS'
         this.keyStorePath = context.config.otherConfigs.get("keyStorePath")?.toString() ?: null
         this.keyStorePassword = context.config.otherConfigs.get("keyStorePassword")?.toString() ?: null
+        this.keyStoreType = context.config.otherConfigs.get("keyStoreType")?.toString() ?: 'PKCS12'
 
         if (this.enableTls) {
             initSSLContext()
@@ -103,12 +108,12 @@ class HttpCliAction implements SuiteAction {
             sslContextBuilder.loadTrustMaterial({ chain, authType -> true })
         } else {
             if (this.trustStorePath) {
-                KeyStore trustStore = KeyStore.getInstance("JKS")
+                KeyStore trustStore = KeyStore.getInstance(this.trustStoreType)
                 trustStore.load(new FileInputStream(this.trustStorePath), this.trustStorePassword.toCharArray())
                 sslContextBuilder.loadTrustMaterial(trustStore, null)
             }
             if (this.tlsVerifyMode == "strict" && this.keyStorePath) {
-                KeyStore keyStore = KeyStore.getInstance("PKCS12")
+                KeyStore keyStore = KeyStore.getInstance(this.keyStoreType)
                 keyStore.load(new FileInputStream(this.keyStorePath), this.keyStorePassword.toCharArray())
                 sslContextBuilder.loadKeyMaterial(keyStore, this.keyStorePassword.toCharArray())
             }

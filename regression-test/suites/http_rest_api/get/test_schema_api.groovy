@@ -50,8 +50,10 @@ suite("test_schema_api") {
             context.config.otherConfigs.get("tlsVerifyMode"),
             context.config.otherConfigs.get("trustStorePath"),
             context.config.otherConfigs.get("trustStorePassword"),
+            context.config.otherConfigs.get("trustStoreType"),
             context.config.otherConfigs.get("keyStorePath"),
-            context.config.otherConfigs.get("keyStorePassword")
+            context.config.otherConfigs.get("keyStorePassword"),
+            context.config.otherConfigs.get("keyStoreType")
         )
     }
     logger.info("url: ${url}")

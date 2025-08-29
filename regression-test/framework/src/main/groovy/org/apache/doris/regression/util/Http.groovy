@@ -50,18 +50,22 @@ class Http {
     static String tlsVerifyMode = "strict"
     static String trustStorePath = null
     static String trustStorePassword = null
+    static String trustStoreType = null
     static String keyStorePath = null
     static String keyStorePassword = null
+    static String keyStoreType = null
 
     static void configure(Boolean enableTLS=false, String mode = "strict", 
-                          String caPath = null, String caPassword = null, 
-                          String keyPath = null, String keyPassword = null) {
+                          String caPath = null, String caPassword = null, String caStoreType = null,  
+                          String keyPath = null, String keyPassword = null, String keystoreType = null) {
         enableTls = enableTLS
         tlsVerifyMode = mode
         trustStorePath = caPath
         trustStorePassword = caPassword
+        trustStoreType = caStoreType
         keyStorePath = keyPath
         keyStorePassword = keyPassword
+        keyStoreType = keystoreType
         initSSLContext()
     }
 
@@ -75,14 +79,14 @@ class Http {
                                 checkServerTrusted: { c, a -> },
                                 getAcceptedIssuers: { [] as X509Certificate[] } ] as X509TrustManager ] as TrustManager[]
         } else {
-            def trustStore = KeyStore.getInstance("JKS")
+            def trustStore = KeyStore.getInstance(trustStoreType)
             trustStore.load(new FileInputStream(trustStorePath), trustStorePassword.toCharArray())
             def tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
             tmf.init(trustStore)
             trustManagers = tmf.trustManagers
 
             if(tlsVerifyMode == "strict" && keyStorePath) {
-                def keyStore = KeyStore.getInstance("PKCS12")
+                def keyStore = KeyStore.getInstance(keyStoreType)
                 keyStore.load(new FileInputStream(keyStorePath), keyStorePassword.toCharArray())
                 def kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
                 kmf.init(keyStore, keyStorePassword.toCharArray())
