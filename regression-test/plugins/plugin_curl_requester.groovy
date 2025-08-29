@@ -56,20 +56,20 @@ Suite.metaClass.http_client = { String method, String url /* param */ ->
     logger.info("HTTP request: ${method} ${url}")
 
     CloseableHttpClient httpClient
-    if ((context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
+    if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         url = url.replace("http://", "https://")
         //如果url没有https开头，那加上
         if (!url.toLowerCase().startsWith("https://")) {
             url="https://${url}"
         }
-        KeyStore ks = KeyStore.getInstance("PKCS12")
-        ks.load(new FileInputStream(context.config.otherConfigs.get("keyStorePath")?.toString()),
+        KeyStore ks = KeyStore.getInstance(suite.context.config.otherConfigs.get("keyStoreType"))
+        ks.load(new FileInputStream(suite.context.config.otherConfigs.get("keyStorePath")?.toString()),
                 context.config.otherConfigs.get("keyStorePassword")?.toCharArray())
-        KeyStore ts = KeyStore.getInstance("JKS")
-        ts.load(new FileInputStream(context.config.otherConfigs.get("trustStorePath")?.toString()),
-                context.config.otherConfigs.get("trustStorePassword")?.toCharArray()) 
+        KeyStore ts = KeyStore.getInstance(suite.context.config.otherConfigs.get("trustStoreType"))
+        ts.load(new FileInputStream(suite.context.config.otherConfigs.get("trustStorePath")?.toString()),
+                suite.context.config.otherConfigs.get("trustStorePassword")?.toCharArray()) 
         SSLContext sslContext = SSLContextBuilder.create()
-            .loadKeyMaterial(ks, context.config.otherConfigs.get("keyStorePassword")?.toCharArray())
+            .loadKeyMaterial(ks, suite.context.config.otherConfigs.get("keyStorePassword")?.toCharArray())
             .loadTrustMaterial(ts, null)
             .build()
         httpClient = HttpClients.custom()
@@ -172,7 +172,7 @@ Suite.metaClass.curl = { String method, String url, String body = null, Integer 
         if (!cmd.contains("https")){
             cmd = cmd.replace("http://", "https://")
         }
-        cmd += String.format(" --cert %s --key %s --cacert %s", context.config.otherConfigs.get("trustCert"), context.config.otherConfigs.get("trustCAKey"), context.config.otherConfigs.get("trustCACert"))
+        cmd += String.format(" --cert %s --key %s --cacert %s", suite.context.config.otherConfigs.get("trustCert"), suite.context.config.otherConfigs.get("trustCAKey"), suite.context.config.otherConfigs.get("trustCACert"))
     }
     logger.info("curl cmd: " + cmd)
     def process
@@ -206,7 +206,7 @@ Suite.metaClass.curl = { String method, String url, String body = null, Integer 
 logger.info("Added 'curl' function to Suite")
 
 Suite.metaClass.show_be_config = { String ip, String port /*param */ ->
-    if ((context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
+    if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         return curl("GET", String.format("https://%s:%s/api/show_config", ip, port))
     }
     return curl("GET", String.format("http://%s:%s/api/show_config", ip, port))
@@ -215,7 +215,7 @@ Suite.metaClass.show_be_config = { String ip, String port /*param */ ->
 logger.info("Added 'show_be_config' function to Suite")
 
 Suite.metaClass.update_be_config = { String ip, String port, String key, String value /*param */ ->
-    if ((context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
+    if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         return curl("POST", String.format("https://%s:%s/api/update_config?%s=%s", ip, port, key, value))
     }
     return curl("POST", String.format("http://%s:%s/api/update_config?%s=%s", ip, port, key, value))
@@ -230,7 +230,7 @@ Suite.metaClass.update_all_be_config = { String key, Object value ->
     backendId_to_backendIP.each { beId, beIp ->
         def port = backendId_to_backendHttpPort.get(beId)
         def url = "http://${beIp}:${port}/api/update_config?${key}=${value}"
-        if ((otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
+        if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
             url = "https://${beIp}:${port}/api/update_config?${key}=${value}"
         }
         def result = Http.POST(url, null, true)
@@ -243,7 +243,7 @@ logger.info("Added 'update_all_be_config' function to Suite")
 
 Suite.metaClass._be_report = { String ip, int port, String reportName ->
     def url = "http://${ip}:${port}/api/report/${reportName}"
-    if ((otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
+    if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         url = "https://${ip}:${port}/api/report/${reportName}"
     }
     def result = Http.GET(url, true)
