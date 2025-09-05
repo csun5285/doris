@@ -206,6 +206,7 @@ Suite.metaClass.curl = { String method, String url, String body = null, Integer 
 logger.info("Added 'curl' function to Suite")
 
 Suite.metaClass.show_be_config = { String ip, String port /*param */ ->
+    Suite suite = delegate as Suite
     if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         return curl("GET", String.format("https://%s:%s/api/show_config", ip, port))
     }
@@ -215,6 +216,7 @@ Suite.metaClass.show_be_config = { String ip, String port /*param */ ->
 logger.info("Added 'show_be_config' function to Suite")
 
 Suite.metaClass.update_be_config = { String ip, String port, String key, String value /*param */ ->
+    Suite suite = delegate as Suite
     if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         return curl("POST", String.format("https://%s:%s/api/update_config?%s=%s", ip, port, key, value))
     }
@@ -224,6 +226,7 @@ Suite.metaClass.update_be_config = { String ip, String port, String key, String 
 logger.info("Added 'update_be_config' function to Suite")
 
 Suite.metaClass.update_all_be_config = { String key, Object value ->
+    Suite suite = delegate as Suite
     def backendId_to_backendIP = [:]
     def backendId_to_backendHttpPort = [:]
     getBackendIpHttpPort(backendId_to_backendIP, backendId_to_backendHttpPort);
@@ -242,6 +245,7 @@ Suite.metaClass.update_all_be_config = { String key, Object value ->
 logger.info("Added 'update_all_be_config' function to Suite")
 
 Suite.metaClass._be_report = { String ip, int port, String reportName ->
+    Suite suite = delegate as Suite
     def url = "http://${ip}:${port}/api/report/${reportName}"
     if ((suite.context.config.otherConfigs.get("enableTLS")?.toString()?.equalsIgnoreCase("true")) ?: false ) {
         url = "https://${ip}:${port}/api/report/${reportName}"
