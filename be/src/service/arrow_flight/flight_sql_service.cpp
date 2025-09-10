@@ -19,6 +19,7 @@
 
 #include <arrow/status.h>
 
+#include <fstream>
 #include <memory>
 
 #include "arrow/flight/sql/server.h"
