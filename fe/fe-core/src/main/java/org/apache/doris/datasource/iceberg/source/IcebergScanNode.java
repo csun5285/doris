@@ -33,7 +33,9 @@ import org.apache.doris.datasource.TableFormatType;
 import org.apache.doris.datasource.hive.HMSExternalTable;
 import org.apache.doris.datasource.iceberg.IcebergExternalCatalog;
 import org.apache.doris.datasource.iceberg.IcebergExternalTable;
+import org.apache.doris.datasource.iceberg.IcebergRestExternalCatalog;
 import org.apache.doris.datasource.iceberg.IcebergUtils;
+import org.apache.doris.datasource.iceberg.IcebergVendedCredentialsProvider;
 import org.apache.doris.nereids.exceptions.NotSupportedException;
 import org.apache.doris.planner.PlanNodeId;
 import org.apache.doris.qe.SessionVariable;
@@ -72,6 +74,7 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -94,6 +97,9 @@ public class IcebergScanNode extends FileQueryScanNode {
     // And for split level count push down opt, the flag is set in each split.
     private boolean tableLevelPushDownCount = false;
     private static final long COUNT_WITH_PARALLEL_SPLITS = 10000;
+    // Cached vended credentials properties obtained during initialization
+    // to ensure consistency throughout the scan process
+    private Map<String, String> cachedVendedCredentials;
 
     /**
      * External file scan node for Query iceberg table
@@ -128,6 +134,15 @@ public class IcebergScanNode extends FileQueryScanNode {
     @Override
     protected void doInitialize() throws UserException {
         icebergTable = source.getIcebergTable();
+        // Initialize vended credentials during scan node initialization
+        // to ensure consistency throughout the scan process (following Doris pattern)
+        if (source.getCatalog() instanceof IcebergRestExternalCatalog) {
+            IcebergRestExternalCatalog restCatalog = (IcebergRestExternalCatalog) source.getCatalog();
+            cachedVendedCredentials = IcebergVendedCredentialsProvider.getInstance()
+                    .getVendedCredentials(restCatalog, icebergTable);
+        } else {
+            cachedVendedCredentials = new HashMap<>();
+        }
         super.doInitialize();
     }
 
@@ -388,7 +403,13 @@ public class IcebergScanNode extends FileQueryScanNode {
 
     @Override
     public Map<String, String> getLocationProperties() throws UserException {
-        return source.getCatalog().getCatalogProperty().getHadoopProperties();
+        Map<String, String> properties = new HashMap<>(source.getCatalog().getCatalogProperty().getHadoopProperties());
+        // Add cached vended credentials obtained during initialization
+        // This ensures consistency and avoids repeated network calls
+        if (cachedVendedCredentials != null && !cachedVendedCredentials.isEmpty()) {
+            properties.putAll(cachedVendedCredentials);
+        }
+        return properties;
     }
 
     @Override

@@ -20,7 +20,9 @@ package org.apache.doris.planner;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.util.LocationPath;
 import org.apache.doris.datasource.iceberg.IcebergExternalTable;
+import org.apache.doris.datasource.iceberg.IcebergRestExternalCatalog;
 import org.apache.doris.datasource.iceberg.IcebergUtils;
+import org.apache.doris.datasource.iceberg.IcebergVendedCredentialsProvider;
 import org.apache.doris.nereids.trees.plans.commands.insert.BaseExternalTableInsertCommandContext;
 import org.apache.doris.nereids.trees.plans.commands.insert.InsertCommandContext;
 import org.apache.doris.thrift.TDataSink;
@@ -55,6 +57,9 @@ public class IcebergTableSink extends BaseExternalTableDataSink {
             add(TFileFormatType.FORMAT_ORC);
             add(TFileFormatType.FORMAT_PARQUET);
         }};
+    // Cached vended credentials obtained during bindDataSink
+    // to ensure consistency during the entire write process
+    private Map<String, String> cachedVendedCredentials;
 
     public IcebergTableSink(IcebergExternalTable targetTable) {
         super();
@@ -84,6 +89,15 @@ public class IcebergTableSink extends BaseExternalTableDataSink {
         TIcebergTableSink tSink = new TIcebergTableSink();
 
         Table icebergTable = targetTable.getIcebergTable();
+        // Initialize vended credentials during bindDataSink (equivalent to init phase)
+        // to ensure consistency throughout the write process (following Doris pattern)
+        if (targetTable.getCatalog() instanceof IcebergRestExternalCatalog) {
+            IcebergRestExternalCatalog restCatalog = (IcebergRestExternalCatalog) targetTable.getCatalog();
+            cachedVendedCredentials = IcebergVendedCredentialsProvider.getInstance()
+                    .getVendedCredentials(restCatalog, icebergTable);
+        } else {
+            cachedVendedCredentials = new HashMap<>();
+        }
 
         tSink.setDbName(targetTable.getDbName());
         tSink.setTbName(targetTable.getName());
@@ -124,14 +138,19 @@ public class IcebergTableSink extends BaseExternalTableDataSink {
         tSink.setFileFormat(getTFileFormatType(IcebergUtils.getFileFormat(icebergTable).name()));
         tSink.setCompressionType(getTFileCompressType(IcebergUtils.getFileCompress(icebergTable)));
 
-        // hadoop config
+        // hadoop config with cached vended credentials
         HashMap<String, String> props = new HashMap<>(icebergTable.properties());
         Map<String, String> catalogProps = targetTable.getCatalog().getProperties();
         props.putAll(catalogProps);
+        // Add cached vended credentials obtained during initialization
+        // This ensures consistency and avoids repeated network calls
+        if (cachedVendedCredentials != null && !cachedVendedCredentials.isEmpty()) {
+            props.putAll(cachedVendedCredentials);
+        }
         tSink.setHadoopConfig(props);
 
         // location
-        LocationPath locationPath = new LocationPath(IcebergUtils.dataLocation(icebergTable), catalogProps);
+        LocationPath locationPath = new LocationPath(IcebergUtils.dataLocation(icebergTable), props);
         tSink.setOutputPath(locationPath.toStorageLocation().toString());
         tSink.setOriginalOutputPath(locationPath.getPath().toString());
         tSink.setFileType(locationPath.getTFileTypeForBE());
