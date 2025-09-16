@@ -323,10 +323,17 @@ Status OrcReader::get_parsed_schema(std::vector<std::string>* col_names,
 
 Status OrcReader::get_schema_col_name_attribute(std::vector<std::string>* col_names,
                                                 std::vector<uint64_t>* col_attributes,
-                                                std::string attribute) {
+                                                std::string attribute, bool* exist_schema) {
     RETURN_IF_ERROR(_create_file_reader());
     auto& root_type = _is_acid ? _remove_acid(_reader->getType()) : _reader->getType();
+
+    *exist_schema = true;
     for (int i = 0; i < root_type.getSubtypeCount(); ++i) {
+        if (!root_type.getSubtype(i)->hasAttributeKey(attribute)) {
+            *exist_schema = false;
+            return Status::OK();
+        }
+
         col_names->emplace_back(get_field_name_lower_case(&root_type, i));
         col_attributes->emplace_back(
                 std::stol(root_type.getSubtype(i)->getAttributeValue(attribute)));

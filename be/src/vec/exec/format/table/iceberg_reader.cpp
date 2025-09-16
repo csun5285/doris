@@ -688,8 +688,14 @@ Status IcebergParquetReader::_gen_col_name_maps(const FieldDescriptor& field_des
 Status IcebergOrcReader::_gen_col_name_maps(OrcReader* orc_reader) {
     std::vector<std::string> col_names;
     std::vector<uint64_t> col_ids;
-    RETURN_IF_ERROR(
-            orc_reader->get_schema_col_name_attribute(&col_names, &col_ids, ICEBERG_ORC_ATTRIBUTE));
+    bool exist_schema = true;
+    RETURN_IF_ERROR(orc_reader->get_schema_col_name_attribute(
+            &col_names, &col_ids, ICEBERG_ORC_ATTRIBUTE, &exist_schema));
+    if (!exist_schema) {
+        _has_iceberg_schema = false;
+        return Status::OK();
+    }
+
     _has_iceberg_schema = true;
     _table_col_to_file_col.clear();
     _file_col_to_table_col.clear();
