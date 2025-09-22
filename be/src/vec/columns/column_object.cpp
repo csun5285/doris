@@ -1518,6 +1518,9 @@ bool ColumnObject::add_sub_column(const PathInData& key, MutableColumnPtr&& subc
     if (key.get_is_typed()) {
         typed_path_count++;
     }
+    if (key.has_nested_part()) {
+        nested_path_count++;
+    }
     return true;
 }
 
@@ -1551,6 +1554,9 @@ bool ColumnObject::add_sub_column(const PathInData& key, size_t new_size) {
     }
     if (key.get_is_typed()) {
         typed_path_count++;
+    }
+    if (key.has_nested_part()) {
+        nested_path_count++;
     }
     return true;
 }
@@ -1970,6 +1976,11 @@ Status ColumnObject::finalize(FinalizeMode mode) {
 
         new_subcolumns.add(entry->path, entry->data);
     }
+
+    // after unnest need to recalculate nested_path_count in new_subcolumns
+    nested_path_count =
+            std::count_if(new_subcolumns.begin(), new_subcolumns.end(),
+                          [](const auto& entry) { return entry->path.has_nested_part(); });
 
     std::swap(subcolumns, new_subcolumns);
     doc_structure = nullptr;

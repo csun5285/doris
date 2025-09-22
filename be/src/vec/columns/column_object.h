@@ -303,6 +303,8 @@ private:
 
     size_t typed_path_count = 0;
 
+    size_t nested_path_count = 0;
+
 public:
     static constexpr auto COLUMN_NAME_DUMMY = "_dummy";
 

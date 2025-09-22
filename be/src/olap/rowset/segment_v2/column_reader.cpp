@@ -408,7 +408,7 @@ Status VariantColumnReader::_new_iterator_with_flat_leaves(ColumnIterator** iter
                     const_cast<StorageReadOptions*>(opts), target_col);
             return Status::OK();
         }
-        
+
         std::unique_ptr<ColumnIterator> it;
         RETURN_IF_ERROR(Segment::new_default_iterator(target_col, &it));
         *iterator = it.release();
@@ -630,8 +630,7 @@ void VariantColumnReader::get_subcolumns_types(
     }
 }
 
-std::vector<std::string> VariantColumnReader::get_typed_paths(
-        std::unordered_set<std::string>* typed_paths) const {
+void VariantColumnReader::get_typed_paths(std::unordered_set<std::string>* typed_paths) const {
     for (const auto& entry : *_subcolumn_readers) {
         if (entry->path.get_is_typed()) {
             typed_paths->insert(entry->path.get_path());

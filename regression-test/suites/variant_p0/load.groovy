@@ -204,6 +204,7 @@ suite("regression_test_variant", "p0"){
         // 7. gh data
         table_name = "ghdata"
         create_table table_name
+        sql """ alter table ghdata add index var_index(v) using inverted properties("parser" = "unicode") """
         load_json_data.call(table_name, """${getS3Url() + '/regression/load/ghdata_sample.json'}""")
         qt_sql_26 "select count() from ${table_name}"
 

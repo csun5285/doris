@@ -136,11 +136,7 @@ suite("regression_test_variant_github_events_p2", "nonConcurrent,p2"){
         )
         DUPLICATE KEY(`k`)
         DISTRIBUTED BY HASH(k) BUCKETS 4 
-<<<<<<< HEAD
-        properties("replication_num" = "1", "disable_auto_compaction" = "true", "variant_enable_flatten_nested" = "false", "variant_max_subcolumns_count" = "${rand_subcolumns_count}");
-=======
         properties("replication_num" = "1", "disable_auto_compaction" = "true", "variant_enable_flatten_nested" = "true");
->>>>>>> a64f4a96abf ([enhance](variant) typed_paths_to sparse column)
     """
     
     // 2015
@@ -187,11 +183,7 @@ suite("regression_test_variant_github_events_p2", "nonConcurrent,p2"){
         )
         UNIQUE KEY(`k`)
         DISTRIBUTED BY HASH(k) BUCKETS 4 
-<<<<<<< HEAD
-        properties("replication_num" = "1", "disable_auto_compaction" = "false", "variant_enable_flatten_nested" = "false", "bloom_filter_columns" = "v", "variant_max_subcolumns_count" = "${rand_subcolumns_count}");
-=======
         properties("replication_num" = "1", "disable_auto_compaction" = "false", "variant_enable_flatten_nested" = "true", "bloom_filter_columns" = "v");
->>>>>>> a64f4a96abf ([enhance](variant) typed_paths_to sparse column)
         """
     sql """insert into github_events2 select * from github_events order by k"""
     sql """select v['payload']['commits'] from github_events order by k ;"""

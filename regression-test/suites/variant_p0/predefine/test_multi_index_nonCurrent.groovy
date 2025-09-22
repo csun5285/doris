@@ -144,7 +144,7 @@ suite("test_variant_multi_index_nonCurrent", "p0, nonConcurrent") {
         sql """ select count() from ${tableName} where var['string2'] match_phrase 'world' """
     } catch (Exception e) {
         logger.info(e.getMessage())
-        assert(e.getMessage().contains("phrase queries require setting support_phrase = true"))
+        assert(e.getMessage().contains("Inverted index does not support phrase"))
         findException = true
     }
     assertTrue(findException)
@@ -175,7 +175,7 @@ suite("test_variant_multi_index_nonCurrent", "p0, nonConcurrent") {
         sql """ select count() from ${tableName} where var['string2'] match_phrase 'world' """
     } catch (Exception e) {
         logger.info(e.getMessage())
-        assert(e.getMessage().contains("phrase queries require setting support_phrase = true"))
+        assert(e.getMessage().contains("Inverted index does not support phrase"))
         findException = true
     }
     assertTrue(findException)
@@ -347,7 +347,7 @@ suite("test_variant_multi_index_nonCurrent", "p0, nonConcurrent") {
         sql """ select count() from ${tableName} where var['char_1'] match_phrase 'short text' """
     } catch (Exception e) {
         logger.info(e.getMessage())
-        assert(e.getMessage().contains("phrase queries require setting support_phrase = true"))
+        assert(e.getMessage().contains("Inverted index does not support phrase"))
         findException = true
     }
     assertTrue(findException)
@@ -406,7 +406,7 @@ suite("test_variant_multi_index_nonCurrent", "p0, nonConcurrent") {
         sql """ select count() from ${tableName} where var['char_1'] match_phrase 'short text' """
     } catch (Exception e) {
         logger.info(e.getMessage())
-        assert(e.getMessage().contains("phrase queries require setting support_phrase = true"))
+        assert(e.getMessage().contains("Inverted index does not support phrase"))
         findException = true
     }
     assertTrue(findException)
