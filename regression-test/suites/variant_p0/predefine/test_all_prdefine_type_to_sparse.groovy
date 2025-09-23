@@ -71,8 +71,9 @@ suite("test_all_prdefine_type_to_sparse", "p0"){
     """
 
     sql """
-         INSERT INTO ${tableName} (`var`) VALUES
+         INSERT INTO ${tableName} (`id`,`var`) VALUES
         (
+            0,
             '{
               "boolean_1": true,
               "tinyint_1": 1,
@@ -114,7 +115,7 @@ suite("test_all_prdefine_type_to_sparse", "p0"){
             }'
         ),
         (
-            '{"other_1": "1"}'
+            1, '{"other_1": "1"}'
         ); 
     """
 
