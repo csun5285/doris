@@ -18,12 +18,12 @@
 suite("regression_test_variant_predefine_hirachinal", "variant_type"){
     def table_name = "var_rs"
     sql "DROP TABLE IF EXISTS ${table_name}"
-    int count = new Random().nextInt(10)
 
+    sql "set default_variant_enable_doc_mode = false"
     sql """
             CREATE TABLE IF NOT EXISTS ${table_name} (
                 k bigint,
-                v variant<'a' : largeint, 'c.d' : text, properties("variant_max_subcolumns_count" = "${count}")>
+                v variant<'a' : largeint, 'c.d' : text, properties("variant_max_subcolumns_count" = "0")>
             )
             DUPLICATE KEY(`k`)
             DISTRIBUTED BY HASH(k) BUCKETS 1

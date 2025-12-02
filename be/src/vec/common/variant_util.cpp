@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-#include "vec/common/schema_util.h"
+#include "vec/common/variant_util.h"
 
 #include <assert.h>
 #include <fmt/format.h>
@@ -30,14 +30,22 @@
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <simdjson/simdjson.h> // IWYU pragma: keep
 #include <unicode/uchar.h>
 
 #include <algorithm>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <ostream>
 #include <set>
+#include <stack>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -66,6 +74,7 @@
 #include "vec/columns/column_array.h"
 #include "vec/columns/column_map.h"
 #include "vec/columns/column_nullable.h"
+#include "vec/columns/column_string.h"
 #include "vec/columns/column_variant.h"
 #include "vec/common/assert_cast.h"
 #include "vec/common/field_visitors.h"
@@ -87,10 +96,10 @@
 #include "vec/functions/function.h"
 #include "vec/functions/simple_function_factory.h"
 #include "vec/json/json_parser.h"
-#include "vec/json/parse2column.h"
 #include "vec/json/path_in_data.h"
+#include "vec/json/simd_json_parser.h"
 
-namespace doris::vectorized::schema_util {
+namespace doris::vectorized::variant_util {
 #include "common/compile_check_begin.h"
 
 size_t get_number_of_dimensions(const IDataType& type) {
@@ -529,75 +538,6 @@ Status get_least_common_schema(const std::vector<TabletSchemaSPtr>& schemas,
     return Status::OK();
 }
 
-Status _parse_variant_columns(Block& block, const std::vector<int>& variant_pos,
-                              const ParseConfig& config) {
-    for (int i = 0; i < variant_pos.size(); ++i) {
-        auto column_ref = block.get_by_position(variant_pos[i]).column;
-        bool is_nullable = column_ref->is_nullable();
-        const auto& column = remove_nullable(column_ref);
-        const auto& var = assert_cast<const ColumnVariant&>(*column.get());
-        var.assume_mutable_ref().finalize();
-
-        MutableColumnPtr variant_column;
-        if (!var.is_scalar_variant()) {
-            variant_column = var.assume_mutable();
-            // already parsed
-            continue;
-        }
-        ColumnPtr scalar_root_column;
-        if (var.get_root_type()->get_primitive_type() == TYPE_JSONB) {
-            // TODO more efficient way to parse jsonb type, currently we just convert jsonb to
-            // json str and parse them into variant
-            RETURN_IF_ERROR(cast_column({var.get_root(), var.get_root_type(), ""},
-                                        var.get_root()->is_nullable()
-                                                ? make_nullable(std::make_shared<DataTypeString>())
-                                                : std::make_shared<DataTypeString>(),
-                                        &scalar_root_column));
-            if (scalar_root_column->is_nullable()) {
-                scalar_root_column = assert_cast<const ColumnNullable*>(scalar_root_column.get())
-                                             ->get_nested_column_ptr();
-            }
-        } else {
-            const auto& root = *var.get_root();
-            scalar_root_column =
-                    root.is_nullable()
-                            ? assert_cast<const ColumnNullable&>(root).get_nested_column_ptr()
-                            : var.get_root();
-        }
-
-        if (scalar_root_column->is_column_string()) {
-            variant_column = ColumnVariant::create(0);
-            parse_json_to_variant(*variant_column.get(),
-                                  assert_cast<const ColumnString&>(*scalar_root_column), config);
-        } else {
-            // Root maybe other types rather than string like ColumnVariant(Int32).
-            // In this case, we should finlize the root and cast to JSON type
-            auto expected_root_type =
-                    make_nullable(std::make_shared<ColumnVariant::MostCommonType>());
-            var.ensure_root_node_type(expected_root_type);
-            variant_column = var.assume_mutable();
-        }
-
-        // Wrap variant with nullmap if it is nullable
-        ColumnPtr result = variant_column->get_ptr();
-        if (is_nullable) {
-            const auto& null_map =
-                    assert_cast<const ColumnNullable&>(*column_ref).get_null_map_column_ptr();
-            result = ColumnNullable::create(result, null_map);
-        }
-        block.get_by_position(variant_pos[i]).column = result;
-    }
-    return Status::OK();
-}
-
-Status parse_variant_columns(Block& block, const std::vector<int>& variant_pos,
-                             const ParseConfig& config) {
-    // Parse each variant column from raw string column
-    RETURN_IF_CATCH_EXCEPTION({
-        return vectorized::schema_util::_parse_variant_columns(block, variant_pos, config);
-    });
-}
-
 // sort by paths in lexicographical order
 vectorized::ColumnVariant::Subcolumns get_sorted_subcolumns(
         const vectorized::ColumnVariant::Subcolumns& subcolumns) {
@@ -668,7 +608,25 @@ TabletColumn create_sparse_shard_column(const TabletColumn& variant, int bucket_
     return res;
 }
 
-uint32_t variant_sparse_shard_of(const StringRef& path, uint32_t bucket_num) {
+TabletColumn create_doc_value_column(const TabletColumn& variant, int bucket_index) {
+    TabletColumn res;
+    std::string name = variant.name_lower_case() + "." + DOC_VALUE_COLUMN_PATH + ".b" +
+                       std::to_string(bucket_index);
+    res.set_name(name);
+    res.set_type(FieldType::OLAP_FIELD_TYPE_MAP);
+    res.set_aggregation_method(variant.aggregation());
+    res.set_parent_unique_id(variant.unique_id());
+    res.set_default_value("NULL");
+    res.set_path_info(PathInData {name});
+
+    TabletColumn child_tcolumn;
+    child_tcolumn.set_type(FieldType::OLAP_FIELD_TYPE_STRING);
+    res.add_sub_column(child_tcolumn);
+    res.add_sub_column(child_tcolumn);
+    return res;
+}
+
+uint32_t variant_binary_shard_of(const StringRef& path, uint32_t bucket_num) {
     if (bucket_num <= 1) return 0;
     SipHash hash;
     hash.update(path.data, path.size);
@@ -844,6 +802,10 @@ Status VariantCompactionUtil::check_path_stats(const std::vector<RowsetSharedPtr
     std::unordered_map<int32_t, PathToNoneNullValues> output_uid_to_path_stats;
     RETURN_IF_ERROR(aggregate_path_to_stats(output, &output_uid_to_path_stats));
     for (const auto& [uid, stats] : output_uid_to_path_stats) {
+        if (output->tablet_schema()->column_by_uid(uid).is_variant_type() &&
+            output->tablet_schema()->column_by_uid(uid).variant_enable_doc_mode()) {
+            continue;
+        }
         if (original_uid_to_path_stats.find(uid) == original_uid_to_path_stats.end()) {
             return Status::InternalError("Path stats not found for uid {}, tablet_id {}", uid,
                                          tablet->tablet_id());
@@ -907,8 +869,7 @@ Status VariantCompactionUtil::get_compaction_typed_columns(
     for (const auto& path : typed_paths) {
         TabletSchema::SubColumnInfo sub_column_info;
         if (generate_sub_column_info(*target, parent_column->unique_id(), path, &sub_column_info)) {
-            vectorized::schema_util::inherit_column_attributes(*parent_column,
-                                                               sub_column_info.column);
+            inherit_column_attributes(*parent_column, sub_column_info.column);
             output_schema->append_column(sub_column_info.column);
             paths_set_info.typed_path_set.insert({path, std::move(sub_column_info)});
             VLOG_DEBUG << "append typed column " << path;
@@ -938,14 +899,14 @@ Status VariantCompactionUtil::get_compaction_nested_columns(
         auto full_path = full_path_builder.append(parent_column->name_lower_case(), false)
                                  .append(path.get_parts(), false)
                                  .build();
-        TabletColumn nested_column = get_column_by_type(
-                data_type, column_name,
-                vectorized::schema_util::ExtraInfo {.unique_id = -1,
-                                                    .parent_unique_id = parent_column->unique_id(),
-                                                    .path_info = full_path});
-        vectorized::schema_util::inherit_column_attributes(*parent_column, nested_column);
+        TabletColumn nested_column =
+                get_column_by_type(data_type, column_name,
+                                   ExtraInfo {.unique_id = -1,
+                                              .parent_unique_id = parent_column->unique_id(),
+                                              .path_info = full_path});
+        inherit_column_attributes(*parent_column, nested_column);
         TabletIndexes sub_column_indexes;
-        vectorized::schema_util::inherit_index(parent_indexes, sub_column_indexes, nested_column);
+        inherit_index(parent_indexes, sub_column_indexes, nested_column);
         paths_set_info.subcolumn_indexes.emplace(path.get_path(), std::move(sub_column_indexes));
         output_schema->append_column(nested_column);
         VLOG_DEBUG << "append nested column " << path.get_path();
@@ -976,8 +937,7 @@ void VariantCompactionUtil::get_compaction_subcolumns_from_subpaths(
         if (parent_column->variant_enable_typed_paths_to_sparse() &&
             generate_sub_column_info(*target, parent_column->unique_id(), std::string(subpath),
                                      &sub_column_info)) {
-            vectorized::schema_util::inherit_column_attributes(*parent_column,
-                                                               sub_column_info.column);
+            inherit_column_attributes(*parent_column, sub_column_info.column);
             output_schema->append_column(sub_column_info.column);
             paths_set_info.subcolumn_indexes.emplace(subpath, std::move(sub_column_info.indexes));
             VLOG_DEBUG << "append typed column " << subpath;
@@ -993,8 +953,6 @@ void VariantCompactionUtil::get_compaction_subcolumns_from_subpaths(
             subcolumn.set_aggregation_method(parent_column->aggregation());
             subcolumn.set_variant_max_subcolumns_count(
                     parent_column->variant_max_subcolumns_count());
-            subcolumn.set_variant_enable_typed_paths_to_sparse(
-                    parent_column->variant_enable_typed_paths_to_sparse());
             subcolumn.set_is_nullable(true);
             output_schema->append_column(subcolumn);
             VLOG_DEBUG << "append sub column " << subpath << " data type "
@@ -1006,13 +964,12 @@ void VariantCompactionUtil::get_compaction_subcolumns_from_subpaths(
             get_least_supertype_jsonb(find_data_types->second, &data_type);
             TabletColumn sub_column =
                     get_column_by_type(data_type, column_name,
-                                       vectorized::schema_util::ExtraInfo {
-                                               .unique_id = -1,
-                                               .parent_unique_id = parent_column->unique_id(),
-                                               .path_info = column_path});
-            vectorized::schema_util::inherit_column_attributes(*parent_column, sub_column);
+                                       ExtraInfo {.unique_id = -1,
+                                                  .parent_unique_id = parent_column->unique_id(),
+                                                  .path_info = column_path});
+            inherit_column_attributes(*parent_column, sub_column);
             TabletIndexes sub_column_indexes;
-            vectorized::schema_util::inherit_index(parent_indexes, sub_column_indexes, sub_column);
+            inherit_index(parent_indexes, sub_column_indexes, sub_column);
             paths_set_info.subcolumn_indexes.emplace(subpath, std::move(sub_column_indexes));
             output_schema->append_column(sub_column);
             VLOG_DEBUG << "append sub column " << subpath << " data type " << data_type->get_name();
@@ -1033,14 +990,14 @@ void VariantCompactionUtil::get_compaction_subcolumns_from_data_types(
         get_least_supertype_jsonb(data_types, &data_type);
         auto column_name = parent_column->name_lower_case() + "." + path.get_path();
         auto column_path = PathInData(column_name);
-        TabletColumn sub_column = get_column_by_type(
-                data_type, column_name,
-                vectorized::schema_util::ExtraInfo {.unique_id = -1,
-                                                    .parent_unique_id = parent_column->unique_id(),
-                                                    .path_info = column_path});
-        vectorized::schema_util::inherit_column_attributes(*parent_column, sub_column);
+        TabletColumn sub_column =
+                get_column_by_type(data_type, column_name,
+                                   ExtraInfo {.unique_id = -1,
+                                              .parent_unique_id = parent_column->unique_id(),
+                                              .path_info = column_path});
+        inherit_column_attributes(*parent_column, sub_column);
         TabletIndexes sub_column_indexes;
-        vectorized::schema_util::inherit_index(parent_indexes, sub_column_indexes, sub_column);
+        inherit_index(parent_indexes, sub_column_indexes, sub_column);
         paths_set_info.subcolumn_indexes.emplace(path.get_path(), std::move(sub_column_indexes));
         output_schema->append_column(sub_column);
         VLOG_DEBUG << "append sub column " << path.get_path() << " data type "
@@ -1075,6 +1032,17 @@ Status VariantCompactionUtil::get_extended_compaction_schema(
             continue;
         }
         VLOG_DEBUG << "column " << column->name() << " unique id " << column->unique_id();
+
+        if (column->variant_enable_doc_mode()) {
+            const int bucket_num = std::max(1, column->variant_doc_hash_shard_count());
+            for (int b = 0; b < bucket_num; ++b) {
+                TabletColumn doc_value_bucket_column = create_doc_value_column(*column, b);
+                doc_value_bucket_column.set_type(FieldType::OLAP_FIELD_TYPE_VARIANT);
+                doc_value_bucket_column.set_is_nullable(false);
+                output_schema->append_column(doc_value_bucket_column);
+            }
+            continue;
+        }
 
         // 1. append typed columns
         RETURN_IF_ERROR(get_compaction_typed_columns(
@@ -1443,10 +1411,9 @@ TabletSchemaSPtr VariantCompactionUtil::calculate_variant_extended_schema(
                                              .build();
                     TabletColumn subcolumn =
                             get_column_by_type(data_type, column_name,
-                                               vectorized::schema_util::ExtraInfo {
-                                                       .unique_id = -1,
-                                                       .parent_unique_id = column->unique_id(),
-                                                       .path_info = full_path});
+                                               ExtraInfo {.unique_id = -1,
+                                                          .parent_unique_id = column->unique_id(),
+                                                          .path_info = full_path});
                     schema->append_column(subcolumn);
                 }
             }
@@ -1525,5 +1492,459 @@ bool inherit_index(const std::vector<const TabletIndex*>& parent_indexes,
                          column_pb.column_path_info().path());
 }
 
+// ============ Implementation from parse2column.cpp ============
+
+/** Pool for objects that cannot be used from different threads simultaneously.
+  * Allows to create an object for each thread.
+  * Pool has unbounded size and objects are not destroyed before destruction of pool.
+  *
+  * Use it in cases when thread local storage is not appropriate
+  *  (when maximum number of simultaneously used objects is less
+  *   than number of running/sleeping threads, that has ever used object,
+  *   and creation/destruction of objects is expensive).
+  */
+template <typename T>
+class SimpleObjectPool {
+protected:
+    /// Hold all available objects in stack.
+    std::mutex mutex;
+    std::stack<std::unique_ptr<T>> stack;
+    /// Specialized deleter for std::unique_ptr.
+    /// Returns underlying pointer back to stack thus reclaiming its ownership.
+    struct Deleter {
+        SimpleObjectPool<T>* parent;
+        Deleter(SimpleObjectPool<T>* parent_ = nullptr) : parent {parent_} {} /// NOLINT
+        void operator()(T* owning_ptr) const {
+            std::lock_guard lock {parent->mutex};
+            parent->stack.emplace(owning_ptr);
+        }
+    };
+
+public:
+    using Pointer = std::unique_ptr<T, Deleter>;
+    /// Extracts and returns a pointer from the stack if it's not empty,
+    ///  creates a new one by calling provided f() otherwise.
+    template <typename Factory>
+    Pointer get(Factory&& f) {
+        std::unique_lock lock(mutex);
+        if (stack.empty()) {
+            return {f(), this};
+        }
+        auto object = stack.top().release();
+        stack.pop();
+        return std::unique_ptr<T, Deleter>(object, Deleter(this));
+    }
+    /// Like get(), but creates object using default constructor.
+    Pointer getDefault() {
+        return get([] { return new T; });
+    }
+};
+
+SimpleObjectPool<JsonParser> parsers_pool;
+
+using Node = typename ColumnVariant::Subcolumns::Node;
+/// Visitor that keeps @num_dimensions_to_keep dimensions in arrays
+/// and replaces all scalars or nested arrays to @replacement at that level.
+class FieldVisitorReplaceScalars : public StaticVisitor<Field> {
+public:
+    FieldVisitorReplaceScalars(const Field& replacement_, size_t num_dimensions_to_keep_)
+            : replacement(replacement_), num_dimensions_to_keep(num_dimensions_to_keep_) {}
+    template <PrimitiveType T>
+    Field operator()(const typename PrimitiveTypeTraits<T>::NearestFieldType& x) const {
+        if constexpr (T == TYPE_ARRAY) {
+            if (num_dimensions_to_keep == 0) {
+                return replacement;
+            }
+            const size_t size = x.size();
+            Array res(size);
+            for (size_t i = 0; i < size; ++i) {
+                res[i] = apply_visitor(
+                        FieldVisitorReplaceScalars(replacement, num_dimensions_to_keep - 1), x[i]);
+            }
+            return Field::create_field<TYPE_ARRAY>(res);
+        } else {
+            return replacement;
+        }
+    }
+
+private:
+    const Field& replacement;
+    size_t num_dimensions_to_keep;
+};
+
+template <typename ParserImpl>
+void parse_json_to_variant_impl(IColumn& column, const char* src, size_t length,
+                                JSONDataParser<ParserImpl>* parser, const ParseConfig& config) {
+    auto& column_variant = assert_cast<ColumnVariant&>(column);
+    std::optional<ParseResult> result;
+    /// Treat empty string as an empty object
+    /// for better CAST from String to Object.
+    if (length > 0) {
+        result = parser->parse(src, length, config);
+    } else {
+        result = ParseResult {};
+    }
+    if (!result) {
+        VLOG_DEBUG << "failed to parse " << std::string_view(src, length) << ", length= " << length;
+        if (config::variant_throw_exeception_on_invalid_json) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT, "Failed to parse object {}",
+                                   std::string_view(src, length));
+        }
+        // Treat as string
+        PathInData root_path;
+        Field field = Field::create_field<TYPE_STRING>(String(src, length));
+        result = ParseResult {{root_path}, {field}};
+    }
+    auto& [paths, values] = *result;
+    assert(paths.size() == values.size());
+    size_t old_num_rows = column_variant.rows();
+    if (config.enable_flatten_nested) {
+        // here we should check the paths in variant and paths in result,
+        // if two paths which same prefix have different structure, we should throw an exception
+        std::vector<PathInData> check_paths;
+        for (const auto& entry : column_variant.get_subcolumns()) {
+            check_paths.push_back(entry->path);
+        }
+        check_paths.insert(check_paths.end(), paths.begin(), paths.end());
+        THROW_IF_ERROR(check_variant_has_no_ambiguous_paths(check_paths));
+    }
+    auto [doc_value_data_paths, doc_value_data_values] =
+            column_variant.get_doc_value_data_paths_and_values();
+    auto& doc_value_data_offsets = column_variant.serialized_doc_value_column_offsets();
+    std::unordered_set<std::string> subcolumn_set;
+
+    auto flush_defaults = [](ColumnVariant::Subcolumn* subcolumn) {
+        const auto num_defaults = subcolumn->cur_num_of_defaults();
+        if (num_defaults > 0) {
+            subcolumn->insert_many_defaults(num_defaults);
+            subcolumn->reset_current_num_of_defaults();
+        }
+    };
+
+    auto get_or_create_subcolumn = [&](const PathInData& path, size_t index_hint,
+                                       const FieldInfo& field_info) -> ColumnVariant::Subcolumn* {
+        if (column_variant.get_subcolumn(path, index_hint) == nullptr) {
+            if (path.has_nested_part()) {
+                column_variant.add_nested_subcolumn(path, field_info, old_num_rows);
+            } else {
+                column_variant.add_sub_column(path, old_num_rows);
+            }
+        }
+        auto* subcolumn = column_variant.get_subcolumn(path, index_hint);
+        if (!subcolumn) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT, "Failed to find sub column {}",
+                                   path.get_path());
+        }
+        return subcolumn;
+    };
+
+    auto insert_into_subcolumn = [&](size_t i,
+                                     bool check_size_mismatch) -> ColumnVariant::Subcolumn* {
+        FieldInfo field_info;
+        get_field_info(values[i], &field_info);
+        if (field_info.scalar_type_id == PrimitiveType::INVALID_TYPE) {
+            return nullptr;
+        }
+        auto* subcolumn = get_or_create_subcolumn(paths[i], i, field_info);
+        flush_defaults(subcolumn);
+        if (check_size_mismatch && subcolumn->size() != old_num_rows) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                   "subcolumn {} size missmatched, may contains duplicated entry",
+                                   paths[i].get_path());
+        }
+        subcolumn->insert(std::move(values[i]), std::move(field_info));
+        return subcolumn;
+    };
+
+    auto insert_unique_path_or_throw = [&](const std::string& path) {
+        auto [it, inserted] = subcolumn_set.insert(path);
+        (void)it;
+        if (!inserted) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                   "may contains duplicated entry : {}", path);
+        }
+    };
+
+    switch (config.parse_to) {
+    case ParseConfig::ParseTo::OnlySubcolumns:
+        for (size_t i = 0; i < paths.size(); ++i) {
+            insert_into_subcolumn(i, true);
+        }
+        break;
+    case ParseConfig::ParseTo::BothSubcolumnsAndDocValueColumn:
+        for (size_t i = 0; i < paths.size(); ++i) {
+            auto* subcolumn = insert_into_subcolumn(i, true);
+            if (!subcolumn) {
+                continue;
+            }
+            const auto path = paths[i].get_path();
+            insert_unique_path_or_throw(path);
+            if (!paths[i].empty()) {
+                subcolumn->serialize_to_binary_column(doc_value_data_paths, path,
+                                                      doc_value_data_values, old_num_rows);
+            }
+        }
+        break;
+    case ParseConfig::ParseTo::OnlyDocValueColumn:
+        ColumnVariant::Subcolumn tmp_subcolumn(0, true);
+        for (size_t i = 0; i < paths.size(); ++i) {
+            FieldInfo field_info;
+            get_field_info(values[i], &field_info);
+            const auto path = paths[i].get_path();
+            insert_unique_path_or_throw(path);
+            // only insert root path to subcolumns
+            if (paths[i].empty()) {
+                auto* subcolumn = column_variant.get_subcolumn(paths[i]);
+                DCHECK(subcolumn != nullptr);
+                flush_defaults(subcolumn);
+                subcolumn->insert(std::move(values[i]), std::move(field_info));
+                continue;
+            }
+            tmp_subcolumn.insert(std::move(values[i]), std::move(field_info));
+            tmp_subcolumn.serialize_to_binary_column(doc_value_data_paths, path,
+                                                     doc_value_data_values, 0);
+            tmp_subcolumn.pop_back(1);
+        }
+        break;
+    }
+    doc_value_data_offsets.push_back(doc_value_data_paths->size());
+    // /// Insert default values to missed subcolumns.
+    const auto& subcolumns = column_variant.get_subcolumns();
+    for (const auto& entry : subcolumns) {
+        if (entry->data.size() == old_num_rows) {
+            // Handle nested paths differently from simple paths
+            if (entry->path.has_nested_part()) {
+                // Try to insert default from nested, if failed, insert regular default
+                bool success = UNLIKELY(column_variant.try_insert_default_from_nested(entry));
+                if (!success) {
+                    entry->data.insert_default();
+                }
+            } else {
+                // For non-nested paths, increment default counter
+                entry->data.increment_default_counter();
+            }
+        }
+    }
+    column_variant.incr_num_rows();
+    auto sparse_column = column_variant.get_sparse_column();
+    if (sparse_column->size() == old_num_rows) {
+        sparse_column->assume_mutable()->insert_default();
+    }
+#ifndef NDEBUG
+    column_variant.check_consistency();
+#endif
+}
+
+// exposed interfaces
+void parse_json_to_variant(IColumn& column, const StringRef& json, JsonParser* parser,
+                           const ParseConfig& config) {
+    if (parser) {
+        return parse_json_to_variant_impl(column, json.data, json.size, parser, config);
+    } else {
+        auto pool_parser = parsers_pool.get([] { return new JsonParser(); });
+        return parse_json_to_variant_impl(column, json.data, json.size, pool_parser.get(), config);
+    }
+}
+
+void parse_json_to_variant(IColumn& column, const ColumnString& raw_json_column,
+                           const ParseConfig& config) {
+    auto parser = parsers_pool.get([] { return new JsonParser(); });
+    for (size_t i = 0; i < raw_json_column.size(); ++i) {
+        StringRef raw_json = raw_json_column.get_data_at(i);
+        parse_json_to_variant_impl(column, raw_json.data, raw_json.size, parser.get(), config);
+    }
+    column.finalize();
+}
+
+// parse the doc snapshot column to subcolumns
+void materialize_docs_to_subcolumns(ColumnVariant& column_variant) {
+    auto subcolumns = materialize_docs_to_subcolumns_map(column_variant);
+
+    for (auto& entry : subcolumns) {
+        entry.second.finalize();
+        if (!column_variant.add_sub_column(PathInData(entry.first),
+                                           IColumn::mutate(entry.second.get_finalized_column_ptr()),
+                                           entry.second.get_least_common_type())) {
+            throw doris::Exception(ErrorCode::INTERNAL_ERROR,
+                                   "Failed to add subcolumn {}, which is from doc snapshot column",
+                                   entry.first);
+        }
+    }
+
+    column_variant.finalize();
+}
+
+// ============ Implementation from variant_util.cpp ============
+
+std::unordered_map<std::string_view, ColumnVariant::Subcolumn> materialize_docs_to_subcolumns_map(
+        const ColumnVariant& variant) {
+    std::unordered_map<std::string_view, ColumnVariant::Subcolumn> subcolumns;
+
+    const auto [column_key, column_value] = variant.get_doc_value_data_paths_and_values();
+    const auto& column_offsets = variant.serialized_doc_value_column_offsets();
+    const size_t num_rows = column_offsets.size();
+
+    DCHECK_EQ(num_rows, variant.size()) << "doc snapshot offsets size mismatch with variant rows";
+
+    // Best-effort reserve: at most number of kv pairs.
+    subcolumns.reserve(column_key->size());
+
+    for (int row = 0; row < num_rows; ++row) {
+        const size_t start = column_offsets[row - 1];
+        const size_t end = column_offsets[row];
+        for (size_t i = start; i < end; ++i) {
+            const auto& key = column_key->get_data_at(i);
+            const std::string_view path_sv(key.data, key.size);
+
+            auto [it, inserted] =
+                    subcolumns.try_emplace(path_sv, ColumnVariant::Subcolumn {0, true, false});
+            auto& subcolumn = it->second;
+            if (inserted) {
+                subcolumn.insert_many_defaults(row);
+            } else if (subcolumn.size() != row) {
+                subcolumn.insert_many_defaults(row - subcolumn.size());
+            }
+            subcolumn.deserialize_from_binary_column(column_value, i);
+        }
+    }
+
+    for (auto& [path, subcolumn] : subcolumns) {
+        if (subcolumn.size() != num_rows) {
+            subcolumn.insert_many_defaults(num_rows - subcolumn.size());
+        }
+    }
+
+    return subcolumns;
+}
+
+namespace {
+
+Status _parse_and_materialize_variant_columns(Block& block,
+                                              const std::vector<uint32_t>& variant_pos,
+                                              const std::vector<ParseConfig>& configs) {
+    for (size_t i = 0; i < variant_pos.size(); ++i) {
+        auto column_ref = block.get_by_position(variant_pos[i]).column;
+        bool is_nullable = column_ref->is_nullable();
+        MutableColumnPtr var_column = column_ref->assume_mutable();
+        if (is_nullable) {
+            const auto& nullable = assert_cast<const ColumnNullable&>(*column_ref);
+            var_column = nullable.get_nested_column_ptr()->assume_mutable();
+        }
+        auto& var = assert_cast<ColumnVariant&>(*var_column);
+        var_column->finalize();
+
+        MutableColumnPtr variant_column;
+        // doc snapshot mode, parse the doc snapshot column to subcolumns
+        if (var.is_doc_mode() &&
+            configs[i].parse_to == ParseConfig::ParseTo::BothSubcolumnsAndDocValueColumn) {
+            materialize_docs_to_subcolumns(var);
+            continue;
+        }
+        if (!var.is_scalar_variant()) {
+            // already parsed
+            continue;
+        }
+
+        VLOG_DEBUG << "parse scalar variant column: " << var.get_root_type()->get_name();
+        ColumnPtr scalar_root_column;
+        if (var.get_root_type()->get_primitive_type() == TYPE_JSONB) {
+            // TODO more efficient way to parse jsonb type, currently we just convert jsonb to
+            // json str and parse them into variant
+            RETURN_IF_ERROR(cast_column({var.get_root(), var.get_root_type(), ""},
+                                        var.get_root()->is_nullable()
+                                                ? make_nullable(std::make_shared<DataTypeString>())
+                                                : std::make_shared<DataTypeString>(),
+                                        &scalar_root_column));
+            if (scalar_root_column->is_nullable()) {
+                scalar_root_column = assert_cast<const ColumnNullable*>(scalar_root_column.get())
+                                             ->get_nested_column_ptr();
+            }
+        } else {
+            const auto& root = *var.get_root();
+            scalar_root_column =
+                    root.is_nullable()
+                            ? assert_cast<const ColumnNullable&>(root).get_nested_column_ptr()
+                            : var.get_root();
+        }
+
+        if (scalar_root_column->is_column_string()) {
+            variant_column = ColumnVariant::create(0);
+            parse_json_to_variant(*variant_column.get(),
+                                  assert_cast<const ColumnString&>(*scalar_root_column),
+                                  configs[i]);
+        } else {
+            // Root maybe other types rather than string like ColumnVariant(Int32).
+            // In this case, we should finlize the root and cast to JSON type
+            auto expected_root_type =
+                    make_nullable(std::make_shared<ColumnVariant::MostCommonType>());
+            var.ensure_root_node_type(expected_root_type);
+            variant_column = var.assume_mutable();
+        }
+
+        // Wrap variant with nullmap if it is nullable
+        ColumnPtr result = variant_column->get_ptr();
+        if (is_nullable) {
+            const auto& null_map =
+                    assert_cast<const ColumnNullable&>(*column_ref).get_null_map_column_ptr();
+            result = ColumnNullable::create(result, null_map);
+        }
+        block.get_by_position(variant_pos[i]).column = result;
+    }
+    return Status::OK();
+}
+
+} // namespace
+
+Status parse_and_materialize_variant_columns(Block& block, const std::vector<uint32_t>& variant_pos,
+                                             const std::vector<ParseConfig>& configs) {
+    RETURN_IF_CATCH_EXCEPTION(
+            { return _parse_and_materialize_variant_columns(block, variant_pos, configs); });
+}
+
+Status parse_and_materialize_variant_columns(Block& block, const TabletSchema& tablet_schema,
+                                             const std::vector<uint32_t>& column_pos) {
+    std::vector<uint32_t> variant_column_pos;
+    for (const auto& pos : column_pos) {
+        const auto& column = tablet_schema.column(pos);
+        if (column.is_variant_type()) {
+            variant_column_pos.push_back(pos);
+        }
+    }
+
+    if (variant_column_pos.empty()) {
+        return Status::OK();
+    }
+
+    std::vector<ParseConfig> configs(variant_column_pos.size());
+    for (size_t i = 0; i < variant_column_pos.size(); ++i) {
+        configs[i].enable_flatten_nested = tablet_schema.variant_flatten_nested();
+        const auto& column = tablet_schema.column(variant_column_pos[i]);
+        if (!column.is_variant_type()) {
+            return Status::InternalError("column is not variant type, column name: {}",
+                                         column.name());
+        }
+        // if doc mode is not enabled, no need to parse to doc value column
+        if (!column.variant_enable_doc_mode()) {
+            configs[i].parse_to = ParseConfig::ParseTo::OnlySubcolumns;
+            continue;
+        }
+
+        auto column_size = block.get_by_position(variant_column_pos[i]).column->size();
+
+        // if column size is greater than min rows, parse to both subcolumns and doc value column
+        if (column_size > column.variant_doc_materialization_min_rows()) {
+            configs[i].parse_to = ParseConfig::ParseTo::BothSubcolumnsAndDocValueColumn;
+        }
+
+        // if column size is less than min rows, parse to only doc value column
+        else {
+            configs[i].parse_to = ParseConfig::ParseTo::OnlyDocValueColumn;
+        }
+    }
+
+    RETURN_IF_ERROR(parse_and_materialize_variant_columns(block, variant_column_pos, configs));
+    return Status::OK();
+}
+
 #include "common/compile_check_end.h"
-} // namespace doris::vectorized::schema_util
+} // namespace doris::vectorized::variant_util
