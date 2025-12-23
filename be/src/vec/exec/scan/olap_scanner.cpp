@@ -269,6 +269,7 @@ Status OlapScanner::prepare() {
     }
 
     if (_tablet_reader_params.score_runtime) {
+        SCOPED_TIMER(local_state->_statistics_collect_timer);
         _tablet_reader_params.collection_statistics = std::make_shared<CollectionStatistics>();
         RETURN_IF_ERROR(_tablet_reader_params.collection_statistics->collect(
                 _state, _tablet_reader_params.rs_splits, _tablet_reader_params.tablet_schema,

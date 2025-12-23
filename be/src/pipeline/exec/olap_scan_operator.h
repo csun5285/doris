@@ -121,6 +121,7 @@ private:
     RuntimeProfile::Counter* _reader_init_timer = nullptr;
     RuntimeProfile::Counter* _scanner_init_timer = nullptr;
     RuntimeProfile::Counter* _process_conjunct_timer = nullptr;
+    RuntimeProfile::Counter* _statistics_collect_timer = nullptr;
 
     RuntimeProfile::Counter* _io_timer = nullptr;
     RuntimeProfile::Counter* _read_compressed_counter = nullptr;
