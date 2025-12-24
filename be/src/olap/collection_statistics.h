@@ -32,6 +32,7 @@ namespace doris {
 namespace io {
 class FileSystem;
 using FileSystemSPtr = std::shared_ptr<FileSystem>;
+struct IOContext;
 } // namespace io
 
 struct RowSetSplits;
@@ -59,7 +60,8 @@ public:
 
     Status collect(RuntimeState* state, const std::vector<RowSetSplits>& rs_splits,
                    const TabletSchemaSPtr& tablet_schema,
-                   const vectorized::VExprContextSPtrs& common_expr_ctxs_push_down);
+                   const vectorized::VExprContextSPtrs& common_expr_ctxs_push_down,
+                   io::IOContext* io_ctx);
 
     MOCK_FUNCTION float get_or_calculate_idf(const std::wstring& lucene_col_name,
                                              const std::wstring& term);
@@ -72,7 +74,8 @@ private:
                                 std::unordered_map<std::wstring, CollectInfo>* collect_infos);
     Status process_segment(const std::string& seg_path, const io::FileSystemSPtr& fs,
                            const TabletSchema* tablet_schema,
-                           const std::unordered_map<std::wstring, CollectInfo>& collect_infos);
+                           const std::unordered_map<std::wstring, CollectInfo>& collect_infos,
+                           io::IOContext* io_ctx);
 
     uint64_t get_term_doc_freq_by_col(const std::wstring& lucene_col_name,
                                       const std::wstring& term);
