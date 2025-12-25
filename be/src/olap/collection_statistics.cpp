@@ -43,13 +43,10 @@ Status CollectionStatistics::collect(
     for (const auto& rs_split : rs_splits) {
         const auto& rs_reader = rs_split.rs_reader;
         auto rowset = rs_reader->rowset();
-        auto rowset_meta = rowset->rowset_meta();
-
         auto num_segments = rowset->num_segments();
         for (int32_t seg_id = 0; seg_id < num_segments; ++seg_id) {
-            auto seg_path = DORIS_TRY(rowset->segment_path(seg_id));
-            auto status = process_segment(seg_path, rowset_meta->fs(), tablet_schema.get(),
-                                          collect_infos, io_ctx);
+            auto status =
+                    process_segment(rowset, seg_id, tablet_schema.get(), collect_infos, io_ctx);
             if (!status.ok()) {
                 if (status.code() == ErrorCode::INVERTED_INDEX_FILE_NOT_FOUND ||
                     status.code() == ErrorCode::INVERTED_INDEX_BYPASS) {
@@ -185,12 +182,16 @@ Status CollectionStatistics::extract_collect_info(
 }
 
 Status CollectionStatistics::process_segment(
-        const std::string& seg_path, const io::FileSystemSPtr& fs,
-        const TabletSchema* tablet_schema,
+        const RowsetSharedPtr& rowset, int32_t seg_id, const TabletSchema* tablet_schema,
         const std::unordered_map<std::wstring, CollectInfo>& collect_infos, io::IOContext* io_ctx) {
+    auto seg_path = DORIS_TRY(rowset->segment_path(seg_id));
+    auto rowset_meta = rowset->rowset_meta();
+
     auto idx_file_reader = std::make_unique<IndexFileReader>(
-            fs, std::string {InvertedIndexDescriptor::get_index_file_path_prefix(seg_path)},
-            tablet_schema->get_inverted_index_storage_format());
+            rowset_meta->fs(),
+            std::string {InvertedIndexDescriptor::get_index_file_path_prefix(seg_path)},
+            tablet_schema->get_inverted_index_storage_format(),
+            rowset_meta->inverted_index_file_info(seg_id));
     RETURN_IF_ERROR(idx_file_reader->init(config::inverted_index_read_buffer_size, io_ctx));
 
     int32_t total_seg_num_docs = 0;

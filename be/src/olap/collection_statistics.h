@@ -37,6 +37,9 @@ struct IOContext;
 
 struct RowSetSplits;
 
+class Rowset;
+using RowsetSharedPtr = std::shared_ptr<Rowset>;
+
 class TabletIndex;
 class TabletSchema;
 using TabletSchemaSPtr = std::shared_ptr<TabletSchema>;
@@ -72,7 +75,7 @@ private:
                                 const vectorized::VExprContextSPtrs& common_expr_ctxs_push_down,
                                 const TabletSchemaSPtr& tablet_schema,
                                 std::unordered_map<std::wstring, CollectInfo>* collect_infos);
-    Status process_segment(const std::string& seg_path, const io::FileSystemSPtr& fs,
+    Status process_segment(const RowsetSharedPtr& rowset, int32_t seg_id,
                            const TabletSchema* tablet_schema,
                            const std::unordered_map<std::wstring, CollectInfo>& collect_infos,
                            io::IOContext* io_ctx);
