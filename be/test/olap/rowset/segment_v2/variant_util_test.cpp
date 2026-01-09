@@ -72,15 +72,15 @@ TEST(VariantUtilTest, ParseDocValueToSubcolumns_FillsDefaultsAndValues) {
 
     vectorized::FieldWithDataType fa;
     a.get(0, fa);
-    EXPECT_EQ(fa.field.get_type(), PrimitiveType::TYPE_BIGINT);
-    EXPECT_EQ(fa.field.get<Int64>(), 1);
+    EXPECT_EQ(fa.field.get_type(), PrimitiveType::TYPE_TINYINT);
+    EXPECT_EQ(fa.field.get<Int8>(), 1);
 
     a.get(1, fa);
     EXPECT_EQ(fa.field.get_type(), PrimitiveType::TYPE_NULL); // missing
 
     a.get(2, fa);
-    EXPECT_EQ(fa.field.get_type(), PrimitiveType::TYPE_BIGINT);
-    EXPECT_EQ(fa.field.get<Int64>(), 3);
+    EXPECT_EQ(fa.field.get_type(), PrimitiveType::TYPE_TINYINT);
+    EXPECT_EQ(fa.field.get<Int8>(), 3);
 
     vectorized::FieldWithDataType fb;
     b.get(0, fb);
@@ -130,11 +130,11 @@ TEST(VariantUtilTest, ParseVariantColumns_ScalarJsonStringToSubcolumns) {
     ASSERT_TRUE(sub_a != nullptr);
     vectorized::FieldWithDataType f;
     sub_a->get(0, f);
-    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_BIGINT);
-    EXPECT_EQ(f.field.get<Int64>(), 1);
+    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_TINYINT);
+    EXPECT_EQ(f.field.get<Int8>(), 1);
     sub_a->get(1, f);
-    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_BIGINT);
-    EXPECT_EQ(f.field.get<Int64>(), 2);
+    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_TINYINT);
+    EXPECT_EQ(f.field.get<Int8>(), 2);
 }
 
 TEST(VariantUtilTest, ParseVariantColumns_DocModeBinaryToSubcolumns) {
@@ -173,11 +173,11 @@ TEST(VariantUtilTest, ParseVariantColumns_DocModeBinaryToSubcolumns) {
 
     vectorized::FieldWithDataType f;
     sub_a->get(0, f);
-    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_BIGINT);
-    EXPECT_EQ(f.field.get<Int64>(), 1);
+    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_TINYINT);
+    EXPECT_EQ(f.field.get<Int8>(), 1);
     sub_a->get(1, f);
-    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_BIGINT);
-    EXPECT_EQ(f.field.get<Int64>(), 2);
+    EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_TINYINT);
+    EXPECT_EQ(f.field.get<Int8>(), 2);
 
     sub_b->get(0, f);
     EXPECT_EQ(f.field.get_type(), PrimitiveType::TYPE_STRING);

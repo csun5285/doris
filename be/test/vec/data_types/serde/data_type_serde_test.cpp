@@ -511,7 +511,7 @@ TEST(DataTypeSerDeTest, DeserializeFromSparseColumnTest) {
         EXPECT_EQ(subcolumn.data.size(), 1);
         EXPECT_EQ(subcolumn.get_least_common_type()->get_primitive_type(),
                   PrimitiveType::TYPE_DATEV2);
-        EXPECT_EQ(subcolumn.get_last_field().get<UInt64>(), 154543245);
+        EXPECT_EQ(subcolumn.get_last_field().get<UInt32>(), 154543245);
         subcolumn.deserialize_from_binary_column(&value, 6);
         EXPECT_EQ(subcolumn.data.size(), 1);
         EXPECT_EQ(subcolumn.get_least_common_type()->get_primitive_type(),
