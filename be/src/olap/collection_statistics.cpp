@@ -63,41 +63,43 @@ Status CollectionStatistics::collect(
     }
 
     // Build a single-line log with query_id, tablet_ids, and per-field term statistics
-    std::set<int64_t> tablet_ids;
-    for (const auto& rs_split : rs_splits) {
-        if (rs_split.rs_reader && rs_split.rs_reader->rowset()) {
-            tablet_ids.insert(rs_split.rs_reader->rowset()->rowset_meta()->tablet_id());
+    if (VLOG_IS_ON(1)) {
+        std::set<int64_t> tablet_ids;
+        for (const auto& rs_split : rs_splits) {
+            if (rs_split.rs_reader && rs_split.rs_reader->rowset()) {
+                tablet_ids.insert(rs_split.rs_reader->rowset()->rowset_meta()->tablet_id());
+            }
         }
-    }
 
-    std::ostringstream oss;
-    oss << "CollectionStatistics: query_id=" << print_id(state->query_id());
+        std::ostringstream oss;
+        oss << "CollectionStatistics: query_id=" << print_id(state->query_id());
 
-    oss << ", tablet_ids=[";
-    bool first_tablet = true;
-    for (int64_t tid : tablet_ids) {
-        if (!first_tablet) oss << ",";
-        oss << tid;
-        first_tablet = false;
-    }
-    oss << "]";
-
-    oss << ", total_num_docs=" << _total_num_docs;
-
-    for (const auto& [ws_field_name, num_tokens] : _total_num_tokens) {
-        oss << ", {field=" << StringHelper::to_string(ws_field_name)
-            << ", num_tokens=" << num_tokens << ", terms=[";
-
-        bool first_term = true;
-        for (const auto& [term, doc_freq] : _term_doc_freqs.at(ws_field_name)) {
-            if (!first_term) oss << ", ";
-            oss << "(" << StringHelper::to_string(term) << ":" << doc_freq << ")";
-            first_term = false;
+        oss << ", tablet_ids=[";
+        bool first_tablet = true;
+        for (int64_t tid : tablet_ids) {
+            if (!first_tablet) oss << ",";
+            oss << tid;
+            first_tablet = false;
         }
-        oss << "]}";
-    }
+        oss << "]";
 
-    LOG(INFO) << oss.str();
+        oss << ", total_num_docs=" << _total_num_docs;
+
+        for (const auto& [ws_field_name, num_tokens] : _total_num_tokens) {
+            oss << ", {field=" << StringHelper::to_string(ws_field_name)
+                << ", num_tokens=" << num_tokens << ", terms=[";
+
+            bool first_term = true;
+            for (const auto& [term, doc_freq] : _term_doc_freqs.at(ws_field_name)) {
+                if (!first_term) oss << ", ";
+                oss << "(" << StringHelper::to_string(term) << ":" << doc_freq << ")";
+                first_term = false;
+            }
+            oss << "]}";
+        }
+
+        VLOG(1) << oss.str();
+    }
 
     return Status::OK();
 }
