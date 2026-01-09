@@ -169,9 +169,19 @@ Status MaterializationSharedState::create_muiltget_result(const vectorized::Colu
                 rpc_struct->second.request.mutable_request_block_descs(i)->add_file_id(
                         row_location.file_id);
                 block_order[j] = row_location.backend_id;
+
+                // Count rows per backend
+                _backend_rows_count[row_location.backend_id]++;
             } else {
                 block_order[j] = 0;
             }
+        }
+    }
+
+    // Update max rows per backend
+    for (const auto& [_, row_count] : _backend_rows_count) {
+        if (row_count > _max_rows_per_backend) {
+            _max_rows_per_backend = row_count;
         }
     }
 
@@ -355,6 +365,8 @@ Status MaterializationOperator::push(RuntimeState* state, vectorized::Block* in_
         if (local_state._materialization_state.need_merge_block) {
             SCOPED_TIMER(local_state._merge_response_timer);
             RETURN_IF_ERROR(local_state._materialization_state.merge_multi_response());
+            local_state._max_rows_per_backend_counter->set(
+                    (int64_t)local_state._materialization_state._max_rows_per_backend);
         }
     }
 
