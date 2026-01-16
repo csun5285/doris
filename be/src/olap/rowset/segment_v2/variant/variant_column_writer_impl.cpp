@@ -1115,7 +1115,6 @@ Status VariantDocCompactWriter::finalize() {
                         ->get_primitive_type() == PrimitiveType::INVALID_TYPE) {
                 continue;
             }
-            subcolumn.finalize();
             TabletColumn tablet_column;
             TabletSchema::SubColumnInfo sub_column_info;
             vectorized::ColumnPtr current_column = subcolumn.get_finalized_column_ptr()->get_ptr();

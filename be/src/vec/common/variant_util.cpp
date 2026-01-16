@@ -1762,7 +1762,6 @@ void materialize_docs_to_subcolumns(ColumnVariant& column_variant) {
     auto subcolumns = materialize_docs_to_subcolumns_map(column_variant);
 
     for (auto& entry : subcolumns) {
-        entry.second.finalize();
         if (!column_variant.add_sub_column(PathInData(entry.first),
                                            IColumn::mutate(entry.second.get_finalized_column_ptr()),
                                            entry.second.get_least_common_type())) {
@@ -1832,8 +1831,7 @@ public:
     /// @param total_rows Total number of rows (for nullmap reservation)
     explicit FastSubcolumn(size_t total_rows, size_t current_rows) {
         _null_map.reserve(total_rows);
-        _null_map.resize(current_rows);
-        memset(_null_map.data(), 1, current_rows);
+        _null_map.resize_fill(current_rows, true);
         _num_rows = current_rows;
     }
 
@@ -1901,11 +1899,27 @@ public:
     /// Convert to ColumnVariant::Subcolumn for final use
     ColumnVariant::Subcolumn to_subcolumn() {
         CHECK(!_data.empty());
+        CHECK(_num_rows == _null_map.size())
+
+        if (_data.size() == 1) {
+            CHECK(_data[0].size() == _num_rows);
+             // Create nullable column from data + null_map
+            auto null_map_column = ColumnUInt8::create();
+            null_map_column->get_data().swap(_null_map);
+
+            auto nullable_column =
+                    ColumnNullable::create(std::move(_data[0]), std::move(null_map_column));
+
+            // Return with nullable type for Subcolumn
+            return ColumnVariant::Subcolumn(std::move(nullable_column),
+                                            make_nullable(least_common_type), true, false);
+        }
 
         // Finalize: merge all parts into one nullable column
         // _least_common_type.get() is non-nullable
         DataTypePtr least_common_type = _least_common_type.get();
         auto result_column = least_common_type->create_column();
+        result_column->reserve(_num_rows);
 
         // Merge all data parts (all types are non-nullable)
         for (size_t i = 0; i < _data.size(); ++i) {
@@ -1964,7 +1978,6 @@ private:
 
     void add_new_column_part(DataTypePtr type) {
         bool is_first_part = _data.empty();
-
         // type is already non-nullable
         auto new_col = type->create_column();
 
@@ -2040,6 +2053,7 @@ private:
     std::vector<DataTypePtr> _data_types;
     LeastCommonType _least_common_type;
     size_t _num_rows = 0;
+    size_t _prev_null_rows = 0;
 };
 
 phmap::flat_hash_map<std::string_view, ColumnVariant::Subcolumn> materialize_docs_to_subcolumns_map(
