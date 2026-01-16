@@ -1899,10 +1899,12 @@ public:
     /// Convert to ColumnVariant::Subcolumn for final use
     ColumnVariant::Subcolumn to_subcolumn() {
         CHECK(!_data.empty());
-        CHECK(_num_rows == _null_map.size())
+        CHECK(_num_rows == _null_map.size());
+
+        DataTypePtr least_common_type = _least_common_type.get();
 
         if (_data.size() == 1) {
-            CHECK(_data[0].size() == _num_rows);
+            CHECK(_data[0]->size() == _num_rows);
              // Create nullable column from data + null_map
             auto null_map_column = ColumnUInt8::create();
             null_map_column->get_data().swap(_null_map);
@@ -1917,7 +1919,6 @@ public:
 
         // Finalize: merge all parts into one nullable column
         // _least_common_type.get() is non-nullable
-        DataTypePtr least_common_type = _least_common_type.get();
         auto result_column = least_common_type->create_column();
         result_column->reserve(_num_rows);
 
@@ -2053,7 +2054,6 @@ private:
     std::vector<DataTypePtr> _data_types;
     LeastCommonType _least_common_type;
     size_t _num_rows = 0;
-    size_t _prev_null_rows = 0;
 };
 
 phmap::flat_hash_map<std::string_view, ColumnVariant::Subcolumn> materialize_docs_to_subcolumns_map(
