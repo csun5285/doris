@@ -1828,25 +1828,24 @@ private:
 public:
     FastSubcolumn() = default;
 
-    /// @param total_rows Total number of rows (for nullmap reservation)
+    /// @param total_rows Total number of rows (pre-allocate nullmap filled with 1s)
+    /// @param current_rows Current row index (logical position, not data size)
     explicit FastSubcolumn(size_t total_rows, size_t current_rows) {
-        _null_map.reserve(total_rows);
-        _null_map.resize_fill(current_rows, true);
+        // Pre-allocate and fill entire nullmap with 1 (NULL) upfront.
+        // This avoids repeated resize/memset calls during insert_many_defaults.
+        _null_map.resize_fill(total_rows, 1);
         _num_rows = current_rows;
     }
 
     size_t size() const { return _num_rows; }
 
-    /// Insert multiple null/default values efficiently using memset
+    /// Insert multiple null/default values - nullmap already filled with 1s,
+    /// so we only need to update data column and row counter.
     void insert_many_defaults(size_t length) {
         if (length == 0) return;
         CHECK(!_data.empty());
 
-        // Data column exists, update both null_map and data
-        size_t old_size = _null_map.size();
-        _null_map.resize(old_size + length);
-        // Use memset for efficient batch null marking (1 = null)
-        memset(_null_map.data() + old_size, 1, length);
+        // Nullmap already contains 1s (NULL), no need to modify it
         _data.back()->insert_many_defaults(length);
         _num_rows += length;
     }
@@ -1891,7 +1890,8 @@ public:
             const uint8_t* end_data = DataTypeSerDe::deserialize_binary_to_non_nullable_column(
                     start_data, *_data.back());
             check_end(end_data);
-            _null_map.push_back(0); // not null
+            // Directly set nullmap to 0 (not null) - no push_back needed since pre-allocated
+            _null_map[_num_rows] = 0;
             ++_num_rows;
         }
     }
@@ -1905,7 +1905,7 @@ public:
 
         if (_data.size() == 1) {
             CHECK(_data[0]->size() == _num_rows);
-             // Create nullable column from data + null_map
+            // Create nullable column from data + null_map
             auto null_map_column = ColumnUInt8::create();
             null_map_column->get_data().swap(_null_map);
 
@@ -2044,7 +2044,8 @@ private:
             field = new_field;
         }
 
-        _null_map.push_back(0); // not null
+        // Directly set nullmap to 0 (not null) - no push_back needed since pre-allocated
+        _null_map[_num_rows] = 0;
         _data.back()->insert(field);
         _num_rows++;
     }
