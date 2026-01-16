@@ -1828,24 +1828,24 @@ private:
 public:
     FastSubcolumn() = default;
 
-    /// @param total_rows Total number of rows (pre-allocate nullmap filled with 1s)
-    /// @param current_rows Current row index (logical position, not data size)
-    explicit FastSubcolumn(size_t total_rows, size_t current_rows) {
-        // Pre-allocate and fill entire nullmap with 1 (NULL) upfront.
-        // This avoids repeated resize/memset calls during insert_many_defaults.
-        _null_map.resize_fill(total_rows, 1);
-        _num_rows = current_rows;
+    /// @param total_rows Unused (kept for API compatibility)
+    /// @param current_rows Number of prefix default rows
+    explicit FastSubcolumn(size_t /*total_rows*/, size_t current_rows) : _num_rows(current_rows) {
+        // No allocation in constructor - prefix defaults handled in add_new_column_part
     }
 
     size_t size() const { return _num_rows; }
 
-    /// Insert multiple null/default values - nullmap already filled with 1s,
-    /// so we only need to update data column and row counter.
+    /// Insert multiple null/default values.
+    /// Called only when _data is non-empty (after first real value inserted).
     void insert_many_defaults(size_t length) {
         if (length == 0) return;
         CHECK(!_data.empty());
 
-        // Nullmap already contains 1s (NULL), no need to modify it
+        // Extend nullmap with 1s (NULL)
+        size_t old_size = _null_map.size();
+        _null_map.resize(old_size + length);
+        memset(_null_map.data() + old_size, 1, length);
         _data.back()->insert_many_defaults(length);
         _num_rows += length;
     }
@@ -1890,8 +1890,8 @@ public:
             const uint8_t* end_data = DataTypeSerDe::deserialize_binary_to_non_nullable_column(
                     start_data, *_data.back());
             check_end(end_data);
-            // Directly set nullmap to 0 (not null) - no push_back needed since pre-allocated
-            _null_map[_num_rows] = 0;
+            // Append 0 (not null) to nullmap
+            _null_map.push_back(0);
             ++_num_rows;
         }
     }
@@ -1982,9 +1982,13 @@ private:
         // type is already non-nullable
         auto new_col = type->create_column();
 
-        // If this is the first data part and we already have rows (prefix defaults),
-        // need to fill the new column with defaults to align with null_map
+        // If this is the first data part and we have prefix defaults (_num_rows > 0),
+        // need to fill both nullmap and data column with prefix defaults
         if (is_first_part && _num_rows > 0) {
+            // Fill nullmap prefix with 1s (NULL)
+            _null_map.resize(_num_rows);
+            memset(_null_map.data(), 1, _num_rows);
+            // Fill data column with defaults
             new_col->insert_many_defaults(_num_rows);
         }
 
@@ -2044,8 +2048,8 @@ private:
             field = new_field;
         }
 
-        // Directly set nullmap to 0 (not null) - no push_back needed since pre-allocated
-        _null_map[_num_rows] = 0;
+        // Append 0 (not null) to nullmap
+        _null_map.push_back(0);
         _data.back()->insert(field);
         _num_rows++;
     }
