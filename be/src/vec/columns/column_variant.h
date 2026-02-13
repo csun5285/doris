@@ -276,6 +276,19 @@ private:
     // Cached search results for previous row (keyed as index in JSON object) - used as a hint.
     mutable std::vector<SubColumnWithName> _prev_positions;
 
+    // Cached sorted dense paths and pointer map for serialize_one_row_to_json_format.
+    // Avoids re-collecting, re-mapping, and re-sorting dense subcolumn paths for every row.
+    mutable struct SerializationCache {
+        bool valid = false;
+        std::vector<std::string> sorted_dense_paths;
+        std::unordered_map<std::string, const Subcolumn*> dense_subcolumn_map;
+        void invalidate() {
+            valid = false;
+            sorted_dense_paths.clear();
+            dense_subcolumn_map.clear();
+        }
+    } _serialization_cache;
+
     // It's filled when the number of subcolumns reaches the limit.
     // It has type Map(String, String) and stores a map (path, binary serialized subcolumn value) for each row.
     WrappedPtr serialized_sparse_column = ColumnMap::create(
@@ -670,6 +683,9 @@ private:
     bool try_add_new_subcolumn(const PathInData& path);
 
     bool is_visible_root_value(size_t nrow) const;
+
+    // Populate the serialization cache with sorted dense paths and pointer map.
+    void ensure_serialization_cache() const;
 };
 
 } // namespace doris::vectorized

@@ -129,6 +129,165 @@ size_t get_number_of_dimensions(const IDataType& type) {
     }
     return num_dimensions;
 }
+/// Directly serialize a binary-encoded sparse value to JSON text output,
+/// avoiding the expensive binary -> Field -> Column -> JSON round-trip.
+/// Returns pointer past the consumed bytes. Works with raw data for recursive ARRAY support.
+/// Falls back to the Subcolumn-based path for uncommon types (DECIMAL, DATE, etc.).
+const uint8_t* serialize_binary_to_json_impl(const uint8_t* data, size_t data_size,
+                                             BufferWritable& output,
+                                             const DataTypeSerDe::FormatOptions& options) {
+    const auto* start = data;
+    const FieldType type = static_cast<FieldType>(*data++);
+
+    switch (type) {
+    case FieldType::OLAP_FIELD_TYPE_BOOL: {
+        output.write_number(unaligned_load<UInt8>(data));
+        data += sizeof(UInt8);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_TINYINT: {
+        output.write_number(unaligned_load<Int8>(data));
+        data += sizeof(Int8);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_SMALLINT: {
+        output.write_number(unaligned_load<Int16>(data));
+        data += sizeof(Int16);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_INT: {
+        output.write_number(unaligned_load<Int32>(data));
+        data += sizeof(Int32);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_BIGINT: {
+        output.write_number(unaligned_load<Int64>(data));
+        data += sizeof(Int64);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_LARGEINT: {
+        Int128 v;
+        memcpy(&v, data, sizeof(Int128));
+        fmt::memory_buffer buffer;
+        fmt::format_to(buffer, "{}", v);
+        output.write(buffer.data(), buffer.size());
+        data += sizeof(Int128);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_FLOAT: {
+        Float32 v = unaligned_load<Float32>(data);
+        fmt::memory_buffer buffer;
+        fmt::format_to(buffer, "{}", v);
+        output.write(buffer.data(), buffer.size());
+        data += sizeof(Float32);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_DOUBLE: {
+        Float64 v = unaligned_load<Float64>(data);
+        fmt::memory_buffer buffer;
+        fmt::format_to(buffer, "{}", v);
+        output.write(buffer.data(), buffer.size());
+        data += sizeof(Float64);
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_STRING: {
+        const size_t str_size = unaligned_load<size_t>(data);
+        data += sizeof(size_t);
+        const auto* str_data = reinterpret_cast<const char*>(data);
+        // Match existing behavior: nesting_level=1 (is_root=true), no quotes
+        if (options.escape_char != 0) {
+            for (size_t i = 0; i < str_size; ++i) {
+                switch (str_data[i]) {
+                case '\b':
+                    output.write("\\b", 2);
+                    break;
+                case '\f':
+                    output.write("\\f", 2);
+                    break;
+                case '\n':
+                    output.write("\\n", 2);
+                    break;
+                case '\r':
+                    output.write("\\r", 2);
+                    break;
+                case '\t':
+                    output.write("\\t", 2);
+                    break;
+                case '\\':
+                    output.write("\\\\", 2);
+                    break;
+                case '"':
+                    output.write("\\\"", 2);
+                    break;
+                default:
+                    output.write(str_data[i]);
+                }
+            }
+        } else {
+            output.write(str_data, str_size);
+        }
+        data += str_size;
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_JSONB: {
+        const size_t jsonb_size = unaligned_load<size_t>(data);
+        data += sizeof(size_t);
+        if (jsonb_size > 0) {
+            std::string str = JsonbToJson::jsonb_to_json_string(
+                    reinterpret_cast<const char*>(data), jsonb_size);
+            output.write(str.c_str(), str.size());
+        } else {
+            output.write("null", 4);
+        }
+        data += jsonb_size;
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_ARRAY: {
+        // Binary format: [size_t: num_elements][element_0][element_1]...
+        // Each element is itself a binary-encoded value (type byte + payload).
+        const size_t nested_size = unaligned_load<size_t>(data);
+        data += sizeof(size_t);
+        output.write_char('[');
+        for (size_t i = 0; i < nested_size; ++i) {
+            if (i > 0) {
+                output.write_char(',');
+            }
+            // Recursively serialize each element
+            data = serialize_binary_to_json_impl(data, start + data_size - data, output, options);
+        }
+        output.write_char(']');
+        break;
+    }
+    case FieldType::OLAP_FIELD_TYPE_NONE: {
+        output.write("null", 4);
+        break;
+    }
+    default: {
+        // Fallback for less common types (DECIMAL, DATE, DATETIME, IP, etc.)
+        // Uses the existing Subcolumn-based deserialization path
+        ColumnVariant::Subcolumn tmp_subcolumn(0, true);
+        // Reconstruct a temporary ColumnString with the full binary data (including type byte)
+        ColumnString tmp_col;
+        tmp_col.insert_data(reinterpret_cast<const char*>(start), data_size);
+        tmp_subcolumn.deserialize_from_binary_column(&tmp_col, 0);
+        tmp_subcolumn.serialize_text_json(0, output, options);
+        // For fallback, consume all remaining bytes since we can't track exact consumption
+        data = start + data_size;
+        break;
+    }
+    }
+    return data;
+}
+
+/// Wrapper that reads binary data from a ColumnString row.
+void serialize_sparse_binary_value_to_json(const ColumnString* values, size_t row,
+                                           BufferWritable& output,
+                                           const DataTypeSerDe::FormatOptions& options) {
+    const auto& data_ref = values->get_data_at(row);
+    serialize_binary_to_json_impl(reinterpret_cast<const uint8_t*>(data_ref.data), data_ref.size,
+                                  output, options);
+}
+
 } // namespace
 
 // current nested level is 2, inside column object
@@ -1408,6 +1567,27 @@ bool ColumnVariant::is_finalized() const {
                        [](const auto& entry) { return entry->data.is_finalized(); });
 }
 
+void ColumnVariant::ensure_serialization_cache() const {
+    if (_serialization_cache.valid) {
+        return;
+    }
+    _serialization_cache.sorted_dense_paths.clear();
+    _serialization_cache.dense_subcolumn_map.clear();
+    _serialization_cache.sorted_dense_paths.reserve(get_subcolumns().size());
+
+    for (const auto& subcolumn : get_subcolumns()) {
+        if (subcolumn->data.is_root) {
+            continue;
+        }
+        const auto& path = subcolumn->path.get_path();
+        _serialization_cache.dense_subcolumn_map.emplace(path, &subcolumn->data);
+        _serialization_cache.sorted_dense_paths.emplace_back(path);
+    }
+    std::sort(_serialization_cache.sorted_dense_paths.begin(),
+              _serialization_cache.sorted_dense_paths.end());
+    _serialization_cache.valid = true;
+}
+
 void ColumnVariant::Subcolumn::wrapp_array_nullable() {
     // Wrap array with nullable, treat empty array as null to elimate conflict at present
     auto& result_column = get_finalized_column_ptr();
@@ -1641,9 +1821,7 @@ void ColumnVariant::serialize_from_doc_value_to_json_format(int64_t row_num, Buf
         output.write_json_string(path_elements.elements.back());
         output.write_c_string(":");
 
-        Subcolumn tmp_subcolumn(0, true);
-        tmp_subcolumn.deserialize_from_binary_column(&values, static_cast<ssize_t>(i));
-        tmp_subcolumn.serialize_text_json(0, output, options);
+        serialize_sparse_binary_value_to_json(&values, static_cast<ssize_t>(i), output, options);
     }
 
     for (size_t j = 0; j != current_prefix.elements.size(); ++j) {
@@ -1673,37 +1851,48 @@ void ColumnVariant::serialize_one_row_to_json_format(
     size_t sparse_data_offset = sparse_data_offsets[static_cast<ssize_t>(row_num) - 1];
     size_t sparse_data_end = sparse_data_offsets[static_cast<ssize_t>(row_num)];
 
-    // We need to convert the set of paths in this row to a JSON object.
-    // To do it, we first collect all the paths from current row, then we sort them
-    // and construct the resulting JSON object by iterating over sorted list of paths.
-    // For example:
-    // b.c, a.b, a.a, b.e, g, h.u.t -> a.a, a.b, b.c, b.e, g, h.u.t -> {"a" : {"a" : ..., "b" : ...}, "b" : {"c" : ..., "e" : ...}, "g" : ..., "h" : {"u" : {"t" : ...}}}.
-    std::vector<String> sorted_paths;
-    std::unordered_map<std::string, Subcolumn> subcolumn_path_map;
-    sorted_paths.reserve(get_subcolumns().size() + (sparse_data_end - sparse_data_offset));
-    for (const auto& subcolumn : get_subcolumns()) {
-        // Skip root value, we have already processed it
-        if (subcolumn->data.is_root) {
-            continue;
-        }
+    // Use cached sorted dense paths and pointer map to avoid per-row re-collection and re-sorting.
+    ensure_serialization_cache();
 
-        // skip empty nested value
-        if (subcolumn->data.is_empty_nested(row_num)) {
+    // Filter active dense paths for this row (exclude nulls and empty nested).
+    // The cached dense paths are already sorted.
+    std::vector<const std::string*> active_dense_paths;
+    active_dense_paths.reserve(_serialization_cache.sorted_dense_paths.size());
+    for (const auto& path : _serialization_cache.sorted_dense_paths) {
+        const Subcolumn* sub = _serialization_cache.dense_subcolumn_map.at(path);
+        if (sub->is_empty_nested(row_num)) {
             continue;
         }
-        /// We consider null value and absence of the path in a row as equivalent cases, because we cannot actually distinguish them.
-        /// So, we don't output null values at all.
-        if (!subcolumn->data.is_null_at(row_num)) {
-            sorted_paths.emplace_back(subcolumn->path.get_path());
+        if (sub->is_null_at(row_num)) {
+            continue;
         }
-        subcolumn_path_map.emplace(subcolumn->path.get_path(), subcolumn->data);
+        active_dense_paths.push_back(&path);
     }
+
+    // Collect sparse paths for this row (stored in sorted order).
+    std::vector<String> sparse_paths_vec;
+    sparse_paths_vec.reserve(sparse_data_end - sparse_data_offset);
     for (size_t i = sparse_data_offset; i != sparse_data_end; ++i) {
-        auto path = sparse_data_paths->get_data_at(i).to_string();
-        sorted_paths.emplace_back(path);
+        sparse_paths_vec.emplace_back(sparse_data_paths->get_data_at(i).to_string());
     }
 
-    std::sort(sorted_paths.begin(), sorted_paths.end());
+    // Merge dense and sparse paths (both already sorted) instead of collect + sort.
+    std::vector<String> sorted_paths;
+    sorted_paths.reserve(active_dense_paths.size() + sparse_paths_vec.size());
+    size_t di = 0, si = 0;
+    while (di < active_dense_paths.size() && si < sparse_paths_vec.size()) {
+        if (*active_dense_paths[di] <= sparse_paths_vec[si]) {
+            sorted_paths.emplace_back(*active_dense_paths[di++]);
+        } else {
+            sorted_paths.emplace_back(std::move(sparse_paths_vec[si++]));
+        }
+    }
+    while (di < active_dense_paths.size()) {
+        sorted_paths.emplace_back(*active_dense_paths[di++]);
+    }
+    while (si < sparse_paths_vec.size()) {
+        sorted_paths.emplace_back(std::move(sparse_paths_vec[si++]));
+    }
 
     output.write_char('{');
     size_t index_in_sparse_data_values = sparse_data_offset;
@@ -1761,19 +1950,18 @@ void ColumnVariant::serialize_one_row_to_json_format(
         output.write_c_string(":");
 
         // Serialize value of current path.
-        if (auto subcolumn_it = subcolumn_path_map.find(path);
-            subcolumn_it != subcolumn_path_map.end()) {
+        if (auto subcolumn_it = _serialization_cache.dense_subcolumn_map.find(path);
+            subcolumn_it != _serialization_cache.dense_subcolumn_map.end()) {
             DataTypeSerDe::FormatOptions options2 = options;
             options2.escape_char = '\\';
-            subcolumn_it->second.serialize_text_json(row_num, output, options2);
+            subcolumn_it->second->serialize_text_json(row_num, output, options2);
         } else {
-            // To serialize value stored in shared data we should first deserialize it from binary format.
-            Subcolumn tmp_subcolumn(0, true);
-            tmp_subcolumn.deserialize_from_binary_column(sparse_data_values,
-                                                         index_in_sparse_data_values++);
+            // Directly serialize sparse binary value to JSON, avoiding the expensive
+            // binary -> Field -> Column -> JSON round-trip.
             DataTypeSerDe::FormatOptions options2 = options;
             options2.escape_char = '\\';
-            tmp_subcolumn.serialize_text_json(0, output, options2);
+            serialize_sparse_binary_value_to_json(sparse_data_values,
+                                                  index_in_sparse_data_values++, output, options2);
         }
     }
 
@@ -2024,6 +2212,7 @@ void ColumnVariant::finalize(FinalizeMode mode) {
                           [](const auto& entry) { return entry->path.has_nested_part(); });
     std::swap(subcolumns, new_subcolumns);
     _prev_positions.clear();
+    _serialization_cache.invalidate();
     ENABLE_CHECK_CONSISTENCY(this);
 }
 
@@ -2131,6 +2320,7 @@ void ColumnVariant::clear() {
     serialized_doc_value_column->clear();
     num_rows = 0;
     _prev_positions.clear();
+    _serialization_cache.invalidate();
     ENABLE_CHECK_CONSISTENCY(this);
 }
 
