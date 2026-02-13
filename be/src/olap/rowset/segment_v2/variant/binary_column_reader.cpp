@@ -18,7 +18,6 @@
 #include "olap/rowset/segment_v2/variant/binary_column_reader.h"
 
 #include <algorithm>
-#include <tuple>
 
 #include "olap/rowset/segment_v2/segment.h"
 #include "vec/columns/column_array.h"
@@ -225,6 +224,22 @@ ordinal_t CombineMultipleBinaryColumnIterator::get_current_ordinal() const {
 void CombineMultipleBinaryColumnIterator::_collect_sparse_data_from_buckets(
         vectorized::IColumn& binary_data_column) {
     using namespace vectorized;
+    struct MergeCursor {
+        std::string_view path;
+        size_t bucket;
+        size_t offset;
+        size_t end;
+    };
+    auto min_path_first = [](const MergeCursor& lhs, const MergeCursor& rhs) {
+        // Keep deterministic output when paths are equal.
+        if (lhs.path != rhs.path) {
+            return lhs.path > rhs.path;
+        }
+        if (lhs.bucket != rhs.bucket) {
+            return lhs.bucket > rhs.bucket;
+        }
+        return lhs.offset > rhs.offset;
+    };
 
     // Get path, value, offset from all buckets.
     auto& column_map = assert_cast<ColumnMap&>(binary_data_column);
@@ -243,27 +258,106 @@ void CombineMultipleBinaryColumnIterator::_collect_sparse_data_from_buckets(
     }
 
     size_t num_rows = _binary_column_data[0]->size();
+    dst_offsets.reserve(dst_offsets.size() + num_rows);
+
+    size_t total_entries = 0;
+    size_t total_path_chars = 0;
+    size_t total_value_chars = 0;
+    for (size_t bucket = 0; bucket != _binary_column_data.size(); ++bucket) {
+        if (num_rows > 0) {
+            total_entries += (*src_offsets[bucket])[num_rows - 1];
+        }
+        total_path_chars += src_paths[bucket]->get_chars().size();
+        total_value_chars += src_values[bucket]->get_chars().size();
+    }
+    dst_paths.get_offsets().reserve(dst_paths.get_offsets().size() + total_entries);
+    dst_values.get_offsets().reserve(dst_values.get_offsets().size() + total_entries);
+    dst_paths.get_chars().reserve(dst_paths.get_chars().size() + total_path_chars);
+    dst_values.get_chars().reserve(dst_values.get_chars().size() + total_value_chars);
+
+    if (_binary_column_data.size() == 1) {
+        const auto* paths = src_paths[0];
+        const auto* values = src_values[0];
+        const auto* offsets = src_offsets[0];
+        for (size_t i = 0; i != num_rows; ++i) {
+            size_t offset_start = (*offsets)[ssize_t(i) - 1];
+            size_t offset_end = (*offsets)[ssize_t(i)];
+            size_t row_size = offset_end - offset_start;
+            if (row_size > 0) {
+                dst_paths.insert_range_from(*paths, offset_start, row_size);
+                dst_values.insert_range_from(*values, offset_start, row_size);
+            }
+            dst_offsets.push_back(dst_paths.size());
+        }
+        return;
+    }
+
+    std::vector<MergeCursor> merge_heap;
+    merge_heap.reserve(_binary_column_data.size());
     for (size_t i = 0; i != num_rows; ++i) {
-        // Sparse data contains paths in sorted order in each row.
-        // Collect all paths from all buckets in this row and sort them.
-        // Save each path bucket and index to be able find corresponding value later.
-        std::vector<std::tuple<std::string_view, size_t, size_t>> all_paths;
+        // Sparse data is sorted in each bucket. Merge all buckets row-wise with a min-heap.
+        merge_heap.clear();
         for (size_t bucket = 0; bucket != _binary_column_data.size(); ++bucket) {
             size_t offset_start = (*src_offsets[bucket])[ssize_t(i) - 1];
             size_t offset_end = (*src_offsets[bucket])[ssize_t(i)];
-
-            // collect all paths.
-            for (size_t j = offset_start; j != offset_end; ++j) {
-                auto path = src_paths[bucket]->get_data_at(j).to_string_view();
-                all_paths.emplace_back(path, bucket, j);
+            if (offset_start != offset_end) {
+                merge_heap.push_back({src_paths[bucket]->get_data_at(offset_start).to_string_view(),
+                                      bucket, offset_start, offset_end});
             }
         }
 
-        std::sort(all_paths.begin(), all_paths.end());
-        for (const auto& [path, bucket, offset] : all_paths) {
-            dst_paths.insert_data(path.data(), path.size());
-            dst_values.insert_from(*src_values[bucket], offset);
+        if (merge_heap.empty()) {
+            dst_offsets.push_back(dst_paths.size());
+            continue;
         }
+        if (merge_heap.size() == 1) {
+            const auto& cursor = merge_heap.front();
+            size_t row_size = cursor.end - cursor.offset;
+            dst_paths.insert_range_from(*src_paths[cursor.bucket], cursor.offset, row_size);
+            dst_values.insert_range_from(*src_values[cursor.bucket], cursor.offset, row_size);
+            dst_offsets.push_back(dst_paths.size());
+            continue;
+        }
+        std::make_heap(merge_heap.begin(), merge_heap.end(), min_path_first);
+
+        size_t run_bucket = 0;
+        size_t run_start = 0;
+        size_t run_size = 0;
+        auto flush_run = [&]() {
+            if (run_size == 0) {
+                return;
+            }
+            dst_paths.insert_range_from(*src_paths[run_bucket], run_start, run_size);
+            dst_values.insert_range_from(*src_values[run_bucket], run_start, run_size);
+            run_size = 0;
+        };
+
+        while (!merge_heap.empty()) {
+            std::pop_heap(merge_heap.begin(), merge_heap.end(), min_path_first);
+            auto cursor = merge_heap.back();
+            merge_heap.pop_back();
+
+            if (run_size == 0) {
+                run_bucket = cursor.bucket;
+                run_start = cursor.offset;
+                run_size = 1;
+            } else if (run_bucket == cursor.bucket && run_start + run_size == cursor.offset) {
+                ++run_size;
+            } else {
+                flush_run();
+                run_bucket = cursor.bucket;
+                run_start = cursor.offset;
+                run_size = 1;
+            }
+
+            ++cursor.offset;
+            if (cursor.offset != cursor.end) {
+                cursor.path = src_paths[cursor.bucket]->get_data_at(cursor.offset).to_string_view();
+                merge_heap.push_back(cursor);
+                std::push_heap(merge_heap.begin(), merge_heap.end(), min_path_first);
+            }
+        }
+        flush_run();
 
         dst_offsets.push_back(dst_paths.size());
     }
