@@ -1,0 +1,2 @@
+/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/llvm-ar qc ../../lib/libparse.a CMakeFiles/parse.dir/thrift/thrifty.cc.o CMakeFiles/parse.dir/thrift/thriftl.cc.o
+/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/llvm-ranlib ../../lib/libparse.a

@@ -1,0 +1,639 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      The system is: Linux - 5.4.119-19.0009.59 - x86_64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is Clang, found in:
+        /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/3.29.0/CompilerIdC/a.out
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++ 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is Clang, found in:
+        /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/3.29.0/CompilerIdCXX/a.out
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerABI.cmake:64 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_d1ae3/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_d1ae3.dir/build.make CMakeFiles/cmTC_d1ae3.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1'
+        Building C object CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang   -v -MD -MT CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -MF CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o.d -o CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -c /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCCompilerABI.c
+        clang version 20.1.7
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin
+        System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang
+        User configuration file directory: /mnt/disk7/sunchenyang/.config/clang
+        Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+         (in-process)
+         "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCCompilerABI.c -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1 -v -fcoverage-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1 -resource-dir /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20 -dependency-file CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o.d -MT CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -sys-header-deps -isysroot /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include -Wno-unused-command-line-argument -ferror-limit 19 -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -x c /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCCompilerABI.c
+        clang -cc1 version 20.1.7 based upon LLVM 20.1.7 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include"
+        ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include
+        End of search list.
+        Linking C executable cmTC_d1ae3
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d1ae3.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang  -v -Wl,-v CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -o cmTC_d1ae3
+        clang version 20.1.7
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin
+        System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang
+        User configuration file directory: /mnt/disk7/sunchenyang/.config/clang
+        Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+         "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/x86_64-pc-linux-gnu-ld" --sysroot=/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_d1ae3 /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15 -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib -v CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o
+        LLD 20.1.7 (compatible with GNU linkers)
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerABI.cmake:134 (message)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include]
+        end of search list found
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/clang/20/include]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include/x86_64-linux-gnu]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/include]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include]
+        implicit include dirs: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/clang/20/include;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include/x86_64-linux-gnu;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/include;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerABI.cmake:170 (message)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1']
+        ignore line: []
+        ignore line: [Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_d1ae3/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_d1ae3.dir/build.make CMakeFiles/cmTC_d1ae3.dir/build]
+        ignore line: [gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1']
+        ignore line: [Building C object CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang   -v -MD -MT CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -MF CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o.d -o CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -c /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCCompilerABI.c]
+        ignore line: [clang version 20.1.7]
+        ignore line: [Target: x86_64-pc-linux-gnu]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin]
+        ignore line: [System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang]
+        ignore line: [User configuration file directory: /mnt/disk7/sunchenyang/.config/clang]
+        ignore line: [Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15]
+        ignore line: [Candidate multilib: .]
+        ignore line: [@m64]
+        ignore line: [Selected multilib: .]
+        ignore line: [@m64]
+        ignore line: [ (in-process)]
+        ignore line: [ "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCCompilerABI.c -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1 -v -fcoverage-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1 -resource-dir /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20 -dependency-file CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o.d -MT CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -sys-header-deps -isysroot /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include -Wno-unused-command-line-argument -ferror-limit 19 -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -x c /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCCompilerABI.c]
+        ignore line: [clang -cc1 version 20.1.7 based upon LLVM 20.1.7 default target x86_64-pc-linux-gnu]
+        ignore line: [ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include"]
+        ignore line: [ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Linking C executable cmTC_d1ae3]
+        ignore line: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d1ae3.dir/link.txt --verbose=1]
+        ignore line: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang  -v -Wl -v CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -o cmTC_d1ae3]
+        ignore line: [clang version 20.1.7]
+        ignore line: [Target: x86_64-pc-linux-gnu]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin]
+        ignore line: [System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang]
+        ignore line: [User configuration file directory: /mnt/disk7/sunchenyang/.config/clang]
+        ignore line: [Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15]
+        ignore line: [Candidate multilib: .]
+        ignore line: [@m64]
+        ignore line: [Selected multilib: .]
+        ignore line: [@m64]
+        link line: [ "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/x86_64-pc-linux-gnu-ld" --sysroot=/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_d1ae3 /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15 -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib -v CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o -lgcc --as-needed -lgcc_s --no-as-needed -lc -lgcc --as-needed -lgcc_s --no-as-needed /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/x86_64-pc-linux-gnu-ld] ==> ignore
+          arg [--sysroot=/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/..] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_d1ae3] ==> ignore
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o]
+          arg [-L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15] ==> dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15]
+          arg [-L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib] ==> dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib]
+          arg [-L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib] ==> dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_d1ae3.dir/CMakeCCompilerABI.c.o] ==> ignore
+          arg [-lgcc] ==> lib [gcc]
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--no-as-needed] ==> ignore
+          arg [-lc] ==> lib [c]
+          arg [-lgcc] ==> lib [gcc]
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--no-as-needed] ==> ignore
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o]
+        ignore line: [LLD 20.1.7 (compatible with GNU linkers)]
+        ignore line: [gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IfG1I1']
+        ignore line: []
+        ignore line: []
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/Scrt1.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crti.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crtn.o]
+        collapse library dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15]
+        collapse library dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib]
+        collapse library dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib]
+        implicit libs: [gcc;gcc_s;c;gcc;gcc_s]
+        implicit objs: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/Scrt1.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crti.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crtn.o]
+        implicit dirs: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerABI.cmake:64 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_451ab/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_451ab.dir/build.make CMakeFiles/cmTC_451ab.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ'
+        Building CXX object CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++   -v -MD -MT CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -c /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCXXCompilerABI.cpp
+        clang version 20.1.7
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin
+        System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang
+        User configuration file directory: /mnt/disk7/sunchenyang/.config/clang
+        Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+         (in-process)
+         "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ -v -fcoverage-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ -resource-dir /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20 -dependency-file CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -isysroot /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15 -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include -Wno-unused-command-line-argument -fdeprecated-macro -ferror-limit 19 -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -x c++ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 20.1.7 based upon LLVM 20.1.7 default target x86_64-pc-linux-gnu
+        ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include"
+        ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include
+         /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include
+        End of search list.
+        Linking CXX executable cmTC_451ab
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_451ab.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++  -v -Wl,-v CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_451ab
+        clang version 20.1.7
+        Target: x86_64-pc-linux-gnu
+        Thread model: posix
+        InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin
+        System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang
+        User configuration file directory: /mnt/disk7/sunchenyang/.config/clang
+        Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15
+        Candidate multilib: .;@m64
+        Selected multilib: .;@m64
+         "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/x86_64-pc-linux-gnu-ld" --sysroot=/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_451ab /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15 -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib -v CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o
+        LLD 20.1.7 (compatible with GNU linkers)
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerABI.cmake:134 (message)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include]
+          add: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include]
+        end of search list found
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/clang/20/include]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include/x86_64-linux-gnu]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/include]
+        collapse include dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include]
+        implicit include dirs: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/clang/20/include;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include/x86_64-linux-gnu;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/include;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeDetermineCompilerABI.cmake:170 (message)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:5 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ']
+        ignore line: []
+        ignore line: [Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_451ab/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_451ab.dir/build.make CMakeFiles/cmTC_451ab.dir/build]
+        ignore line: [gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ']
+        ignore line: [Building CXX object CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++   -v -MD -MT CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -c /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [clang version 20.1.7]
+        ignore line: [Target: x86_64-pc-linux-gnu]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin]
+        ignore line: [System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang]
+        ignore line: [User configuration file directory: /mnt/disk7/sunchenyang/.config/clang]
+        ignore line: [Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15]
+        ignore line: [Candidate multilib: .]
+        ignore line: [@m64]
+        ignore line: [Selected multilib: .]
+        ignore line: [@m64]
+        ignore line: [ (in-process)]
+        ignore line: [ "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/clang" -cc1 -triple x86_64-pc-linux-gnu -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -pic-is-pie -mframe-pointer=all -fmath-errno -ffp-contract=on -fno-rounding-math -mconstructor-aliases -funwind-tables=2 -target-cpu x86-64 -tune-cpu generic -debugger-tuning=gdb -fdebug-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ -v -fcoverage-compilation-dir=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ -resource-dir /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20 -dependency-file CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -isysroot /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15 -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include -internal-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include -internal-externc-isystem /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include -Wno-unused-command-line-argument -fdeprecated-macro -ferror-limit 19 -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -faddrsig -D__GCC_HAVE_DWARF2_CFI_ASM=1 -o CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -x c++ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [clang -cc1 version 20.1.7 based upon LLVM 20.1.7 default target x86_64-pc-linux-gnu]
+        ignore line: [ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/local/include"]
+        ignore line: [ignoring nonexistent directory "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/../../../../x86_64-pc-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/x86_64-pc-linux-gnu]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/include/g++-v15/backward]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin/../../../../lib/clang/20/include]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include/x86_64-linux-gnu]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../include]
+        ignore line: [ /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Linking CXX executable cmTC_451ab]
+        ignore line: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_451ab.dir/link.txt --verbose=1]
+        ignore line: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++  -v -Wl -v CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_451ab]
+        ignore line: [clang version 20.1.7]
+        ignore line: [Target: x86_64-pc-linux-gnu]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/tmp/gentoo/llvm/bin]
+        ignore line: [System configuration file directory: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../etc/clang]
+        ignore line: [User configuration file directory: /mnt/disk7/sunchenyang/.config/clang]
+        ignore line: [Selected GCC installation: /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15]
+        ignore line: [Candidate multilib: .]
+        ignore line: [@m64]
+        ignore line: [Selected multilib: .]
+        ignore line: [@m64]
+        link line: [ "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/x86_64-pc-linux-gnu-ld" --sysroot=/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/.. --hash-style=gnu --eh-frame-hdr -m elf_x86_64 -pie -dynamic-linker /lib64/ld-linux-x86-64.so.2 -o cmTC_451ab /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15 -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib -L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib -v CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/x86_64-pc-linux-gnu-ld] ==> ignore
+          arg [--sysroot=/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/..] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_451ab] ==> ignore
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o]
+          arg [-L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15] ==> dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15]
+          arg [-L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib] ==> dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib]
+          arg [-L/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib] ==> dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_451ab.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [-lstdc++] ==> lib [stdc++]
+          arg [-lm] ==> lib [m]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o]
+          arg [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o] ==> obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o]
+        ignore line: [LLD 20.1.7 (compatible with GNU linkers)]
+        ignore line: [gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-f14XrJ']
+        ignore line: []
+        ignore line: []
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/Scrt1.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/Scrt1.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crti.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crti.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o]
+        collapse obj [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib/crtn.o] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crtn.o]
+        collapse library dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib/gcc/x86_64-pc-linux-gnu/15] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15]
+        collapse library dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../lib] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib]
+        collapse library dir [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/../usr/lib] ==> [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib]
+        implicit libs: [stdc++;m;gcc_s;gcc;c;gcc_s;gcc]
+        implicit objs: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/Scrt1.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crti.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtbeginS.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15/crtendS.o;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib/crtn.o]
+        implicit dirs: [/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib/gcc/x86_64-pc-linux-gnu/15;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/lib;/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/usr/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/Internal/CheckLinkerFlag.cmake:37 (cmake_check_source_compiles)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CheckLinkerFlag.cmake:44 (cmake_check_linker_flag)"
+      - "/mnt/disk7/sunchenyang/doris/thirdparty/src/protobuf-21.11/CMakeLists.txt:149 (check_linker_flag)"
+      - "CMakeLists.txt:9 (include)"
+    checks:
+      - "Performing Test protobuf_HAVE_LD_VERSION_SCRIPT"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-Z0bKsr"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-Z0bKsr"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "protobuf_HAVE_LD_VERSION_SCRIPT"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-Z0bKsr'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_5df32/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_5df32.dir/build.make CMakeFiles/cmTC_5df32.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-Z0bKsr'
+        Building CXX object CMakeFiles/cmTC_5df32.dir/src.cxx.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++ -Dprotobuf_HAVE_LD_VERSION_SCRIPT   -MD -MT CMakeFiles/cmTC_5df32.dir/src.cxx.o -MF CMakeFiles/cmTC_5df32.dir/src.cxx.o.d -o CMakeFiles/cmTC_5df32.dir/src.cxx.o -c /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-Z0bKsr/src.cxx
+        Linking CXX executable cmTC_5df32
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_5df32.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++ -Wl,--version-script=/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/cmaketest.map CMakeFiles/cmTC_5df32.dir/src.cxx.o -o cmTC_5df32
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-Z0bKsr'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CheckCSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/FindThreads.cmake:97 (CHECK_C_SOURCE_COMPILES)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/FindThreads.cmake:163 (_threads_check_libc)"
+      - "/mnt/disk7/sunchenyang/doris/thirdparty/src/protobuf-21.11/CMakeLists.txt:163 (find_package)"
+      - "CMakeLists.txt:9 (include)"
+    checks:
+      - "Performing Test CMAKE_HAVE_LIBC_PTHREAD"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-dQqpJ9"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-dQqpJ9"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_HAVE_LIBC_PTHREAD"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-dQqpJ9'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_fe8ee/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_fe8ee.dir/build.make CMakeFiles/cmTC_fe8ee.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-dQqpJ9'
+        Building C object CMakeFiles/cmTC_fe8ee.dir/src.c.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang -DCMAKE_HAVE_LIBC_PTHREAD   -MD -MT CMakeFiles/cmTC_fe8ee.dir/src.c.o -MF CMakeFiles/cmTC_fe8ee.dir/src.c.o.d -o CMakeFiles/cmTC_fe8ee.dir/src.c.o -c /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-dQqpJ9/src.c
+        Linking C executable cmTC_fe8ee
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_fe8ee.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang CMakeFiles/cmTC_fe8ee.dir/src.c.o -o cmTC_fe8ee
+        x86_64-pc-linux-gnu-ld: error: undefined symbol: pthread_create
+        >>> referenced by src.c
+        >>>               CMakeFiles/cmTC_fe8ee.dir/src.c.o:(main)
+        
+        x86_64-pc-linux-gnu-ld: error: undefined symbol: pthread_detach
+        >>> referenced by src.c
+        >>>               CMakeFiles/cmTC_fe8ee.dir/src.c.o:(main)
+        
+        x86_64-pc-linux-gnu-ld: error: undefined symbol: pthread_cancel
+        >>> referenced by src.c
+        >>>               CMakeFiles/cmTC_fe8ee.dir/src.c.o:(main)
+        
+        x86_64-pc-linux-gnu-ld: error: undefined symbol: pthread_join
+        >>> referenced by src.c
+        >>>               CMakeFiles/cmTC_fe8ee.dir/src.c.o:(main)
+        
+        x86_64-pc-linux-gnu-ld: error: undefined symbol: pthread_atfork
+        >>> referenced by src.c
+        >>>               CMakeFiles/cmTC_fe8ee.dir/src.c.o:(main)
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_fe8ee.dir/build.make:100: cmTC_fe8ee] Error 1
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-dQqpJ9'
+        gmake: *** [Makefile:127: cmTC_fe8ee/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CheckLibraryExists.cmake:69 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/FindThreads.cmake:112 (CHECK_LIBRARY_EXISTS)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/FindThreads.cmake:175 (_threads_check_lib)"
+      - "/mnt/disk7/sunchenyang/doris/thirdparty/src/protobuf-21.11/CMakeLists.txt:163 (find_package)"
+      - "CMakeLists.txt:9 (include)"
+    checks:
+      - "Looking for pthread_create in pthreads"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IWdMfS"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IWdMfS"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_HAVE_PTHREADS_CREATE"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IWdMfS'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4560a/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4560a.dir/build.make CMakeFiles/cmTC_4560a.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IWdMfS'
+        Building C object CMakeFiles/cmTC_4560a.dir/CheckFunctionExists.c.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang   -DCHECK_FUNCTION_EXISTS=pthread_create -MD -MT CMakeFiles/cmTC_4560a.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_4560a.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_4560a.dir/CheckFunctionExists.c.o -c /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IWdMfS/CheckFunctionExists.c
+        Linking C executable cmTC_4560a
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4560a.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang  -DCHECK_FUNCTION_EXISTS=pthread_create CMakeFiles/cmTC_4560a.dir/CheckFunctionExists.c.o -o cmTC_4560a  -lpthreads
+        x86_64-pc-linux-gnu-ld: error: unable to find library -lpthreads
+        clang: error: linker command failed with exit code 1 (use -v to see invocation)
+        gmake[1]: *** [CMakeFiles/cmTC_4560a.dir/build.make:100: cmTC_4560a] Error 1
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-IWdMfS'
+        gmake: *** [Makefile:127: cmTC_4560a/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CheckLibraryExists.cmake:69 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/FindThreads.cmake:112 (CHECK_LIBRARY_EXISTS)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/FindThreads.cmake:176 (_threads_check_lib)"
+      - "/mnt/disk7/sunchenyang/doris/thirdparty/src/protobuf-21.11/CMakeLists.txt:163 (find_package)"
+      - "CMakeLists.txt:9 (include)"
+    checks:
+      - "Looking for pthread_create in pthread"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-GKAq0A"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-GKAq0A"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_HAVE_PTHREAD_CREATE"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-GKAq0A'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4c9d7/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4c9d7.dir/build.make CMakeFiles/cmTC_4c9d7.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-GKAq0A'
+        Building C object CMakeFiles/cmTC_4c9d7.dir/CheckFunctionExists.c.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang   -DCHECK_FUNCTION_EXISTS=pthread_create -MD -MT CMakeFiles/cmTC_4c9d7.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_4c9d7.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_4c9d7.dir/CheckFunctionExists.c.o -c /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-GKAq0A/CheckFunctionExists.c
+        Linking C executable cmTC_4c9d7
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4c9d7.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang  -DCHECK_FUNCTION_EXISTS=pthread_create CMakeFiles/cmTC_4c9d7.dir/CheckFunctionExists.c.o -o cmTC_4c9d7  -lpthread
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-GKAq0A'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/Internal/CheckSourceCompiles.cmake:101 (try_compile)"
+      - "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/share/cmake-3.29/Modules/CheckCXXSourceCompiles.cmake:52 (cmake_check_source_compiles)"
+      - "/mnt/disk7/sunchenyang/doris/thirdparty/src/protobuf-21.11/CMakeLists.txt:198 (check_cxx_source_compiles)"
+      - "CMakeLists.txt:9 (include)"
+    checks:
+      - "Performing Test protobuf_HAVE_BUILTIN_ATOMICS"
+    directories:
+      source: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-LHeN2j"
+      binary: "/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-LHeN2j"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang-scan-deps"
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "protobuf_HAVE_BUILTIN_ATOMICS"
+      cached: true
+      stdout: |
+        Change Dir: '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-LHeN2j'
+        
+        Run Build Command(s): /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_80370/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_80370.dir/build.make CMakeFiles/cmTC_80370.dir/build
+        gmake[1]: Entering directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-LHeN2j'
+        Building CXX object CMakeFiles/cmTC_80370.dir/src.cxx.o
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++ -Dprotobuf_HAVE_BUILTIN_ATOMICS  -std=c++11 -MD -MT CMakeFiles/cmTC_80370.dir/src.cxx.o -MF CMakeFiles/cmTC_80370.dir/src.cxx.o.d -o CMakeFiles/cmTC_80370.dir/src.cxx.o -c /mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-LHeN2j/src.cxx
+        Linking CXX executable cmTC_80370
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/cmake -E cmake_link_script CMakeFiles/cmTC_80370.dir/link.txt --verbose=1
+        /mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++  -std=c++11 CMakeFiles/cmTC_80370.dir/src.cxx.o -o cmTC_80370
+        gmake[1]: Leaving directory '/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/CMakeScratch/TryCompile-LHeN2j'
+        
+      exitCode: 0
+...

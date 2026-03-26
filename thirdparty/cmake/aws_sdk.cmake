@@ -17,6 +17,11 @@ set(CURL_INCLUDE_DIRS "${TP_SOURCE_DIR}/curl-8.2.1/include")
 set(CURL_LIBRARIES libcurl)
 set(CURL_LIBRARY libcurl)
 
+# Create CURL::libcurl imported target that AWS SDK's internal CMake expects
+if(TARGET libcurl AND NOT TARGET CURL::libcurl)
+    add_library(CURL::libcurl ALIAS libcurl)
+endif()
+
 # AWS SDK bundles its own aws-c-* dependencies, build all from source
 add_subdirectory(${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219 ${CMAKE_CURRENT_BINARY_DIR}/aws-sdk EXCLUDE_FROM_ALL)
 
@@ -29,3 +34,30 @@ foreach(_awslib aws-c-common aws-c-event-stream aws-checksums aws-c-io aws-c-htt
         message(STATUS "[contrib] ${_awslib} not found as target, may be built by aws-sdk")
     endif()
 endforeach()
+
+# AWS SDK leaks its aws-c-* C headers into the codebase's public API. We need an interface
+# target to expose all these nested include directories.
+add_library(aws_c_headers INTERFACE)
+target_include_directories(aws_c_headers SYSTEM INTERFACE
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-auth/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-cal/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-common/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-compression/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-event-stream/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-http/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-io/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-mqtt/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-s3/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-sdkutils/include
+    ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-checksums/include
+)
+
+# Also inject CRT include paths into aws-cpp-sdk-core's public interface so
+# any target that transitively links aws-cpp-sdk-core (e.g. via aws-cpp-sdk-s3)
+# automatically gets the CRT headers needed by aws/crt/Allocator.h etc.
+if(TARGET aws-cpp-sdk-core)
+    target_include_directories(aws-cpp-sdk-core SYSTEM PUBLIC
+        ${TP_SOURCE_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-common/include
+        ${CMAKE_CURRENT_BINARY_DIR}/aws-sdk/crt/aws-crt-cpp/crt/aws-c-common/generated/include
+    )
+endif()

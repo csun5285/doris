@@ -1,0 +1,1 @@
+/mnt/disk7/sunchenyang/opt/ldb_toolchain-20/bin/clang++ -O3 -DNDEBUG "CMakeFiles/protoc.dir/mnt/disk7/sunchenyang/doris/thirdparty/src/protobuf-21.11/src/google/protobuf/compiler/main.cc.o" -o protoc-3.21.11.0  -Wl,-rpath,:::::::::::::::: libprotoc.a libprotobuf.a -lpthread /usr/lib64/libz.so

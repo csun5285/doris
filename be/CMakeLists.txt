@@ -19,6 +19,11 @@ cmake_minimum_required(VERSION 3.19.2)
 
 project(doris CXX C)
 
+# Enable position-independent code globally.
+# The pch target (STATIC_LIBRARY) inherits -fPIC from COMMON_THIRDPARTY dependencies;
+# all consumer targets must also use -fPIC to avoid "is pie differs in AST file" PCH errors.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Write compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # set platforms
@@ -151,7 +156,7 @@ message(STATUS "build task executor simulator: ${BUILD_TASK_EXECUTOR_SIMULATOR}"
 option(BUILD_FILE_CACHE_LRU_TOOL "ON for building file cache lru tool or OFF for not" OFF)
 message(STATUS "build file cache lru tool: ${BUILD_FILE_CACHE_LRU_TOOL}")
 
-option(ENABLE_PAIMON_CPP "Enable Paimon C++ integration" ON)
+option(ENABLE_PAIMON_CPP "Enable Paimon C++ integration" OFF)
 set(PAIMON_HOME "" CACHE PATH "Paimon install prefix")
 
 # Allow env to override when reconfiguring (avoid picking /usr/local).
@@ -167,7 +172,79 @@ set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
 # Compile generated source if necessary
-message(STATUS "build gensrc if necessary")
+# First, ensure protoc and thrift compiler are available.
+# When building from source (no thirdparty/installed), we compile them on the fly.
+set(_PROTOC_BIN "$ENV{DORIS_THIRDPARTY}/installed/bin/protoc")
+set(_THRIFT_BIN "$ENV{DORIS_THIRDPARTY}/installed/bin/thrift")
+set(_GENSRC_TOOLS_DIR "$ENV{DORIS_THIRDPARTY}/_gensrc_tools")
+
+if(NOT EXISTS "${_PROTOC_BIN}")
+    message(STATUS "protoc not found at ${_PROTOC_BIN}, building from source...")
+    set(_PROTOC_BUILD_DIR "${_GENSRC_TOOLS_DIR}/protoc_build")
+    file(MAKE_DIRECTORY "${_PROTOC_BUILD_DIR}")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND}
+            -DCMAKE_BUILD_TYPE=Release
+            -Dprotobuf_BUILD_TESTS=OFF
+            -Dprotobuf_BUILD_SHARED_LIBS=OFF
+            "${THIRDPARTY_SRC_DIR}/src/protobuf-21.11/cmake"
+        WORKING_DIRECTORY "${_PROTOC_BUILD_DIR}"
+        RESULT_VARIABLE _PROTOC_CMAKE_RESULT)
+    if(_PROTOC_CMAKE_RESULT EQUAL 0)
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} --build . --target protoc -j
+            WORKING_DIRECTORY "${_PROTOC_BUILD_DIR}"
+            RESULT_VARIABLE _PROTOC_BUILD_RESULT)
+    endif()
+    if(_PROTOC_BUILD_RESULT EQUAL 0 AND EXISTS "${_PROTOC_BUILD_DIR}/protoc")
+        set(_PROTOC_BIN "${_PROTOC_BUILD_DIR}/protoc")
+        message(STATUS "Built protoc: ${_PROTOC_BIN}")
+    else()
+        message(WARNING "Failed to build protoc from source")
+    endif()
+endif()
+
+if(NOT EXISTS "${_THRIFT_BIN}")
+    message(STATUS "thrift compiler not found at ${_THRIFT_BIN}, building from source...")
+    set(_THRIFT_BUILD_DIR "${_GENSRC_TOOLS_DIR}/thrift_build")
+    file(MAKE_DIRECTORY "${_THRIFT_BUILD_DIR}")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND}
+            -DCMAKE_BUILD_TYPE=Release
+            -DBUILD_TESTING=OFF
+            -DBUILD_COMPILER=ON
+            -DBUILD_TUTORIALS=OFF
+            -DBUILD_EXAMPLES=OFF
+            -DBUILD_LIBRARIES=OFF
+            -DWITH_CPP=OFF
+            -DWITH_JAVA=OFF
+            -DWITH_PYTHON=OFF
+            -DWITH_HASKELL=OFF
+            -DWITH_C_GLIB=OFF
+            "${THIRDPARTY_SRC_DIR}/src/thrift-0.16.0"
+        WORKING_DIRECTORY "${_THRIFT_BUILD_DIR}"
+        RESULT_VARIABLE _THRIFT_CMAKE_RESULT)
+    if(_THRIFT_CMAKE_RESULT EQUAL 0)
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} --build . --target thrift-compiler -j
+            WORKING_DIRECTORY "${_THRIFT_BUILD_DIR}"
+            RESULT_VARIABLE _THRIFT_BUILD_RESULT)
+    endif()
+    # thrift compiler binary ends up in compiler/cpp/bin/thrift (RUNTIME_OUTPUT_DIRECTORY=bin/)
+    find_program(_THRIFT_BUILT NAMES thrift
+        PATHS "${_THRIFT_BUILD_DIR}/bin" "${_THRIFT_BUILD_DIR}/compiler/cpp/bin" "${_THRIFT_BUILD_DIR}/compiler/cpp"
+        NO_DEFAULT_PATH)
+    if(_THRIFT_BUILD_RESULT EQUAL 0 AND _THRIFT_BUILT)
+        set(_THRIFT_BIN "${_THRIFT_BUILT}")
+        message(STATUS "Built thrift compiler: ${_THRIFT_BIN}")
+    else()
+        message(WARNING "Failed to build thrift compiler from source")
+    endif()
+endif()
+
+message(STATUS "build gensrc if necessary (PROTOC=${_PROTOC_BIN}, THRIFT=${_THRIFT_BIN})")
+set(ENV{PROTOC} "${_PROTOC_BIN}")
+set(ENV{THRIFT} "${_THRIFT_BIN}")
 execute_process(COMMAND make -C ${BASE_DIR}/../gensrc/
                 RESULT_VARIABLE MAKE_GENSRC_RESULT)
 if(NOT ${MAKE_GENSRC_RESULT} EQUAL 0 AND NOT APPLE)
@@ -364,7 +441,23 @@ add_definitions(-D__STDC_FORMAT_MACROS
                     -DBOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX=1
                     -DBRPC_ENABLE_CPU_PROFILER
                     -DS2_USE_GFLAGS
-                    -DS2_USE_GLOG)
+                    -DS2_USE_GLOG
+                    -DAWS_USE_EPOLL
+                    -DAWS_SDK_VERSION_MAJOR=1
+                    -DAWS_SDK_VERSION_MINOR=11
+                    -DAWS_SDK_VERSION_PATCH=219
+                    -DAZ_RTTI
+                    -DBASE64_STATIC_DEFINE
+                    -DBENCHMARK_STATIC_DEFINE
+                    -DBROTLI_SHARED_COMPILATION
+                    -DCARES_STATICLIB
+                    -DCURL_STATICLIB
+                    -DGFLAGS_IS_A_DLL=0
+                    -DJSON_DIAGNOSTICS=0
+                    -DJSON_USE_IMPLICIT_CONVERSIONS=1
+                    -DLIBRDKAFKA_STATICLIB
+                    -DSIMDJSON_THREADS_ENABLED=1
+                    -DWITH_STATIC_LIB_libcrypto)
 
 # Thrift requires these two definitions for some types that we use
 add_definitions(-DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H)
@@ -545,7 +638,7 @@ include_directories(SYSTEM
     # bitshuffle
     ${TP_SRC_DIR}/bitshuffle-0.5.1/src
     # odbc
-    ${TP_SRC_DIR}/unix-odbc-2.3.7/include
+    ${TP_SRC_DIR}/unixODBC-2.3.7/include
     # gperftools
     ${TP_BUILD_DIR}/gperftools/include
     # xxHash
@@ -568,6 +661,123 @@ include_directories(SYSTEM
     ${CMAKE_SOURCE_DIR}/../thirdparty/installed/include
     # CRoaring (needs SYSTEM to suppress -Wundef/-Wshorten-64-to-32 from roaring headers)
     ${TP_SRC_DIR}/CRoaring-2.1.2/include
+    # Nested include paths for libraries that use subdir-prefixed includes
+    # (e.g. #include <lz4/lz4.h>, #include <snappy/snappy.h>)
+    ${TP_BUILD_DIR}/lz4_headers/include
+    ${TP_BUILD_DIR}/snappy_headers/include
+    ${TP_BUILD_DIR}/mysql_headers/include
+    ${TP_BUILD_DIR}/rdkafka_headers/include
+    # jemalloc
+    ${TP_SRC_DIR}/jemalloc-5.3.0/include
+    # krb5 headers (copied from old/include by thirdparty/cmake/krb5_headers.cmake)
+    ${TP_BUILD_DIR}/krb5_headers/include
+    # libunwind headers
+    ${TP_SRC_DIR}/libunwind-1.6.2/include
+    # abseil-cpp (for absl/strings, etc.)
+    ${TP_SRC_DIR}/abseil-cpp-20250512.1
+    # arrow source headers (thirdparty/src path; contrib/apache-arrow may not exist)
+    ${TP_SRC_DIR}/arrow-apache-arrow-17.0.0/cpp/src
+    ${TP_BUILD_DIR}/arrow/src
+    # fast_float (for fast_float/fast_float.h)
+    ${TP_SRC_DIR}/fast_float-3.9.0/include
+    # aws-cpp-sdk-s3 generated headers (for aws/s3/S3Errors.h)
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/generated/src/aws-cpp-sdk-s3/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/generated/src/aws-cpp-sdk-s3-crt/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/src/aws-cpp-sdk-transfer/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/src/aws-cpp-sdk-identity-management/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/generated/src/aws-cpp-sdk-sts/include
+    # aws-crt-cpp sub-library headers (needed transitively by aws/crt/Allocator.h, Types.h, etc.)
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-common/include
+    ${TP_BUILD_DIR}/aws-sdk/crt/aws-crt-cpp/crt/aws-c-common/generated/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-io/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-cal/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-auth/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-http/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-s3/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-sdkutils/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-checksums/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-event-stream/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-compression/include
+    ${TP_SRC_DIR}/aws-sdk-cpp-1.11.219/crt/aws-crt-cpp/crt/aws-c-mqtt/include
+    # libevent generated config (for event2/event-config.h)
+    ${TP_BUILD_DIR}/libevent/include
+    # hadoop hdfs
+    ${TP_BUILD_DIR}/hadoop_hdfs_headers/include
+    # ICU (for unicode/*.h)
+    ${TP_SRC_DIR}/icu-release-69-1/icu4c/source/common
+    ${TP_SRC_DIR}/icu-release-69-1/icu4c/source/i18n
+    ${TP_SRC_DIR}/icu-release-69-1/icu4c/source/io
+    # curl
+    ${TP_SRC_DIR}/curl-8.2.1/include
+    # ODBC (for sqltypes.h)
+    ${TP_SRC_DIR}/unixODBC-2.3.7/include
+    # ODBC generated config (for unixodbc_conf.h)
+    ${TP_SRC_DIR}/unixODBC-2.3.7
+    # libevent (for event2/*.h)
+    ${TP_SRC_DIR}/doris-thirdparty-libevent-2.1.12.1/include
+    # pugixml
+    ${TP_SRC_DIR}/pugixml-1.15/src
+    # bzip2
+    ${TP_SRC_DIR}/bzip2-1.0.8
+    # paimon-cpp
+    ${TP_SRC_DIR}/doris-thirdparty-paimon-cpp-0a4f4e2/include
+    # nlohmann json
+    ${TP_SRC_DIR}/json-3.10.1/single_include
+    # minizip (zlib contrib)
+    ${TP_SRC_DIR}/zlib-1.3.1/contrib
+    # ---- BATCH: all remaining third-party source include paths ----
+    # libdeflate
+    ${TP_SRC_DIR}/libdeflate-1.19
+    # simdjson
+    ${TP_SRC_DIR}/simdjson-3.11.6/singleheader
+    # xxHash
+    ${TP_SRC_DIR}/xxHash-0.8.3
+    # zstd
+    ${TP_SRC_DIR}/zstd-1.5.7/lib
+    # concurrentqueue
+    ${TP_SRC_DIR}/concurrentqueue-1.0.3
+    # streamvbyte
+    ${TP_SRC_DIR}/streamvbyte-1.0.0/include
+    # CRoaring
+    ${TP_SRC_DIR}/CRoaring-2.1.2/include
+    # re2
+    ${TP_SRC_DIR}/re2-2021-02-02
+    # flatbuffers
+    ${TP_SRC_DIR}/flatbuffers-2.0.0/include
+    # fmt
+    ${TP_SRC_DIR}/fmt-7.1.3/include
+    # parallel-hashmap
+    ${TP_SRC_DIR}/parallel-hashmap-1.3.8
+    # rapidjson
+    ${TP_SRC_DIR}/rapidjson-232389d4f1012dddec4ef84861face2d2ba85709/include
+    # orc
+    ${TP_SRC_DIR}/orc-1.9.0/c++/include
+    # leveldb
+    ${TP_SRC_DIR}/leveldb-1.23/include
+    # rocksdb
+    ${TP_SRC_DIR}/rocksdb-5.14.2/include
+    # boost
+    ${TP_SRC_DIR}/boost_1_81_0
+    # openssl
+    ${TP_SRC_DIR}/openssl-OpenSSL_1_1_1s/include
+    # libxml2
+    ${TP_SRC_DIR}/libxml2-v2.9.10/include
+    # lzo
+    ${TP_SRC_DIR}/lzo-2.10/include
+    # libdivide
+    ${TP_SRC_DIR}/libdivide-5.2.0
+    # zlib (also for zconf.h)
+    ${TP_SRC_DIR}/zlib-1.3.1
+    # brotli
+    ${TP_SRC_DIR}/brotli-1.0.9/c/include
+    # timsort
+    ${TP_BUILD_DIR}/timsort_headers/include
+    # bitshuffle
+    ${TP_BUILD_DIR}/bitshuffle_headers/include
+    # hyperscan
+    ${TP_BUILD_DIR}/hyperscan_headers/include
+    # gtest (for gtest_prod.h used in some source files)
+    ${TP_SRC_DIR}/googletest-release-1.12.1/googletest/include
 )
 
 include_directories(
@@ -657,6 +867,7 @@ set(COMMON_THIRDPARTY
 
 if (ENABLE_PAIMON_CPP)
     message(STATUS "Paimon C++ enabled: legacy thirdparty static linkage mode")
+    add_definitions(-DENABLE_PAIMON_CPP)
 endif()
 
 if ((ARCH_AMD64 OR ARCH_AARCH64) AND OS_LINUX)
@@ -719,6 +930,13 @@ if (ENABLE_PAIMON_CPP)
     set(PAIMON_FACTORY_REGISTRY_LIBS paimon_parquet_file_format)
     list(REMOVE_ITEM COMMON_THIRDPARTY ${PAIMON_FACTORY_REGISTRY_LIBS})
 endif()
+
+# Help linker resolve bare -lcurl, -lcares, -ldeflate injected by AWS SDK CMake
+link_directories(
+    ${CMAKE_BINARY_DIR}/lib
+    ${CMAKE_BINARY_DIR}/thirdparty/cares/lib64
+    ${CMAKE_BINARY_DIR}/thirdparty/libdeflate
+)
 
 set(DORIS_DEPENDENCIES
     ${DORIS_DEPENDENCIES}

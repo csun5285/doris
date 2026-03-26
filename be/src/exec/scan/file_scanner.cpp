@@ -70,10 +70,12 @@
 #include "format/table/iceberg_reader.h"
 #include "format/table/lakesoul_jni_reader.h"
 #include "format/table/max_compute_jni_reader.h"
+#ifdef ENABLE_PAIMON_CPP
 #include "format/table/paimon_cpp_reader.h"
 #include "format/table/paimon_jni_reader.h"
 #include "format/table/paimon_predicate_converter.h"
 #include "format/table/paimon_reader.h"
+#endif
 #include "format/table/remote_doris_reader.h"
 #include "format/table/transactional_hive_reader.h"
 #include "format/table/trino_connector_jni_reader.h"
@@ -952,6 +954,7 @@ Status FileScanner::_get_next_reader() {
         TFileFormatType::type format_type = _get_current_format_type();
         // for compatibility, this logic is deprecated in 3.1
         if (format_type == TFileFormatType::FORMAT_JNI && range.__isset.table_format_params) {
+#ifdef ENABLE_PAIMON_CPP
             if (range.table_format_params.table_format_type == "paimon" &&
                 !range.table_format_params.paimon_params.__isset.paimon_split) {
                 // use native reader
@@ -964,6 +967,7 @@ Status FileScanner::_get_next_reader() {
                     return Status::InternalError("Not supported paimon file format: {}", format);
                 }
             }
+#endif
         }
 
         // JNI reader can only push down column value range
@@ -983,6 +987,7 @@ Status FileScanner::_get_next_reader() {
                         range, _state, _profile);
                 init_status = mc_reader->init_reader();
                 _cur_reader = std::move(mc_reader);
+#ifdef ENABLE_PAIMON_CPP
             } else if (range.__isset.table_format_params &&
                        range.table_format_params.table_format_type == "paimon") {
                 if (_state->query_options().__isset.enable_paimon_cpp_reader &&
@@ -1004,6 +1009,7 @@ Status FileScanner::_get_next_reader() {
                                                                  range, _params);
                     init_status = ((PaimonJniReader*)(_cur_reader.get()))->init_reader();
                 }
+#endif
             } else if (range.__isset.table_format_params &&
                        range.table_format_params.table_format_type == "hudi") {
                 _cur_reader = HudiJniReader::create_unique(*_params,
@@ -1224,6 +1230,7 @@ Status FileScanner::_init_parquet_reader(std::unique_ptr<ParquetReader>&& parque
                 _col_name_to_slot_id, &_not_single_slot_filter_conjuncts,
                 &_slot_id_to_filter_conjuncts);
         _cur_reader = std::move(iceberg_reader);
+#ifdef ENABLE_PAIMON_CPP
     } else if (range.__isset.table_format_params &&
                range.table_format_params.table_format_type == "paimon") {
         std::unique_ptr<PaimonParquetReader> paimon_reader = PaimonParquetReader::create_unique(
@@ -1236,6 +1243,7 @@ Status FileScanner::_init_parquet_reader(std::unique_ptr<ParquetReader>&& parque
                 &_slot_id_to_filter_conjuncts);
         RETURN_IF_ERROR(paimon_reader->init_row_filters());
         _cur_reader = std::move(paimon_reader);
+#endif
     } else if (range.__isset.table_format_params &&
                range.table_format_params.table_format_type == "hudi") {
         std::unique_ptr<HudiParquetReader> hudi_reader = HudiParquetReader::create_unique(
@@ -1338,6 +1346,7 @@ Status FileScanner::_init_orc_reader(std::unique_ptr<OrcReader>&& orc_reader,
                 _default_val_row_desc.get(), _col_name_to_slot_id,
                 &_not_single_slot_filter_conjuncts, &_slot_id_to_filter_conjuncts);
         _cur_reader = std::move(iceberg_reader);
+#ifdef ENABLE_PAIMON_CPP
     } else if (range.__isset.table_format_params &&
                range.table_format_params.table_format_type == "paimon") {
         std::unique_ptr<PaimonOrcReader> paimon_reader = PaimonOrcReader::create_unique(
@@ -1350,6 +1359,7 @@ Status FileScanner::_init_orc_reader(std::unique_ptr<OrcReader>&& orc_reader,
                 &_slot_id_to_filter_conjuncts);
         RETURN_IF_ERROR(paimon_reader->init_row_filters());
         _cur_reader = std::move(paimon_reader);
+#endif
     } else if (range.__isset.table_format_params &&
                range.table_format_params.table_format_type == "hudi") {
         std::unique_ptr<HudiOrcReader> hudi_reader =

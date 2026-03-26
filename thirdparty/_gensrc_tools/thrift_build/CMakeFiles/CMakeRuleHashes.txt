@@ -1,0 +1,7 @@
+# Hashes of file build rules.
+c9afd0ebe7c57dedab97674d397891e4 /mnt/disk7/sunchenyang/doris/thirdparty/src/thrift-0.16.0/compiler/cpp/thrift
+af96f5c0ff97195b9437cb2776d60d60 CMakeFiles/do_run_clang_tidy
+99626894975e4b08764b933e2e84d4df CMakeFiles/thrift_uninstall
+a4fb815280a598690a2255944713f499 compiler/cpp/CMakeFiles/copy-thrift-compiler
+d81e2ee0e91ad3c32889519445809235 compiler/cpp/thrift/thriftl.cc
+d3ee3e0d002e3d08a4c6109c0c2d35ad compiler/cpp/thrift/thrifty.cc

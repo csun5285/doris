@@ -131,7 +131,7 @@ LZ4_MD5SUM="e9286adb64040071c5e23498bf753261"
 BZIP_DOWNLOAD="https://fossies.org/linux/misc/bzip2-1.0.8.tar.gz"
 BZIP_NAME=bzip2-1.0.8.tar.gz
 BZIP_SOURCE=bzip2-1.0.8
-BZIP_MD5SUM="67e051268d0c475ea773822f7500d0e5"
+BZIP_MD5SUM="7c131543f10402c2743dd15e0b6d75c0"
 
 # lzo2
 LZO2_DOWNLOAD="https://fossies.org/linux/misc/lzo-2.10.tar.gz"

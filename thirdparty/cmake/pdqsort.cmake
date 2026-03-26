@@ -1,2 +1,3 @@
-# pdqsort - single header file (already installed to include/)
-# No target needed, included via THIRDPARTY_DIR/include
+# pdqsort - single header file
+add_library(pdqsort INTERFACE)
+target_include_directories(pdqsort SYSTEM INTERFACE ${TP_SOURCE_DIR})

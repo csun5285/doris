@@ -22,6 +22,11 @@ set(LIBRARY_OUTPUT_PATH "${BUILD_DIR}/src/format")
 set(EXECUTABLE_OUTPUT_PATH "${BUILD_DIR}/src/format")
 
 file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS *.cpp)
+
+if(NOT ENABLE_PAIMON_CPP)
+    list(FILTER SRC_FILES EXCLUDE REGEX ".*paimon.*\\.cpp$")
+endif()
+
 add_library(Format STATIC ${SRC_FILES})
 
 pch_reuse(Format)

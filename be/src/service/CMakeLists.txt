@@ -45,6 +45,14 @@ if (${MAKE_TEST} STREQUAL "OFF" AND ${BUILD_BENCHMARK} STREQUAL "OFF")
         ${DORIS_LINK_LIBS}
     )
 
+    # Help linker resolve bare -lcurl, -lcares, -ldeflate injected by
+    # AWS SDK and other third-party CMake transitive dependencies
+    target_link_directories(doris_be PRIVATE
+        ${CMAKE_BINARY_DIR}/lib
+        ${CMAKE_BINARY_DIR}/thirdparty/cares/lib64
+        ${CMAKE_BINARY_DIR}/thirdparty/libdeflate
+    )
+
     install(DIRECTORY DESTINATION ${OUTPUT_DIR}/lib/)
     install(TARGETS doris_be DESTINATION ${OUTPUT_DIR}/lib/)
 

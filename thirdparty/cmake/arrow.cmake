@@ -27,9 +27,63 @@ set(ARROW_IPC ON CACHE BOOL "" FORCE)
 set(ARROW_JEMALLOC OFF CACHE BOOL "" FORCE)
 set(ARROW_MIMALLOC OFF CACHE BOOL "" FORCE)
 set(ARROW_DEPENDENCY_USE_SHARED OFF CACHE BOOL "" FORCE)
+set(ARROW_ENABLE_THREADING ON CACHE BOOL "" FORCE)
+set(ARROW_SIMD_LEVEL "SSE4_2" CACHE STRING "" FORCE)
+set(ARROW_RUNTIME_SIMD_LEVEL "MAX" CACHE STRING "" FORCE)
+# Rely exclusively on pristine CMake variables and our shims
 set(ARROW_DEPENDENCY_SOURCE SYSTEM CACHE STRING "" FORCE)
-# Point to our pre-built/co-built deps
-set(OPENSSL_ROOT_DIR ${TP_INSTALL_DIR} CACHE PATH "" FORCE)
-set(Protobuf_ROOT ${TP_INSTALL_DIR} CACHE PATH "" FORCE)
-set(gRPC_ROOT ${TP_INSTALL_DIR} CACHE PATH "" FORCE)
+# Pre-set Thrift version so Arrow's ThirdpartyToolchain.cmake sees it after find_package
+set(Thrift_VERSION "0.16.0" CACHE STRING "" FORCE)
+set(THRIFT_VERSION "0.16.0" CACHE STRING "" FORCE)
+# Point xsimd config-mode search to our shim
+set(xsimd_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/shims/xsimd" CACHE PATH "" FORCE)
+# Prevent Arrow from generating pkg-config entries for bzip2 (which triggers
+# a Conan-specific codepath looking for CONAN_LIB::bzip2_bz2_* targets)
+set(bzip2_PC_FOUND TRUE CACHE BOOL "" FORCE)
+
+# Pre-configure gflags for Arrow.
+# Arrow's FindgflagsAlt.cmake uses find_package(gflags) first. We provide
+# the config-mode variables so it succeeds, and also create the aliased
+# targets Arrow expects.
+get_target_property(_gflags_bin gflags_static BINARY_DIR)
+set(gflagsAlt_FOUND TRUE CACHE BOOL "" FORCE)
+set(GFLAGS_FOUND TRUE CACHE BOOL "" FORCE)
+set(gflags_FOUND TRUE CACHE BOOL "" FORCE)
+set(GFLAGS_INCLUDE_DIR "${_gflags_bin}/include" CACHE PATH "" FORCE)
+set(gflags_LIB gflags_static CACHE STRING "" FORCE)
+set(GFLAGS_LIBRARIES gflags_static CACHE STRING "" FORCE)
+if(NOT TARGET gflags::gflags)
+    add_library(gflags::gflags INTERFACE IMPORTED GLOBAL)
+    target_link_libraries(gflags::gflags INTERFACE gflags_static)
+    target_include_directories(gflags::gflags INTERFACE "${_gflags_bin}/include")
+endif()
+if(NOT TARGET gflags::gflags_static)
+    add_library(gflags::gflags_static INTERFACE IMPORTED GLOBAL)
+    target_link_libraries(gflags::gflags_static INTERFACE gflags_static)
+    target_include_directories(gflags::gflags_static INTERFACE "${_gflags_bin}/include")
+endif()
+
+# Pre-configure thrift for Arrow.
+# Arrow's FindThriftAlt.cmake first checks `if(ThriftAlt_FOUND) return()`.
+# We set all required variables and create the thrift::thrift target that
+# Arrow Parquet expects.
+if(TARGET thrift_static)
+    get_target_property(_thrift_bin thrift_static BINARY_DIR)
+else()
+    set(_thrift_bin "${CMAKE_CURRENT_BINARY_DIR}/thrift")
+endif()
+set(_thrift_include "${TP_SOURCE_DIR}/thrift-0.16.0/lib/cpp/src;${_thrift_bin};${TP_SOURCE_DIR}/boost_1_81_0")
+set(ThriftAlt_FOUND TRUE CACHE BOOL "" FORCE)
+set(Thrift_FOUND TRUE CACHE BOOL "" FORCE)
+set(ThriftAlt_LIB "${_thrift_bin}/lib/libthrift.a" CACHE INTERNAL "")
+set(ThriftAlt_INCLUDE_DIR "${_thrift_include}" CACHE INTERNAL "")
+set(ThriftAlt_VERSION "0.16.0" CACHE INTERNAL "")
+if(NOT TARGET thrift::thrift)
+    add_library(thrift::thrift INTERFACE IMPORTED GLOBAL)
+    if(TARGET thrift_static)
+        target_link_libraries(thrift::thrift INTERFACE thrift_static)
+    endif()
+    target_include_directories(thrift::thrift INTERFACE "${_thrift_include}")
+endif()
+
 add_subdirectory(${TP_SOURCE_DIR}/arrow-apache-arrow-17.0.0/cpp ${CMAKE_CURRENT_BINARY_DIR}/arrow EXCLUDE_FROM_ALL)

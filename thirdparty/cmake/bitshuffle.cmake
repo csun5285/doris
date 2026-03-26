@@ -7,6 +7,12 @@ set(BITSHUFFLE_SOURCES
 )
 set(BITSHUFFLE_INCLUDES ${BITSHUFFLE_SRC}/src ${BITSHUFFLE_SRC}/lz4)
 
+# Create bitshuffle include structure
+set(BITSHUFFLE_INC_DIR ${CMAKE_CURRENT_BINARY_DIR}/bitshuffle_headers/include)
+file(COPY "${BITSHUFFLE_SRC}/src/bitshuffle.h" "${BITSHUFFLE_SRC}/src/bitshuffle_core.h"
+     DESTINATION "${BITSHUFFLE_INC_DIR}/bitshuffle"
+)
+
 # --- Default (no special arch flags) ---
 add_library(bitshuffle_default STATIC ${BITSHUFFLE_SOURCES})
 target_include_directories(bitshuffle_default PRIVATE ${BITSHUFFLE_INCLUDES})
@@ -69,12 +75,12 @@ ar rs \"$OUTPUT\" \"$WORK/default_merged.o\" \"$WORK/avx2_merged.o\" \"$WORK/avx
     add_library(bitshuffle STATIC IMPORTED GLOBAL)
     set_target_properties(bitshuffle PROPERTIES
         IMPORTED_LOCATION ${BITSHUFFLE_COMBINED_LIB}
-        INTERFACE_INCLUDE_DIRECTORIES "${BITSHUFFLE_SRC}/src"
+        INTERFACE_INCLUDE_DIRECTORIES "${BITSHUFFLE_INC_DIR}"
     )
     add_dependencies(bitshuffle bitshuffle_combined)
 
 else()
     # Non-AMD64: just use the default build
     add_library(bitshuffle ALIAS bitshuffle_default)
-    target_include_directories(bitshuffle_default PUBLIC ${BITSHUFFLE_SRC}/src)
+    target_include_directories(bitshuffle_default INTERFACE ${BITSHUFFLE_INC_DIR})
 endif()

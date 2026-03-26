@@ -1,0 +1,20 @@
+# Find module shim for gflagsAlt
+if(TARGET gflags_static)
+    get_target_property(_gflags_bin_dir gflags_static BINARY_DIR)
+    set(GFLAGS_INCLUDE_DIR "${_gflags_bin_dir}/include")
+    set(gflags_LIB gflags_static)
+    set(gflagsAlt_FOUND TRUE)
+    set(GFLAGS_FOUND TRUE)
+    
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(gflagsAlt DEFAULT_MSG gflags_LIB GFLAGS_INCLUDE_DIR)
+
+    if(NOT TARGET gflags::gflags)
+        add_library(gflags::gflags INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(gflags::gflags INTERFACE gflags_static)
+    endif()
+    if(NOT TARGET gflags::gflags_static)
+        add_library(gflags::gflags_static INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(gflags::gflags_static INTERFACE gflags_static)
+    endif()
+endif()

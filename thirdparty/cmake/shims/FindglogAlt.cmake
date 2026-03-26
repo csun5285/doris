@@ -1,0 +1,25 @@
+# Find module shim for glogAlt
+if(TARGET glog::glog)
+    set(GLOG_LIBRARY glog::glog)
+    set(GLOG_INCLUDE_DIR "${TP_SOURCE_DIR}/glog-0.6.0/src")
+    set(glogAlt_FOUND TRUE)
+    set(GLOG_FOUND TRUE)
+    
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(glogAlt DEFAULT_MSG GLOG_LIBRARY GLOG_INCLUDE_DIR)
+else()
+    if(TARGET glog)
+        set(GLOG_LIBRARY glog)
+        set(GLOG_INCLUDE_DIR "${TP_SOURCE_DIR}/glog-0.6.0/src")
+        set(glogAlt_FOUND TRUE)
+        set(GLOG_FOUND TRUE)
+        
+        include(FindPackageHandleStandardArgs)
+        find_package_handle_standard_args(glogAlt DEFAULT_MSG GLOG_LIBRARY GLOG_INCLUDE_DIR)
+
+        if(NOT TARGET glog::glog)
+            add_library(glog::glog INTERFACE IMPORTED GLOBAL)
+            target_link_libraries(glog::glog INTERFACE glog)
+        endif()
+    endif()
+endif()

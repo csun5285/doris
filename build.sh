@@ -617,6 +617,67 @@ echo "Feature List: ${DORIS_FEATURE_LIST}"
 if [[ "${CLEAN}" -eq 1 ]]; then
     clean_gensrc
 fi
+
+# Ensure protoc and thrift compilers are available before generating code.
+# They may be missing after a --clean (broken symlinks pointing into deleted build dirs).
+_PROTOC_BIN="${DORIS_THIRDPARTY}/installed/bin/protoc"
+_THRIFT_BIN="${DORIS_THIRDPARTY}/installed/bin/thrift"
+_GENSRC_TOOLS_DIR="${DORIS_THIRDPARTY}/_gensrc_tools"
+
+if [[ ! -x "${_PROTOC_BIN}" ]]; then
+    echo "protoc not found or not executable at ${_PROTOC_BIN}, building from source..."
+    _PROTOC_BUILD_DIR="${_GENSRC_TOOLS_DIR}/protoc_build"
+    mkdir -p "${_PROTOC_BUILD_DIR}"
+    "${CMAKE_CMD}" -DCMAKE_BUILD_TYPE=Release \
+        -Dprotobuf_BUILD_TESTS=OFF \
+        -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+        -S "${DORIS_THIRDPARTY}/src/protobuf-21.11/cmake" \
+        -B "${_PROTOC_BUILD_DIR}"
+    "${CMAKE_CMD}" --build "${_PROTOC_BUILD_DIR}" --target protoc -j "${PARALLEL}"
+    if [[ -f "${_PROTOC_BUILD_DIR}/protoc" ]]; then
+        ln -sf "${_PROTOC_BUILD_DIR}/protoc" "${_PROTOC_BIN}"
+        echo "Built and linked protoc: ${_PROTOC_BIN} -> ${_PROTOC_BUILD_DIR}/protoc"
+    else
+        echo "ERROR: Failed to build protoc from source" >&2
+        exit 1
+    fi
+fi
+
+if [[ ! -x "${_THRIFT_BIN}" ]]; then
+    echo "thrift not found or not executable at ${_THRIFT_BIN}, building from source..."
+    _THRIFT_BUILD_DIR="${_GENSRC_TOOLS_DIR}/thrift_build"
+    mkdir -p "${_THRIFT_BUILD_DIR}"
+    "${CMAKE_CMD}" -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_COMPILER=ON \
+        -DBUILD_TUTORIALS=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_LIBRARIES=OFF \
+        -DWITH_CPP=OFF \
+        -DWITH_JAVA=OFF \
+        -DWITH_PYTHON=OFF \
+        -DWITH_HASKELL=OFF \
+        -DWITH_C_GLIB=OFF \
+        -S "${DORIS_THIRDPARTY}/src/thrift-0.16.0" \
+        -B "${_THRIFT_BUILD_DIR}"
+    "${CMAKE_CMD}" --build "${_THRIFT_BUILD_DIR}" --target thrift-compiler -j "${PARALLEL}"
+    # thrift compiler binary may end up in different locations
+    _THRIFT_BUILT=""
+    for _candidate in "${_THRIFT_BUILD_DIR}/bin/thrift" "${_THRIFT_BUILD_DIR}/compiler/cpp/bin/thrift" "${_THRIFT_BUILD_DIR}/compiler/cpp/thrift"; do
+        if [[ -f "${_candidate}" ]]; then
+            _THRIFT_BUILT="${_candidate}"
+            break
+        fi
+    done
+    if [[ -n "${_THRIFT_BUILT}" ]]; then
+        ln -sf "${_THRIFT_BUILT}" "${_THRIFT_BIN}"
+        echo "Built and linked thrift: ${_THRIFT_BIN} -> ${_THRIFT_BUILT}"
+    else
+        echo "ERROR: Failed to build thrift compiler from source" >&2
+        exit 1
+    fi
+fi
+
 "${DORIS_HOME}"/generated-source.sh noclean
 
 # Assesmble FE modules
@@ -739,6 +800,12 @@ if [[ "${BUILD_BE}" -eq 1 ]]; then
         "${DORIS_HOME}/be"
 
     if [[ "${OUTPUT_BE_BINARY}" -eq 1 ]]; then
+        # Fix bare library names injected by AWS SDK CMake internals
+        if [[ -f build.ninja ]]; then
+            sed -i 's| -lcurl | bin/libcurl.a |g' build.ninja
+            sed -i 's| -llibcurl_static | bin/libcurl.a |g' build.ninja
+            sed -i 's| -lcares | thirdparty/cares/lib64/libcares.a |g' build.ninja
+        fi
         "${BUILD_SYSTEM}" -j "${PARALLEL}"
         "${BUILD_SYSTEM}" install
     fi

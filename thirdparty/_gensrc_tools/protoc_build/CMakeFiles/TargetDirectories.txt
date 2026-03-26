@@ -1,0 +1,10 @@
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/libprotobuf-lite.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/libprotobuf.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/libprotoc.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/protoc.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/edit_cache.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/rebuild_cache.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/list_install_components.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/install.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/install/local.dir
+/mnt/disk7/sunchenyang/doris/thirdparty/_gensrc_tools/protoc_build/CMakeFiles/install/strip.dir

@@ -5,14 +5,10 @@ set(BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_PERFORMANCE_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
 set(MSVC OFF) # ensure non-MSVC path
-# Disable auto vcpkg fetching
+# Disable auto vcpkg fetching (Azure checks ENV, not CMake variable!)
+set(ENV{AZURE_SDK_DISABLE_AUTO_VCPKG} "1")
 set(AZURE_SDK_DISABLE_AUTO_VCPKG ON CACHE BOOL "" FORCE)
-# Use source-built OpenSSL
-set(OPENSSL_ROOT_DIR "${CMAKE_CURRENT_BINARY_DIR}/openssl" CACHE PATH "" FORCE)
-# Set LibXml2 to source-built version
-set(LIBXML2_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/xml2/include/libxml2" CACHE PATH "" FORCE)
-set(LIBXML2_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/xml2/lib/libxml2.a" CACHE FILEPATH "" FORCE)
-set(LIBXML2_LIBRARIES "${CMAKE_CURRENT_BINARY_DIR}/xml2/lib/libxml2.a" CACHE STRING "" FORCE)
+# Use the OpenSSL and LibXml2 cache variables already set globally by Doris thirdparty
 # Disable opentelemetry tracing (not available)
 set(BUILD_AZURE_CORE_OPENTELEMETRY OFF CACHE BOOL "" FORCE)
 set(DISABLE_AZURE_CORE_OPENTELEMETRY ON CACHE BOOL "" FORCE)

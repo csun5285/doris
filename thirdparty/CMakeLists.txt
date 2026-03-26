@@ -40,6 +40,8 @@ list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/shims")
 # Skip all install rules for thirdparty libs — we build them, not install them
 # This fixes INSTALL(EXPORT) errors for gflags/thrift/rocksdb/aws-sdk
 set(CMAKE_SKIP_INSTALL_RULES ON)
+# Workaround: Parent CMakeLists still tries to include our missing install script
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/cmake_install.cmake" "# Dummy script to satisfy parent include()\n")
 
 # Suppress all warnings in third-party code
 set(TP_SAVED_C_FLAGS "${CMAKE_C_FLAGS}")
@@ -76,6 +78,7 @@ add_contrib(parallel_hashmap)
 add_contrib(fast_float)
 add_contrib(libdivide)
 add_contrib(pdqsort)
+add_contrib(timsort)
 add_contrib(concurrentqueue)
 add_contrib(nlohmann_json)
 
@@ -135,14 +138,15 @@ add_contrib(thrift)          # depends: openssl, libevent, boost
 add_contrib(rocksdb)         # depends: zlib, lz4, zstd, snappy
 add_contrib(brpc)            # depends: protobuf, gflags, glog, leveldb
 # TODO: fix hyperscan and arrow integration
-#add_contrib(hyperscan)       # depends: boost
-#add_contrib(arrow)           # depends: many
+add_contrib(hyperscan)       # depends: boost
+add_contrib(arrow)           # depends: many
 add_contrib(rdkafka)         # depends: zstd, lz4, cyrus-sasl
 
 # ============================================================================
 # Layer 4: System/auth libraries (autoconf)
 # ============================================================================
 add_contrib(krb5)            # autoconf
+add_contrib(krb5_headers)    # copy krb5 headers from old/include
 add_contrib(cyrus_sasl)      # autoconf
 add_contrib(gsasl)           # autoconf
 add_contrib(idn)             # autoconf
@@ -150,6 +154,8 @@ add_contrib(xml2)            # autoconf
 add_contrib(lzma)            # autoconf
 add_contrib(odbc)            # autoconf
 add_contrib(mysql)           # headers only
+add_contrib(libunwind_headers)  # copy libunwind headers from old/include
+add_contrib(hadoop_hdfs_headers) # copy hadoop_hdfs_3_4 headers from old/include
 
 # ============================================================================
 # Layer 5: Cloud/Storage SDKs
@@ -177,6 +183,18 @@ set(CMAKE_CXX_FLAGS "${TP_SAVED_CXX_FLAGS}")
 # ============================================================================
 set(COMMON_THIRDPARTY
     # Core libs
+    rapidjson
+    parallel_hashmap
+    fast_float
+    libdivide_header
+    pdqsort
+    timsort
+    aws_c_headers
+    concurrentqueue
+    nlohmann_json
+    xxhash
+    dragonbox
+    lzo2
     gflags
     glog
     backtrace
@@ -188,11 +206,16 @@ set(COMMON_THIRDPARTY
     benchmark
     gmock
     snappy
+    snappy_headers
     curl
     lz4
+    lz4_headers
     thrift
     thriftnb
     crc32c
+    jemalloc
+    mysql_headers
+    boost_headers
 
     # libevent
     libevent_core
@@ -226,13 +249,13 @@ set(COMMON_THIRDPARTY
     address_sorting
     z
 
-    # arrow (TODO: add_contrib(arrow) wrapper)
-    arrow
-    arrow_flight
-    arrow_flight_sql
-    arrow_dataset
-    arrow_acero
-    parquet
+    # arrow — Arrow creates _static suffix targets for static builds
+    arrow_static
+    arrow_flight_static
+    arrow_flight_sql_static
+    arrow_dataset_static
+    arrow_acero_static
+    parquet_static
 
     # brpc
     brpc
@@ -244,6 +267,7 @@ set(COMMON_THIRDPARTY
     cyrus-sasl
     rdkafka_cpp
     rdkafka
+    rdkafka_headers
 
     # misc
     s2
@@ -293,8 +317,8 @@ set(COMMON_THIRDPARTY
     streamvbyte
     deflate
     hs
-    icuuc
     icui18n
+    icuuc
     icudata
     pugixml
     PARENT_SCOPE
@@ -372,7 +396,7 @@ if(TARGET arrow_static)
     get_target_property(_arrow_inc arrow_static INTERFACE_INCLUDE_DIRECTORIES)
     if(NOT _arrow_inc OR _arrow_inc MATCHES "NOTFOUND")
         target_include_directories(arrow_static INTERFACE
-            ${CMAKE_SOURCE_DIR}/../contrib/apache-arrow/cpp/src
+            ${TP_SOURCE_DIR}/arrow-apache-arrow-17.0.0/cpp/src
             ${CMAKE_CURRENT_BINARY_DIR}/arrow/src)
     endif()
 endif()
