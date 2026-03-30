@@ -527,8 +527,8 @@ DataTypePtr DataTypeFactory::create_data_type(const std::vector<TTypeNode>& type
             bool doc_mode = scalar_type.__isset.variant_enable_doc_mode
                                     ? scalar_type.variant_enable_doc_mode
                                     : false;
-            auto dt = std::make_shared<DataTypeVariant>(
-                    scalar_type.variant_max_subcolumns_count, doc_mode);
+            auto dt = std::make_shared<DataTypeVariant>(scalar_type.variant_max_subcolumns_count,
+                                                        doc_mode);
             return is_nullable ? make_nullable(dt) : dt;
         }
         return create_data_type(thrift_to_type(scalar_type.type), is_nullable,
