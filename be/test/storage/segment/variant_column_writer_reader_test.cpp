@@ -230,8 +230,8 @@ protected:
         for (const auto& batch : batches) {
             Block block = _tablet_schema->create_block();
             auto columns = block.mutate_columns();
-            auto variant_col =
-                    ColumnVariant::create(_tablet_schema->column(0).variant_max_subcolumns_count(), false);
+            auto variant_col = ColumnVariant::create(
+                    _tablet_schema->column(0).variant_max_subcolumns_count(), false);
             auto json_col = ColumnString::create();
             for (const auto& json : batch) {
                 json_col->insert_data(json.data(), json.size());
@@ -271,8 +271,8 @@ protected:
 
         Block block = _tablet_schema->create_block();
         auto columns = block.mutate_columns();
-        auto variant_col =
-                ColumnVariant::create(_tablet_schema->column(0).variant_max_subcolumns_count(), false);
+        auto variant_col = ColumnVariant::create(
+                _tablet_schema->column(0).variant_max_subcolumns_count(), false);
         auto json_col = ColumnString::create();
         for (const auto& json : jsons) {
             json_col->insert_data(json.data(), json.size());
@@ -872,7 +872,8 @@ TEST_F(VariantColumnWriterReaderTest, test_write_data_normal) {
     // test VariantRootColumnIterator for next_batch and read_by_rowids
     {
         auto iter = assert_cast<VariantRootColumnIterator*>(it3.get());
-        auto nullable_dt = std::make_shared<DataTypeNullable>(std::make_shared<DataTypeVariant>(3, false));
+        auto nullable_dt =
+                std::make_shared<DataTypeNullable>(std::make_shared<DataTypeVariant>(3, false));
         MutableColumnPtr root_column_object = nullable_dt->create_column();
         nrows = 1000;
         st = iter->seek_to_ordinal(0);
