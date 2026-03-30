@@ -76,8 +76,9 @@ public:
                 << arguments[1]->get_name() << ".";
         auto arg_variant = remove_nullable(arguments[0]);
         const auto& data_type_object = assert_cast<const DataTypeVariant&>(*arg_variant);
-        return make_nullable(
-                std::make_shared<DataTypeVariant>(data_type_object.variant_max_subcolumns_count()));
+        return make_nullable(std::make_shared<DataTypeVariant>(
+                data_type_object.variant_max_subcolumns_count(),
+                data_type_object.enable_doc_mode()));
     }
 
     // wrap variant column with nullable
@@ -259,7 +260,7 @@ private:
                                      ColumnPtr* result) {
         std::string field_name = index_column->get_data_at(0).to_string();
         if (src.empty()) {
-            *result = ColumnVariant::create(src.max_subcolumns_count());
+            *result = ColumnVariant::create(src.max_subcolumns_count(), src.enable_doc_mode());
             // src subcolumns empty but src row count may not be 0
             (*result)->assume_mutable()->insert_many_defaults(src.size());
             // ColumnVariant should be finalized before parsing, finalize maybe modify original column structure
@@ -286,8 +287,8 @@ private:
                     result_column->insert_default();
                 }
             }
-            *result = ColumnVariant::create(src.max_subcolumns_count(), type,
-                                            std::move(result_column));
+            *result = ColumnVariant::create(src.max_subcolumns_count(), src.enable_doc_mode(),
+                                            type, std::move(result_column));
             (*result)->assume_mutable()->finalize();
             return Status::OK();
         } else {
@@ -296,7 +297,7 @@ private:
             PathInData path(field_name);
             ColumnVariant::Subcolumns subcolumns = mutable_ptr->get_subcolumns();
             const auto* node = subcolumns.find_exact(path);
-            MutableColumnPtr result_col = ColumnVariant::create(src.max_subcolumns_count());
+            MutableColumnPtr result_col = ColumnVariant::create(src.max_subcolumns_count(), src.enable_doc_mode());
             ColumnVariant::Subcolumns new_subcolumns;
 
             if (node != nullptr) {
@@ -321,11 +322,11 @@ private:
                     new_subcolumns.create_root(ColumnVariant::Subcolumn {
                             nodes[0]->data.get_finalized_column_ptr()->assume_mutable(),
                             nodes[0]->data.get_least_common_type(), true, true});
-                    auto container = ColumnVariant::create(src.max_subcolumns_count(),
+                    auto container = ColumnVariant::create(src.max_subcolumns_count(), src.enable_doc_mode(),
                                                            std::move(new_subcolumns));
                     result_col->insert_range_from(*container, 0, container->size());
                 } else {
-                    auto container = ColumnVariant::create(src.max_subcolumns_count(),
+                    auto container = ColumnVariant::create(src.max_subcolumns_count(), src.enable_doc_mode(),
                                                            std::move(new_subcolumns));
                     container->clear_sparse_column();
                     _extract_sparse_column_from_source(mutable_ptr, path, container);
@@ -333,6 +334,7 @@ private:
                 }
             } else {
                 auto container = ColumnVariant::create(src.max_subcolumns_count(),
+                                                       src.enable_doc_mode(),
                                                        std::move(new_subcolumns));
                 const auto& sparse_offsets = mutable_ptr->serialized_sparse_column_offsets();
                 if (sparse_offsets.back() == sparse_offsets[-1]) {
