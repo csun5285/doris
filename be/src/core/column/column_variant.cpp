@@ -825,7 +825,7 @@ void ColumnVariant::insert_from(const IColumn& src, size_t n) {
     ENABLE_CHECK_CONSISTENCY(this);
     // doc mode fast path: both sides root-only, direct copy root + sparse + doc_value
     if (_enable_doc_mode) {
-        CHECK(src_v->_enable_doc_mode) << "dst is doc mode but src is not";
+        DCHECK(src_v->_enable_doc_mode) << "dst is doc mode but src is not";
         FieldWithDataType field;
         src_v->subcolumns.get_root()->data.get(n, field);
         subcolumns.get_mutable_root()->data.insert(field);
@@ -1160,7 +1160,7 @@ void ColumnVariant::insert_range_from(const IColumn& src, size_t start, size_t l
 
     // doc mode fast path: both sides root-only, direct range copy root + sparse + doc_value
     if (_enable_doc_mode) {
-        CHECK(src_object._enable_doc_mode) << "dst is doc mode but src is not";
+        DCHECK(src_object._enable_doc_mode) << "dst is doc mode but src is not";
         subcolumns.get_mutable_root()->data.insert_range_from(
                 src_object.subcolumns.get_root()->data, start, length);
         serialized_sparse_column->insert_range_from(*src_object.serialized_sparse_column, start,
