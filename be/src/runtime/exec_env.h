@@ -122,7 +122,6 @@ class CdcClientMgr;
 class TabletSchemaCache;
 class TabletColumnObjectPool;
 class UserFunctionCache;
-class SchemaCache;
 class StoragePageCache;
 class SegmentLoader;
 class LookupConnectionCache;
@@ -361,7 +360,6 @@ public:
 
     TabletSchemaCache* get_tablet_schema_cache() { return _tablet_schema_cache; }
     TabletColumnObjectPool* get_tablet_column_object_pool() { return _tablet_column_object_pool; }
-    SchemaCache* schema_cache() { return _schema_cache; }
     StoragePageCache* get_storage_page_cache() { return _storage_page_cache; }
     SegmentLoader* segment_loader() { return _segment_loader; }
     LookupConnectionCache* get_lookup_connection_cache() { return _lookup_connection_cache; }
@@ -523,7 +521,6 @@ private:
     TabletSchemaCache* _tablet_schema_cache = nullptr;
     TabletColumnObjectPool* _tablet_column_object_pool = nullptr;
     std::unique_ptr<BaseStorageEngine> _storage_engine;
-    SchemaCache* _schema_cache = nullptr;
     StoragePageCache* _storage_page_cache = nullptr;
     SegmentLoader* _segment_loader = nullptr;
     LookupConnectionCache* _lookup_connection_cache = nullptr;
