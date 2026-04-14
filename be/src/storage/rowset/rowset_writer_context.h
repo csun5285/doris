@@ -135,6 +135,14 @@ struct RowsetWriterContext {
     // For collect segment statistics for compaction
     std::vector<RowsetReaderSharedPtr> input_rs_readers;
 
+    // For variant doc-mode compaction: per-variant-column-uid map of
+    // (path → cumulative non-null count across all input source segments).
+    // Populated by the compaction code via VariantCompactionUtil and consumed
+    // by VariantDocCompactWriter to pre-reserve its sparse-subcolumn rowid
+    // accumulators (saves the PaddedPODArray 2x growth waste).
+    std::unordered_map<int32_t, std::unordered_map<std::string, uint64_t>>
+            variant_doc_value_path_total_counts;
+
     // TODO(lihangyu) remove this lock
     // In semi-structure senario tablet_schema will be updated concurrently,
     // this lock need to be held when update.Use shared_ptr to avoid delete copy contructor

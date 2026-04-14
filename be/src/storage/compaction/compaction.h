@@ -168,6 +168,13 @@ protected:
     std::unique_ptr<RowIdConversion> _rowid_conversion = nullptr;
     TabletSchemaSPtr _cur_tablet_schema;
 
+    // Per-uid (path → cumulative non-null count) collected from source segment
+    // doc-value stats during build_basic_info. Plumbed into the output
+    // RowsetWriterContext so VariantDocCompactWriter can pre-reserve its
+    // sparse-subcolumn accumulators in pure doc-mode compaction.
+    std::unordered_map<int32_t, std::unordered_map<std::string, uint64_t>>
+            _variant_doc_value_path_total_counts;
+
     std::unique_ptr<RuntimeProfile> _profile;
 
     bool _enable_inverted_index_compaction {false};

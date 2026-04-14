@@ -316,6 +316,45 @@ DataTypePtr create_variant_type(const TabletColumn& target_col) {
 Status VariantColumnReader::_build_read_plan_flat_leaves(
         ReadPlan* plan, const TabletColumn& target_col, const StorageReadOptions* opts,
         ColumnReaderCache* column_reader_cache, PathToBinaryColumnCache* binary_column_cache_ptr) {
+    // Fast paths that avoid loading the full external meta. The legacy code
+    // path unconditionally calls load_external_meta_once at the top of this
+    // function, which costs ~10-15 MB per source segment and becomes a
+    // dominant read-side allocation in pure doc-mode compaction. Detect cases
+    // where we definitively don't need _subcolumns_meta_info and short-circuit.
+    if (target_col.has_path_info()) {
+        auto relative_path_fast = target_col.path_info_ptr()->copy_pop_front();
+        const std::string rel_fast = relative_path_fast.get_path();
+
+        // Case A: doc-value bucket read in MULTIPLE_DOC_VALUE source. We only
+        // need _binary_column_reader to select the right bucket.
+        if (_binary_column_reader &&
+            _binary_column_reader->get_type() == BinaryColumnType::MULTIPLE_DOC_VALUE &&
+            rel_fast.find(DOC_VALUE_COLUMN_PATH) != std::string::npos) {
+            const size_t bucket_pos = rel_fast.rfind('b');
+            if (bucket_pos != std::string::npos) {
+                const uint32_t bucket_value =
+                        static_cast<uint32_t>(std::stoul(rel_fast.substr(bucket_pos + 1)));
+                plan->kind = ReadKind::DOC_COMPACT;
+                plan->type = DataTypeFactory::instance().create_data_type(target_col);
+                plan->binary_column_reader = _binary_column_reader->select_reader(bucket_value);
+                return Status::OK();
+            }
+        }
+
+        // Case B: parent variant column read (empty relative_path). The legacy
+        // path falls through to ROOT_FLAT below, which only needs the root
+        // type/path — no subcolumns meta. The nested group / sparse / leaf
+        // branches all skip when relative_path is empty, so we can build the
+        // plan immediately without the meta load.
+        if (rel_fast.empty()) {
+            plan->kind = ReadKind::ROOT_FLAT;
+            plan->type = create_variant_type(target_col);
+            plan->relative_path = relative_path_fast;
+            plan->needs_root_merge = _needs_root_nested_group_merge(relative_path_fast);
+            return Status::OK();
+        }
+    }
+
     // make sure external meta is loaded otherwise can't find any meta data for extracted columns
     // TODO(lhy): this will load all external meta if not loaded, and memory will be consumed.
     RETURN_IF_ERROR(load_external_meta_once());

@@ -92,6 +92,11 @@ struct VariantExtendedInfo {
             nested_paths;               // nested paths in this variant column
     PathToDataTypes path_to_data_types; // key: path, value: data types
     bool has_nested_group = false;      // whether this variant column has nested group
+    // For pure doc-mode compaction: total non-null count of each path across
+    // all input source segments. Populated in aggregate_variant_extended_info
+    // and consumed by VariantDocCompactWriter to pre-reserve its sparse-subcolumn
+    // accumulators (avoiding PaddedPODArray 2x growth waste).
+    std::unordered_map<std::string, uint64_t> doc_value_path_total_counts;
 };
 
 /// Returns number of dimensions in Array type. 0 if type is not array.
@@ -202,8 +207,14 @@ public:
             std::unordered_map<int32_t, PathToNoneNullValues>* uid_to_path_stats);
 
     // Build the temporary schema for compaction, this will reduce the memory usage of compacting variant columns
-    static Status get_extended_compaction_schema(const std::vector<RowsetSharedPtr>& rowsets,
-                                                 TabletSchemaSPtr& target);
+    // `doc_value_path_total_counts_out` (optional): if non-null, populated with
+    // per-uid (path → cumulative non-null count) maps for variant columns in
+    // pure doc mode. Caller plumbs this into RowsetWriterContext so the
+    // VariantDocCompactWriter can pre-reserve its accumulators.
+    static Status get_extended_compaction_schema(
+            const std::vector<RowsetSharedPtr>& rowsets, TabletSchemaSPtr& target,
+            std::unordered_map<int32_t, std::unordered_map<std::string, uint64_t>>*
+                    doc_value_path_total_counts_out = nullptr);
 
     // Used to collect all the subcolumns types of variant column from rowsets
     static TabletSchemaSPtr calculate_variant_extended_schema(

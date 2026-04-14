@@ -19,12 +19,14 @@
 #include <gen_cpp/segment_v2.pb.h>
 
 #include <algorithm>
+#include <deque>
 #include <memory>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "common/cast_set.h"
+#include "common/config.h"
 #include "common/status.h"
 #include "core/block/block.h"
 #include "core/block/column_with_type_and_name.h"
@@ -554,6 +556,59 @@ Status append_sparse_converted_column(const TabletColumn& tablet_column, ColumnW
     return Status::OK();
 }
 } // namespace
+
+// State carried across batched flushes in VariantDocCompactWriter.
+// Defined here (same translation unit as DocSparseSubcolumns) so the header
+// can forward-declare it and hold it via unique_ptr without exposing internals.
+struct VariantDocCompactBatchState {
+    // Pointer-stable storage owning the path strings. StringRef keys in
+    // accumulated_sparse point into elements of this deque, so growth of the
+    // deque never invalidates existing StringRefs.
+    std::deque<std::string> path_arena;
+    DocSparseSubcolumns accumulated_sparse;
+};
+
+// Append one batch of doc_value data into a StringRef-keyed sparse subcolumn
+// accumulator. Keys borrow from `path_arena`. Hot path stays allocation-free
+// for repeat paths.
+//
+// `total_count_lookup` (optional): when non-null, is consulted on the FIRST
+// occurrence of each path to pre-reserve `data.rowids` to its expected final
+// size. This avoids the PaddedPODArray 2x growth waste — typically ~50% of the
+// rowid vector capacity in steady state.
+void append_sparse_subcolumns_with_offset(
+        const ColumnVariant& variant, uint32_t base_rowid_offset,
+        std::deque<std::string>* path_arena, DocSparseSubcolumns* out_sparse,
+        const std::unordered_map<std::string, uint64_t>* total_count_lookup = nullptr) {
+    auto [column_key, column_value] = variant.get_doc_value_data_paths_and_values();
+    const auto& column_offsets = variant.serialized_doc_value_column_offsets();
+    const size_t num_rows = column_offsets.size();
+
+    for (size_t row = 0; row < num_rows; ++row) {
+        const size_t start = column_offsets[row - 1];
+        const size_t end = column_offsets[row];
+        for (size_t i = start; i < end; ++i) {
+            const StringRef path = column_key->get_data_at(i);
+            auto it = out_sparse->find(path);
+            if (it == out_sparse->end()) {
+                path_arena->emplace_back(path.data, path.size);
+                const std::string& owned = path_arena->back();
+                StringRef owned_ref(owned.data(), owned.size());
+                it = out_sparse->try_emplace(owned_ref).first;
+                if (total_count_lookup != nullptr) {
+                    auto count_it = total_count_lookup->find(owned);
+                    if (count_it != total_count_lookup->end() && count_it->second > 0) {
+                        it->second.rowids.reserve(count_it->second);
+                    }
+                }
+            }
+            auto& data = it->second;
+            data.rowids.push_back(cast_set<uint32_t>(row + base_rowid_offset));
+            data.subcolumn.deserialize_from_binary_column(column_value, i);
+            ++data.non_null_count;
+        }
+    }
+}
 
 Status UnifiedSparseColumnWriter::init(const TabletColumn* parent_column, int bucket_num,
                                        int& column_id, const ColumnWriterOptions& base_opts,
@@ -1740,6 +1795,8 @@ VariantDocCompactWriter::VariantDocCompactWriter(const ColumnWriterOptions& opts
     _column = ColumnVariant::create(0, false);
 }
 
+VariantDocCompactWriter::~VariantDocCompactWriter() = default;
+
 Status VariantDocCompactWriter::init() {
     return Status::OK();
 }
@@ -1750,6 +1807,15 @@ Status VariantDocCompactWriter::append_data(const uint8_t** ptr, size_t num_rows
     auto* dst_ptr = assert_cast<ColumnVariant*>(_column.get());
     // TODO: if direct write we could avoid copy
     dst_ptr->insert_range_from(src, column->row_pos, num_rows);
+
+    // Batch flush: when the buffered doc_value column grows past the configured
+    // byte threshold, push the accumulated data through _doc_value_column_writer
+    // and reset _column so its backing ColumnStr memory is released. A threshold
+    // of <=0 disables batching and preserves the legacy single-pass behavior.
+    const int64_t thr = config::variant_doc_compact_batch_flush_bytes;
+    if (thr > 0 && dst_ptr->byte_size() >= static_cast<size_t>(thr)) {
+        RETURN_IF_ERROR(_flush_batch());
+    }
     return Status::OK();
 }
 
@@ -1835,33 +1901,152 @@ Status VariantDocCompactWriter::_write_materialized_subcolumn(
                                         &_subcolumn_writers, rowids);
 }
 
+Status VariantDocCompactWriter::_ensure_doc_value_writer_initialized(
+        const TabletColumn& parent_column) {
+    if (_doc_value_column_writer != nullptr) {
+        return Status::OK();
+    }
+    std::string doc_value_column_path = _tablet_column->path_info_ptr()->get_path();
+    size_t pos = doc_value_column_path.rfind("b");
+    int bucket_value = std::stoi(doc_value_column_path.substr(pos + 1));
+    _doc_value_tablet_column = std::make_unique<TabletColumn>(
+            variant_util::create_doc_value_column(parent_column, bucket_value));
+    // NOTE: the caller (legacy or batched finalize) must call _init_column_meta with
+    // the proper column_id before this method — the meta is already set up there.
+    RETURN_IF_ERROR(ColumnWriter::create_map_writer(_opts, _doc_value_tablet_column.get(),
+                                                    _opts.file_writer, &_doc_value_column_writer));
+    RETURN_IF_ERROR(_doc_value_column_writer->init());
+    return Status::OK();
+}
+
 Status VariantDocCompactWriter::_write_doc_value_column(const TabletColumn& parent_column,
                                                         ColumnVariant* variant_column,
                                                         OlapBlockDataConvertor* converter,
                                                         int column_id, size_t num_rows) {
-    std::string doc_value_column_path = _tablet_column->path_info_ptr()->get_path();
-    size_t pos = doc_value_column_path.rfind("b");
-    int bucket_value = std::stoi(doc_value_column_path.substr(pos + 1));
-    TabletColumn doc_value_column =
-            variant_util::create_doc_value_column(parent_column, bucket_value);
-    _init_column_meta(_opts.meta, column_id, doc_value_column, _opts.compression_type);
-    RETURN_IF_ERROR(ColumnWriter::create_map_writer(_opts, &doc_value_column, _opts.file_writer,
-                                                    &_doc_value_column_writer));
-    RETURN_IF_ERROR(_doc_value_column_writer->init());
-
     (void)converter;
-    auto doc_value_converter = std::make_unique<OlapBlockDataConvertor>();
-    doc_value_converter->add_column_data_convertor(doc_value_column);
-    RETURN_IF_ERROR(doc_value_converter->set_source_content_with_specifid_column(
+    // Install column meta, then create the writer and converter lazily.
+    _init_column_meta(_opts.meta, column_id,
+                      variant_util::create_doc_value_column(
+                              parent_column,
+                              std::stoi(_tablet_column->path_info_ptr()->get_path().substr(
+                                      _tablet_column->path_info_ptr()->get_path().rfind("b") + 1))),
+                      _opts.compression_type);
+    RETURN_IF_ERROR(_ensure_doc_value_writer_initialized(parent_column));
+
+    // Use a local converter for one-shot write: OlapBlockDataConvertor caches
+    // the converted output internally, so sharing one across batches leaks
+    // memory. The converter is cheap to build — we pay one allocation per call.
+    auto local_converter = std::make_unique<OlapBlockDataConvertor>();
+    local_converter->add_column_data_convertor(*_doc_value_tablet_column);
+    RETURN_IF_ERROR(local_converter->set_source_content_with_specifid_column(
             {variant_column->get_doc_value_column(), nullptr, ""}, 0, num_rows, 0));
-    auto [status, column] = doc_value_converter->convert_column_data(0);
+    auto [status, column] = local_converter->convert_column_data(0);
     RETURN_IF_ERROR(status);
     RETURN_IF_ERROR(
             _doc_value_column_writer->append(column->get_nullmap(), column->get_data(), num_rows));
-    doc_value_converter->clear_source_content(0);
+    local_converter->clear_source_content(0);
+    return Status::OK();
+}
+
+Status VariantDocCompactWriter::_flush_batch() {
+    auto* variant_column = assert_cast<ColumnVariant*>(_column.get());
+    const size_t batch_rows = variant_column->size();
+    if (batch_rows == 0) {
+        return Status::OK();
+    }
+
+    const auto& parent_column =
+            _opts.rowset_ctx->tablet_schema->column_by_uid(_tablet_column->parent_unique_id());
+
+    // First batch: install column meta for the bucket and create lazy writer/converter.
+    if (_doc_value_column_writer == nullptr) {
+        // Column meta is owned by _opts.meta and keyed on a column_id chosen here.
+        // For the batched path we always use column_id 0 because VariantDocCompactWriter
+        // is instantiated once per bucket and owns a single meta slot.
+        _init_column_meta(_opts.meta, /*column_id=*/0,
+                          variant_util::create_doc_value_column(
+                                  parent_column,
+                                  std::stoi(_tablet_column->path_info_ptr()->get_path().substr(
+                                          _tablet_column->path_info_ptr()->get_path().rfind("b") +
+                                          1))),
+                          _opts.compression_type);
+        RETURN_IF_ERROR(_ensure_doc_value_writer_initialized(parent_column));
+    }
+    if (_batch_state == nullptr) {
+        _batch_state = std::make_unique<VariantDocCompactBatchState>();
+    }
+    if (_bucket_path_expected_counts == nullptr) {
+        // Build once on first flush: pull the tablet-wide doc_value path counts
+        // from RowsetWriterContext, filter to paths that hash into this bucket.
+        _bucket_path_expected_counts =
+                std::make_unique<std::unordered_map<std::string, uint64_t>>();
+        if (_opts.rowset_ctx != nullptr) {
+            const int parent_uid = _tablet_column->parent_unique_id();
+            auto uid_it =
+                    _opts.rowset_ctx->variant_doc_value_path_total_counts.find(parent_uid);
+            if (uid_it != _opts.rowset_ctx->variant_doc_value_path_total_counts.end()) {
+                const std::string bucket_path = _tablet_column->path_info_ptr()->get_path();
+                const size_t bucket_pos = bucket_path.rfind('b');
+                if (bucket_pos != std::string::npos) {
+                    const uint32_t bucket_value = static_cast<uint32_t>(
+                            std::stoul(bucket_path.substr(bucket_pos + 1)));
+                    const int total_buckets =
+                            std::max(1, parent_column.variant_doc_hash_shard_count());
+                    for (const auto& [path, cnt] : uid_it->second) {
+                        const StringRef path_ref {path.data(), path.size()};
+                        if (variant_util::variant_binary_shard_of(
+                                    path_ref, total_buckets) == bucket_value) {
+                            (*_bucket_path_expected_counts)[path] = cnt;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // (1) Append this batch's doc_value data to the persistent writer using a
+    //     throwaway converter. A shared converter would retain its converted
+    //     output buffer across batches and negate the flush savings.
+    {
+        auto local_converter = std::make_unique<OlapBlockDataConvertor>();
+        local_converter->add_column_data_convertor(*_doc_value_tablet_column);
+        RETURN_IF_ERROR(local_converter->set_source_content_with_specifid_column(
+                {variant_column->get_doc_value_column(), nullptr, ""}, 0, batch_rows, 0));
+        auto [status, column] = local_converter->convert_column_data(0);
+        RETURN_IF_ERROR(status);
+        RETURN_IF_ERROR(_doc_value_column_writer->append(column->get_nullmap(),
+                                                         column->get_data(), batch_rows));
+        local_converter->clear_source_content(0);
+    }
+
+    // (2) Deserialize the (path, value) pairs into the sparse accumulator,
+    //     shifting rowids by _total_rows_flushed so the global map stays consistent.
+    append_sparse_subcolumns_with_offset(*variant_column,
+                                         cast_set<uint32_t>(_total_rows_flushed),
+                                         &_batch_state->path_arena,
+                                         &_batch_state->accumulated_sparse,
+                                         _bucket_path_expected_counts.get());
+
+    // (3) Drop the raw ColumnStr memory. This is the whole point of batching.
+    _total_rows_flushed += batch_rows;
+    _column = ColumnVariant::create(0, true);
     return Status::OK();
 }
 Status VariantDocCompactWriter::finalize() {
+    // If batching already ran for this writer, stay on the batched path so the
+    // data already appended to _doc_value_column_writer is not lost. Otherwise
+    // fall back to the original single-pass pipeline.
+    if (_total_rows_flushed > 0) {
+        // Flush any remaining rows accumulated after the last threshold crossing.
+        if (_column->size() > 0) {
+            RETURN_IF_ERROR(_flush_batch());
+        }
+        return _finalize_batched();
+    }
+    return _finalize_legacy();
+}
+
+Status VariantDocCompactWriter::_finalize_legacy() {
     auto* variant_column = assert_cast<ColumnVariant*>(_column.get());
 
     const auto& parent_column =
@@ -1912,8 +2097,69 @@ Status VariantDocCompactWriter::finalize() {
     return Status::OK();
 }
 
+Status VariantDocCompactWriter::_finalize_batched() {
+    DCHECK(_batch_state != nullptr);
+    DCHECK(_doc_value_column_writer != nullptr);
+
+    const auto& parent_column =
+            _opts.rowset_ctx->tablet_schema->column_by_uid(_tablet_column->parent_unique_id());
+
+    // (a) Finish the doc_value column writer — all batches have already been appended.
+    RETURN_IF_ERROR(finish_and_write_column_writer(_doc_value_column_writer.get()));
+
+    // (b) Write each path's accumulated sparse subcolumn. The rowids are relative to
+    //     _total_rows_flushed, identical to what a single-pass sparse build would yield.
+    _subcolumn_writers.clear();
+    _subcolumns_indexes.clear();
+    _subcolumn_opts.clear();
+
+    auto converter = std::make_unique<OlapBlockDataConvertor>();
+    int column_id = 0;
+    for (auto& [path, sparse] : _batch_state->accumulated_sparse) {
+        const size_t prev_writer_count = _subcolumn_writers.size();
+        RETURN_IF_ERROR(_write_materialized_subcolumn(
+                parent_column, std::string_view(path), sparse.subcolumn, _total_rows_flushed,
+                converter.get(), column_id, &sparse.rowids));
+        if (_subcolumn_writers.size() > prev_writer_count) {
+            RETURN_IF_ERROR(finish_and_write_column_writer(_subcolumn_writers.back().get()));
+        }
+        // Release the per-path typed subcolumn buffer now that it is on disk.
+        ColumnVariant::Subcolumn released {0, true, false};
+        std::swap(sparse.subcolumn, released);
+        std::vector<uint32_t>().swap(sparse.rowids);
+    }
+    // Rewrite the doc_value bucket's column_id to the final slot number.
+    _opts.meta->set_column_id(column_id);
+
+    // (c) Meta + variant_statistics. total rows include every batch flushed.
+    _opts.meta->set_num_rows(_total_rows_flushed);
+    auto* stats = _opts.meta->mutable_variant_statistics();
+    auto* doc_value_column_non_null_size = stats->mutable_doc_value_column_non_null_size();
+    for (const auto& [path, sparse] : _batch_state->accumulated_sparse) {
+        (*doc_value_column_non_null_size)[std::string(path.data, path.size)] =
+                sparse.non_null_count;
+    }
+
+    _batch_state.reset();
+    _column = ColumnVariant::create(0, true);
+    _data_written = true;
+    _is_finalized = true;
+    return Status::OK();
+}
+
 uint64_t VariantDocCompactWriter::estimate_buffer_size() {
-    return _column->byte_size();
+    uint64_t total = _column->byte_size();
+    if (_batch_state != nullptr) {
+        for (const auto& [path, sparse] : _batch_state->accumulated_sparse) {
+            total += path.size;
+            total += sparse.subcolumn.byteSize();
+            total += sparse.rowids.capacity() * sizeof(uint32_t);
+        }
+        for (const auto& p : _batch_state->path_arena) {
+            total += p.capacity();
+        }
+    }
+    return total;
 }
 
 } // namespace doris::segment_v2

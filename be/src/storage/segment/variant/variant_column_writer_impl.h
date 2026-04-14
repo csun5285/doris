@@ -43,6 +43,7 @@ namespace segment_v2 {
 
 class ColumnWriter;
 class ScalarColumnWriter;
+struct VariantDocCompactBatchState;
 
 // Write already serialized binary data of variant columns into storage.
 class VariantBinaryWriter {
@@ -226,7 +227,7 @@ public:
     explicit VariantDocCompactWriter(const ColumnWriterOptions& opts, const TabletColumn* column,
                                      std::unique_ptr<StorageField> field);
 
-    ~VariantDocCompactWriter() override = default;
+    ~VariantDocCompactWriter() override;
 
     Status init() override;
     bool is_finalized() const { return _is_finalized; }
@@ -277,6 +278,12 @@ private:
                                    OlapBlockDataConvertor* converter, int column_id,
                                    size_t num_rows);
 
+    // Batch flush helpers. See variant_column_writer_impl.cpp for details.
+    Status _flush_batch();
+    Status _ensure_doc_value_writer_initialized(const TabletColumn& parent_column);
+    Status _finalize_legacy();
+    Status _finalize_batched();
+
     ordinal_t _next_rowid = 0;
     MutableColumnPtr _column;
     const TabletColumn* _tablet_column = nullptr;
@@ -287,6 +294,19 @@ private:
     std::vector<std::unique_ptr<ColumnWriter>> _subcolumn_writers;
     std::vector<TabletIndexes> _subcolumns_indexes;
     std::vector<ColumnWriterOptions> _subcolumn_opts;
+
+    // Batch flush state. _batch_state is lazily allocated on the first flush,
+    // _total_rows_flushed counts rows already appended to _doc_value_column_writer
+    // across batches. Both are non-zero only when the batched path is active.
+    size_t _total_rows_flushed = 0;
+    std::unique_ptr<VariantDocCompactBatchState> _batch_state;
+    std::unique_ptr<TabletColumn> _doc_value_tablet_column;
+
+    // Per-path expected non-null count for paths that hash into this writer's
+    // bucket. Built once on the first _flush_batch call by filtering the
+    // tablet-wide map plumbed via RowsetWriterContext. Used by
+    // append_sparse_subcolumns_with_offset to pre-reserve rowid vectors.
+    std::unique_ptr<std::unordered_map<std::string, uint64_t>> _bucket_path_expected_counts;
 };
 
 void _init_column_meta(ColumnMetaPB* meta, uint32_t column_id, const TabletColumn& column,

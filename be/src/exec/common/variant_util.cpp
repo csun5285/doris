@@ -873,10 +873,25 @@ Status VariantCompactionUtil::aggregate_variant_extended_info(
             CHECK(column_reader->get_meta_type() == FieldType::OLAP_FIELD_TYPE_VARIANT);
             auto* variant_column_reader =
                     assert_cast<segment_v2::VariantColumnReader*>(column_reader.get());
-            // load external meta before getting stats
-            RETURN_IF_ERROR(variant_column_reader->load_external_meta_once());
             const auto* source_stats = variant_column_reader->get_stats();
             CHECK(source_stats);
+
+            // For pure doc mode, only need to detect has_doc_value_segments from
+            // stats (available from init, no external meta load needed). Also
+            // accumulate per-path counts so VariantDocCompactWriter can pre-reserve
+            // its sparse-subcolumn rowid vectors instead of paying PaddedPODArray
+            // 2x growth waste.
+            if (column->variant_enable_doc_mode() &&
+                source_stats->has_doc_value_column_non_null_size()) {
+                auto& info = (*uid_to_variant_extended_info)[column->unique_id()];
+                for (const auto& [path, cnt] : source_stats->doc_value_column_non_null_size) {
+                    info.doc_value_path_total_counts[path] += cnt;
+                }
+                continue;
+            }
+
+            // load external meta for subcolumn info (paths, types, etc.)
+            RETURN_IF_ERROR(variant_column_reader->load_external_meta_once());
 
             // 1. agg path -> stats
             for (const auto& [path, size] : source_stats->sparse_column_non_null_size) {
@@ -1207,7 +1222,9 @@ void VariantCompactionUtil::get_compaction_subcolumns_from_data_types(
 // 5. set the path set info for each unique id
 // 6. return the output schema
 Status VariantCompactionUtil::get_extended_compaction_schema(
-        const std::vector<RowsetSharedPtr>& rowsets, TabletSchemaSPtr& target) {
+        const std::vector<RowsetSharedPtr>& rowsets, TabletSchemaSPtr& target,
+        std::unordered_map<int32_t, std::unordered_map<std::string, uint64_t>>*
+                doc_value_path_total_counts_out) {
     std::unordered_map<int32_t, VariantExtendedInfo> uid_to_variant_extended_info;
     const bool has_extendable_variant =
             std::ranges::any_of(target->columns(), [](const TabletColumnPtr& column) {
@@ -1306,6 +1323,19 @@ Status VariantCompactionUtil::get_extended_compaction_schema(
     target = output_schema;
     // used to merge & filter path to sparse column during reading in compaction
     target->set_path_set_info(std::move(uid_to_paths_set_info));
+
+    // Hand the per-uid doc-value path counts back to the caller. They were
+    // populated in aggregate_variant_extended_info for variant columns in pure
+    // doc mode and let the writer pre-reserve its sparse accumulators.
+    if (doc_value_path_total_counts_out != nullptr) {
+        for (auto& [uid, info] : uid_to_variant_extended_info) {
+            if (!info.doc_value_path_total_counts.empty()) {
+                (*doc_value_path_total_counts_out)[uid] =
+                        std::move(info.doc_value_path_total_counts);
+            }
+        }
+    }
+
     VLOG_DEBUG << "dump schema " << target->dump_full_schema();
     return Status::OK();
 }
