@@ -30,6 +30,7 @@
 #include "core/arena.h"
 #include "core/data_type/data_type.h"
 #include "core/data_type/define_primitive_type.h"
+#include "core/string_ref.h"
 #include "io/fs/file_reader_writer_fwd.h"
 #include "storage/field.h"
 #include "storage/metadata_adder.h"
@@ -148,10 +149,20 @@ private:
 
     void _update_page_zonemap(const ValType& min_value, const ValType& max_value);
 
+    // Materialize the running CppType min/max into _page_zone_map.{min,max}_value.
+    // Called at flush() time, so the per-row hot path never constructs a Field.
+    void _materialize_page_minmax();
+
     DataTypePtr _data_type;
     // memory will be managed by Arena
     ZoneMap _page_zone_map;
     ZoneMap _segment_zone_map;
+    // Running min/max for the current page kept as raw ValType (avoids per-row
+    // Field temporaries). For string types, the bytes are copied into _arena so
+    // the StringRef stays valid across add_values() calls.
+    ValType _page_min {};
+    ValType _page_max {};
+    bool _page_has_minmax = false;
     // TODO(zc): we should replace this arena later, we only allocate min/max
     // for field. But Arena allocate 4KB least, it will a waste for most cases.
     Arena _arena;

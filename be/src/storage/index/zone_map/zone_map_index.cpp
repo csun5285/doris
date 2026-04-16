@@ -122,15 +122,45 @@ TypedZoneMapIndexWriter<Type>::TypedZoneMapIndexWriter(DataTypePtr&& data_type)
 template <PrimitiveType Type>
 void TypedZoneMapIndexWriter<Type>::_update_page_zonemap(const ValType& min_value,
                                                          const ValType& max_value) {
-    auto min_field = doris::Field::create_field_from_olap_value<Type>(min_value);
-    auto max_field = doris::Field::create_field_from_olap_value<Type>(max_value);
-    if (!_page_zone_map.has_not_null || min_field < _page_zone_map.min_value) {
-        _page_zone_map.min_value = std::move(min_field);
+    // Hot path: compare/store using raw CppType to avoid Field temporaries.
+    // For string types, truncate to MAX_ZONE_MAP_INDEX_SIZE (matching the old
+    // Field-based path) and copy bytes into the arena so the StringRef stays
+    // valid across add_values() calls.
+    if constexpr (is_string_type(Type)) {
+        constexpr size_t kMaxZoneMapSize = MAX_ZONE_MAP_INDEX_SIZE;
+        auto truncate_and_store = [&](const StringRef& src) {
+            auto sz = std::min(src.size, kMaxZoneMapSize);
+            char* buf = _arena.alloc(sz);
+            memcpy(buf, src.data, sz);
+            return StringRef(buf, sz);
+        };
+        StringRef min_t(min_value.data, std::min(min_value.size, kMaxZoneMapSize));
+        StringRef max_t(max_value.data, std::min(max_value.size, kMaxZoneMapSize));
+        if (!_page_has_minmax || min_t < _page_min) {
+            _page_min = truncate_and_store(min_value);
+        }
+        if (!_page_has_minmax || _page_max < max_t) {
+            _page_max = truncate_and_store(max_value);
+        }
+    } else {
+        if (!_page_has_minmax || min_value < _page_min) {
+            _page_min = min_value;
+        }
+        if (!_page_has_minmax || max_value > _page_max) {
+            _page_max = max_value;
+        }
     }
-    if (!_page_zone_map.has_not_null || max_field > _page_zone_map.max_value) {
-        _page_zone_map.max_value = std::move(max_field);
-    }
+    _page_has_minmax = true;
     _page_zone_map.has_not_null = true;
+}
+
+template <PrimitiveType Type>
+void TypedZoneMapIndexWriter<Type>::_materialize_page_minmax() {
+    if (!_page_has_minmax) {
+        return;
+    }
+    _page_zone_map.min_value = doris::Field::create_field_from_olap_value<Type>(_page_min);
+    _page_zone_map.max_value = doris::Field::create_field_from_olap_value<Type>(_page_max);
 }
 
 template <PrimitiveType Type>
@@ -195,14 +225,20 @@ void TypedZoneMapIndexWriter<Type>::invalid_page_zone_map() {
 
 template <PrimitiveType Type>
 Status TypedZoneMapIndexWriter<Type>::flush() {
+    // Materialize the running CppType min/max into the Field-typed page zone map
+    // before merging into the segment zone map / serializing to proto.
+    _materialize_page_minmax();
+
     // Update segment zone map.
-    if (!_segment_zone_map.has_not_null ||
-        _segment_zone_map.min_value.get<Type>() > _page_zone_map.min_value.get<Type>()) {
-        _segment_zone_map.min_value = _page_zone_map.min_value;
-    }
-    if (!_segment_zone_map.has_not_null ||
-        _segment_zone_map.max_value.get<Type>() < _page_zone_map.max_value.get<Type>()) {
-        _segment_zone_map.max_value = _page_zone_map.max_value;
+    if (_page_has_minmax) {
+        if (!_segment_zone_map.has_not_null ||
+            _segment_zone_map.min_value.get<Type>() > _page_zone_map.min_value.get<Type>()) {
+            _segment_zone_map.min_value = _page_zone_map.min_value;
+        }
+        if (!_segment_zone_map.has_not_null ||
+            _segment_zone_map.max_value.get<Type>() < _page_zone_map.max_value.get<Type>()) {
+            _segment_zone_map.max_value = _page_zone_map.max_value;
+        }
     }
     if (_page_zone_map.has_null) {
         _segment_zone_map.has_null = true;
@@ -224,6 +260,10 @@ Status TypedZoneMapIndexWriter<Type>::flush() {
     modify_index_before_flush(_page_zone_map);
     _page_zone_map.to_proto(&zone_map_pb, _data_type);
     _reset_zone_map(&_page_zone_map);
+    _page_has_minmax = false;
+    _page_min = ValType();
+    _page_max = ValType();
+    _arena.clear();
 
     std::string serialized_zone_map;
     bool ret = zone_map_pb.SerializeToString(&serialized_zone_map);
