@@ -73,9 +73,9 @@ public:
 
     OlapScanner(pipeline::ScanLocalStateBase* parent, Params&& params);
 
-    Status prepare() override;
+    Status _prepare_impl() override;
 
-    Status open(RuntimeState* state) override;
+    Status _open_impl(RuntimeState* state) override;
 
     Status close(RuntimeState* state) override;
 

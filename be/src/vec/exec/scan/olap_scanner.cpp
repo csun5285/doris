@@ -127,7 +127,7 @@ static std::string read_columns_to_string(TabletSchemaSPtr tablet_schema,
     return read_columns_string;
 }
 
-Status OlapScanner::prepare() {
+Status OlapScanner::_prepare_impl() {
     auto* local_state = static_cast<pipeline::OlapScanLocalState*>(_local_state);
     auto& tablet = _tablet_reader_params.tablet;
     auto& tablet_schema = _tablet_reader_params.tablet_schema;
@@ -303,8 +303,8 @@ Status OlapScanner::prepare() {
     return Status::OK();
 }
 
-Status OlapScanner::open(RuntimeState* state) {
-    RETURN_IF_ERROR(Scanner::open(state));
+Status OlapScanner::_open_impl(RuntimeState* state) {
+    RETURN_IF_ERROR(Scanner::_open_impl(state));
     SCOPED_TIMER(_local_state->cast<pipeline::OlapScanLocalState>()._reader_init_timer);
 
     auto res = _tablet_reader->init(_tablet_reader_params);
