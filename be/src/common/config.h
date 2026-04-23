@@ -387,6 +387,9 @@ DECLARE_mInt32(exchg_buffer_queue_capacity_factor);
 // memory_limitation_per_thread_for_schema_change_bytes unit bytes
 DECLARE_mInt64(memory_limitation_per_thread_for_schema_change_bytes);
 
+// batch size used by schema change when reading source rowsets
+DECLARE_mInt32(alter_table_batch_size);
+
 // all cache prune interval, used by GC and periodic thread.
 DECLARE_mInt32(cache_prune_interval_sec);
 DECLARE_mInt32(cache_periodic_prune_stale_sweep_sec);

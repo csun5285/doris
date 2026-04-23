@@ -342,6 +342,9 @@ DEFINE_mInt32(exchg_buffer_queue_capacity_factor, "64");
 // memory_limitation_per_thread_for_schema_change_bytes unit bytes
 DEFINE_mInt64(memory_limitation_per_thread_for_schema_change_bytes, "2147483648");
 
+// batch size used by schema change when reading source rowsets
+DEFINE_mInt32(alter_table_batch_size, "4096");
+
 DEFINE_mInt32(cache_prune_interval_sec, "10");
 DEFINE_mInt32(cache_periodic_prune_stale_sweep_sec, "60");
 // the clean interval of tablet lookup cache

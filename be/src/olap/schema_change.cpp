@@ -95,14 +95,13 @@ class CollectionValue;
 
 using namespace ErrorCode;
 
-constexpr int ALTER_TABLE_BATCH_SIZE = 4064;
-
 class MultiBlockMerger {
 public:
     MultiBlockMerger(BaseTabletSPtr tablet) : _tablet(tablet), _cmp(*tablet) {}
 
     Status merge(const std::vector<std::unique_ptr<vectorized::Block>>& blocks,
                  RowsetWriter* rowset_writer, uint64_t* merged_rows) {
+        const int batch_size = config::alter_table_batch_size;
         int rows = 0;
         for (const auto& block : blocks) {
             rows += block->rows();
@@ -189,7 +188,7 @@ public:
                         agg_functions[j - key_number]->reset(agg_places[j - key_number]);
                     }
 
-                    if (i == rows - 1 || finalized_block.rows() == ALTER_TABLE_BATCH_SIZE) {
+                    if (i == rows - 1 || finalized_block.rows() == batch_size) {
                         *merged_rows -= finalized_block.rows();
                         RETURN_IF_ERROR(rowset_writer->add_block(&finalized_block));
                         finalized_block.clear_column_data();
@@ -227,8 +226,8 @@ public:
             rows = cast_set<int>(pushed_row_refs.size());
             *merged_rows -= rows;
 
-            for (int i = 0; i < rows; i += ALTER_TABLE_BATCH_SIZE) {
-                int limit = std::min(ALTER_TABLE_BATCH_SIZE, rows - i);
+            for (int i = 0; i < rows; i += batch_size) {
+                int limit = std::min(batch_size, rows - i);
 
                 for (int idx = 0; idx < columns; idx++) {
                     auto column = finalized_block.get_by_position(idx).column->assume_mutable();
@@ -1032,7 +1031,7 @@ Status SchemaChangeJob::_do_process_alter_tablet(const TAlterTabletReqV2& reques
             reader_context.return_columns = &return_columns;
             reader_context.sequence_id_idx = reader_context.tablet_schema->sequence_col_idx();
             reader_context.is_unique = _base_tablet->keys_type() == UNIQUE_KEYS;
-            reader_context.batch_size = ALTER_TABLE_BATCH_SIZE;
+            reader_context.batch_size = config::alter_table_batch_size;
             reader_context.delete_bitmap = _base_tablet->tablet_meta()->delete_bitmap_ptr();
             reader_context.version = Version(0, end_version);
             if (!_base_tablet_schema->cluster_key_uids().empty()) {
