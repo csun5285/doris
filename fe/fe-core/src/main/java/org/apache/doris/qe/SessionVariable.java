@@ -3714,11 +3714,13 @@ public class SessionVariable implements Serializable, Writable {
         this.defaultVariantDocHashShardCount = random.nextInt(5);
         boolean zeroOrOne = random.nextBoolean();
         this.defaultVariantDocMaterializationMinRows = zeroOrOne ? 0 : random.nextInt(20);
+        this.defaultVariantDocHashShardCount = random.nextInt(5);
         if (this.defaultVariantEnableDocMode) {
-            this.defaultVariantMaxSubcolumnsCount = 0;
+            this.defaultVariantMaxSubcolumnsCount = random.nextInt(5);
             this.defaultEnableTypedPathsToSparse = false;
         } else {
             this.defaultVariantDocMaterializationMinRows = 0L;
+            this.defaultVariantDocHashShardCount = 0;
             this.defaultVariantDocHashShardCount = 0;
         }
         int randomInt = random.nextInt(4);
