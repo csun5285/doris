@@ -2843,50 +2843,56 @@ void ColumnVariant::convert_subcolumns_to_doc_value() {
     if (subcolumns.size() <= 1) {
         return; // already root-only, nothing to convert
     }
-    if (num_rows == 0) {
-        return; // empty column, nothing to convert
-    }
 
-    // Finalize all subcolumns first
-    for (auto& entry : subcolumns) {
-        entry->data.finalize();
-    }
-
-    // Build new doc_value_column: serialize all subcolumn data into ColumnMap<String, String>
-    auto new_doc_value = create_binary_column_fn();
-    auto* map_column = assert_cast<ColumnMap*>(new_doc_value.get());
-    auto& map_keys = assert_cast<ColumnString&>(map_column->get_keys());
-    auto& map_values = assert_cast<ColumnString&>(map_column->get_values());
-    auto& map_offsets = map_column->get_offsets();
-
-    // subcolumn-mode variant should not have doc_value data
-    DCHECK_EQ(serialized_doc_value_column_offsets()[num_rows - 1], 0)
-            << "subcolumn variant should not have doc_value data when converting to doc_value";
-
-    for (size_t row = 0; row < num_rows; ++row) {
-        // Serialize subcolumn values for this row
-        for (const auto& entry : variant_util::get_sorted_subcolumns(subcolumns)) {
-            if (entry->path.empty()) continue;
-            const_cast<Subcolumn&>(entry->data)
-                    .serialize_to_binary_column(&map_keys, entry->path.get_path(), &map_values,
-                                                row);
+    // num_rows == 0 still needs to collapse the structure to root-only so
+    // callers (e.g. _insert_range_from_doc_mode scenario 4) don't recurse
+    // forever when they re-check dst_has_subcolumns after this call.
+    if (num_rows > 0) {
+        // Finalize all subcolumns first
+        for (auto& entry : subcolumns) {
+            entry->data.finalize();
         }
 
-        map_offsets.push_back(map_keys.size());
-    }
+        // Build new doc_value_column: serialize all subcolumn data into
+        // ColumnMap<String, String>
+        auto new_doc_value = create_binary_column_fn();
+        auto* map_column = assert_cast<ColumnMap*>(new_doc_value.get());
+        auto& map_keys = assert_cast<ColumnString&>(map_column->get_keys());
+        auto& map_values = assert_cast<ColumnString&>(map_column->get_values());
+        auto& map_offsets = map_column->get_offsets();
 
-    // Replace doc_value_column
-    serialized_doc_value_column = std::move(new_doc_value);
+        // subcolumn-mode variant should not have doc_value data
+        DCHECK_EQ(serialized_doc_value_column_offsets()[num_rows - 1], 0)
+                << "subcolumn variant should not have doc_value data when converting to doc_value";
+
+        // Sort once: O(S log S) outside the row loop so the total cost is
+        // O(S log S + N*S) instead of O(N * S log S).
+        const auto sorted = variant_util::get_sorted_subcolumns(subcolumns);
+
+        for (size_t row = 0; row < num_rows; ++row) {
+            for (const auto& entry : sorted) {
+                if (entry->path.empty()) continue;
+                const_cast<Subcolumn&>(entry->data)
+                        .serialize_to_binary_column(&map_keys, entry->path.get_path(), &map_values,
+                                                    row);
+            }
+
+            map_offsets.push_back(map_keys.size());
+        }
+
+        // Replace doc_value_column
+        serialized_doc_value_column = std::move(new_doc_value);
+
+        // Verify sparse column has no data
+        DCHECK_EQ(serialized_sparse_column_offsets()[num_rows - 1], 0)
+                << "sparse column should be empty when converting to doc_value";
+    }
 
     // Clear subcolumns to root-only: preserve original root data
     Subcolumn root_data = std::move(subcolumns.get_mutable_root()->data);
     subcolumns = Subcolumns();
     _prev_positions.clear(); // Invalidate cache to prevent dangling pointers
     subcolumns.create_root(std::move(root_data));
-
-    // Verify sparse column has no data
-    DCHECK_EQ(serialized_sparse_column_offsets()[num_rows - 1], 0)
-            << "sparse column should be empty when converting to doc_value";
 
     ENABLE_CHECK_CONSISTENCY(this);
 }

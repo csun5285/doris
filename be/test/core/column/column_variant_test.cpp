@@ -4112,4 +4112,44 @@ TEST_F(ColumnVariantTest, insert_range_from_cross_mode_empty_dst_accepts_doc_val
     EXPECT_EQ(paths1[5], "x6");
 }
 
+// Regression: dst has subcolumns structure but 0 rows, src is doc_value-only.
+// Before the fix, convert_subcolumns_to_doc_value() returned early when
+// num_rows == 0 without collapsing the subcolumn structure, causing
+// _insert_range_from_doc_mode scenario 4 to recurse forever.
+TEST_F(ColumnVariantTest, insert_range_from_cross_mode_dst_subcolumns_zero_rows) {
+    auto dst = create_doc_mode_subcolumn_variant(2);
+    EXPECT_GT(dst->get_subcolumns().size(), 1);
+    dst->pop_back(dst->size());
+    EXPECT_EQ(dst->size(), 0);
+    EXPECT_GT(dst->get_subcolumns().size(), 1);
+
+    auto src = create_doc_mode_variant({R"({"x1":1,"x2":2})", R"({"x1":3,"x2":4})"}, true);
+    EXPECT_TRUE(src->is_doc_mode());
+
+    dst->insert_range_from(*src, 0, 2);
+    EXPECT_EQ(dst->size(), 2);
+    EXPECT_EQ(dst->get_subcolumns().size(), 1);
+    EXPECT_TRUE(dst->is_doc_mode());
+
+    auto paths0 = get_doc_value_paths_for_row(*dst, 0);
+    EXPECT_EQ(paths0.size(), 2);
+    EXPECT_EQ(paths0[0], "x1");
+}
+
+// Regression: convert_subcolumns_to_doc_value on a column with subcolumns but
+// num_rows == 0 must collapse to root-only so subsequent doc-mode operations
+// don't see stale subcolumn structure.
+TEST_F(ColumnVariantTest, convert_subcolumns_to_doc_value_zero_rows_collapses_structure) {
+    auto col = create_doc_mode_subcolumn_variant(3);
+    EXPECT_GT(col->get_subcolumns().size(), 1);
+    col->pop_back(col->size());
+    EXPECT_EQ(col->size(), 0);
+    EXPECT_GT(col->get_subcolumns().size(), 1);
+
+    col->convert_subcolumns_to_doc_value();
+
+    EXPECT_EQ(col->size(), 0);
+    EXPECT_EQ(col->get_subcolumns().size(), 1);
+}
+
 } // namespace doris
