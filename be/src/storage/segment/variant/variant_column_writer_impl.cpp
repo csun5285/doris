@@ -2029,20 +2029,27 @@ Status VariantDocCompactWriter::_flush_batch() {
         }
     }
 
-    // (1) Append this batch's doc_value data to the persistent writer using a
-    //     throwaway converter. A shared converter would retain its converted
-    //     output buffer across batches and negate the flush savings.
+    // (1) Append this batch's doc_value data to the persistent writer.
+    //     The converter is intentionally held across batches: OlapColumnData-
+    //     ConvertorMap accumulates `_base_offset` per convert_to_olap() call so
+    //     that the offsets handed to _doc_value_column_writer (a single
+    //     continuous offset stream) stay monotonically increasing. Recreating
+    //     the converter every batch would restart `_base_offset` at 0 and
+    //     produce non-monotonic offsets on disk, tripping the read-side
+    //     `next_storage_offset >= first_storage_offset` DCHECK.
+    if (_doc_value_local_converter == nullptr) {
+        _doc_value_local_converter = std::make_unique<OlapBlockDataConvertor>();
+        _doc_value_local_converter->add_column_data_convertor(*_doc_value_tablet_column);
+    }
+    RETURN_IF_ERROR(_doc_value_local_converter->set_source_content_with_specifid_column(
+            {variant_column->get_doc_value_column(), nullptr, ""}, 0, batch_rows, 0));
     {
-        auto local_converter = std::make_unique<OlapBlockDataConvertor>();
-        local_converter->add_column_data_convertor(*_doc_value_tablet_column);
-        RETURN_IF_ERROR(local_converter->set_source_content_with_specifid_column(
-                {variant_column->get_doc_value_column(), nullptr, ""}, 0, batch_rows, 0));
-        auto [status, column] = local_converter->convert_column_data(0);
+        auto [status, column] = _doc_value_local_converter->convert_column_data(0);
         RETURN_IF_ERROR(status);
         RETURN_IF_ERROR(_doc_value_column_writer->append(column->get_nullmap(), column->get_data(),
                                                          batch_rows));
-        local_converter->clear_source_content(0);
     }
+    _doc_value_local_converter->clear_source_content(0);
 
     // (2) Deserialize the (path, value) pairs into the sparse accumulator,
     //     shifting rowids by _total_rows_flushed so the global map stays consistent.

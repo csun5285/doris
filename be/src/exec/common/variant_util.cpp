@@ -1634,12 +1634,6 @@ TabletSchemaSPtr VariantCompactionUtil::calculate_variant_extended_schema(
                 if (!column->is_variant_type()) {
                     continue;
                 }
-                // Pure doc-mode columns never materialize subcolumns, so there
-                // are no extra columns to contribute to the extended schema.
-                // Skip to avoid external meta loading per source segment.
-                if (column->variant_enable_doc_mode()) {
-                    continue;
-                }
                 std::shared_ptr<ColumnReader> column_reader;
                 OlapReaderStatistics stats;
                 st = segment->get_column_reader(column->unique_id(), &column_reader, &stats);

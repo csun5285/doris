@@ -311,6 +311,14 @@ private:
     // first _flush_batch via the writer's bucket_idx. Used by
     // append_sparse_subcolumns_with_offset to pre-reserve rowid vectors.
     const std::unordered_map<std::string, uint64_t>* _bucket_path_expected_counts = nullptr;
+
+    // Persistent converter reused across _flush_batch calls. Must be persistent
+    // because OlapColumnDataConvertorMap accumulates `_base_offset` across
+    // convert_to_olap() calls so that successive batches produce monotonically
+    // increasing offsets that match what _doc_value_column_writer (a single
+    // continuous offset stream) expects. A fresh-per-batch converter would
+    // restart `_base_offset` from 0, corrupting the on-disk offsets.
+    std::unique_ptr<OlapBlockDataConvertor> _doc_value_local_converter;
 };
 
 void _init_column_meta(ColumnMetaPB* meta, uint32_t column_id, const TabletColumn& column,
