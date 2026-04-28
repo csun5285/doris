@@ -410,6 +410,96 @@ TEST_F(VariantDocCompactWriterTest, BatchedPath_TailFlushOnFinalize) {
     EXPECT_EQ(_footer->columns(0).num_rows(), 32);
 }
 
+// Regression: VariantDocCompactWriter::_flush_batch used to construct a
+// throwaway OlapBlockDataConvertor every call. OlapColumnDataConvertorMap
+// keeps a cumulative `_base_offset` across convert_to_olap() calls so each
+// successive convert produces monotonically increasing offsets within one
+// continuous offset stream. A fresh-per-batch converter restarts
+// `_base_offset` at 0, while _doc_value_column_writer (a single
+// MapColumnWriter -> OffsetColumnWriter) appends each batch's offsets verbatim
+// into one stream. The on-disk sequence becomes non-monotonic and trips the
+// read-side `next_storage_offset >= first_storage_offset` DCHECK in
+// OffsetFileColumnIterator::_calculate_offsets.
+//
+// Force ≥ 2 flushes by setting a tiny threshold, finalize, reopen the
+// segment, then read the doc-value Map column back. With the bug present the
+// read either aborts (debug build) or returns garbled offsets (release
+// build); with the fix every row reads back monotonically.
+TEST_F(VariantDocCompactWriterTest, BatchedPath_DocValueOffsetsMonotonicAcrossBatches) {
+    config::variant_doc_compact_batch_flush_bytes = 64;
+    ASSERT_TRUE(configure(/*bucket_idx=*/0).ok());
+
+    constexpr int kBatchCount = 4;
+    constexpr int kRowsPerBatch = 10;
+    constexpr int kFlatKeys = 3;
+    constexpr int kObjChildren = 0; // keep keys-per-row deterministic
+    int seed = 0;
+    for (int b = 0; b < kBatchCount; ++b) {
+        std::vector<std::string> jsons;
+        jsons.reserve(kRowsPerBatch);
+        for (int i = 0; i < kRowsPerBatch; ++i) {
+            jsons.push_back(generate_json(kFlatKeys, ++seed, kObjChildren));
+        }
+        auto variant = make_doc_mode_variant(jsons);
+        ASSERT_TRUE(feed(*variant, 0, kRowsPerBatch).ok());
+    }
+
+    ASSERT_TRUE(finish_and_flush().ok());
+    ASSERT_TRUE(_file_writer->close().ok());
+    _file_writer.reset();
+
+    constexpr size_t kTotalRows = static_cast<size_t>(kBatchCount * kRowsPerBatch);
+    const auto& bucket_meta = _footer->columns(0);
+    ASSERT_EQ(bucket_meta.num_rows(), kTotalRows);
+
+    // Reopen the segment file and build a ColumnReader for the doc-value
+    // Map bucket directly (no Segment/VariantColumnReader needed).
+    io::FileReaderSPtr file_reader;
+    ASSERT_TRUE(io::global_local_filesystem()->open_file(_file_path, &file_reader).ok());
+
+    ColumnReaderOptions reader_opts;
+    reader_opts.kept_in_memory = false;
+    reader_opts.tablet_schema = _schema;
+    std::shared_ptr<ColumnReader> column_reader;
+    ASSERT_TRUE(
+            ColumnReader::create(reader_opts, bucket_meta, kTotalRows, file_reader, &column_reader)
+                    .ok());
+
+    ColumnIteratorUPtr iter;
+    ASSERT_TRUE(column_reader->new_iterator(&iter, _bucket_column.get()).ok());
+
+    OlapReaderStatistics stats;
+    ColumnIteratorOptions iter_opts;
+    iter_opts.stats = &stats;
+    iter_opts.file_reader = file_reader.get();
+    ASSERT_TRUE(iter->init(iter_opts).ok());
+
+    auto map_dst = ColumnVariant::create_binary_column_fn();
+    size_t to_read = kTotalRows;
+    bool has_null = false;
+    ASSERT_TRUE(iter->seek_to_ordinal(0).ok());
+    // With the bug present this aborts via DCHECK in
+    // OffsetFileColumnIterator::_calculate_offsets. With the fix it succeeds.
+    ASSERT_TRUE(iter->next_batch(&to_read, map_dst, &has_null).ok());
+    EXPECT_EQ(to_read, kTotalRows);
+    EXPECT_EQ(map_dst->size(), kTotalRows);
+
+    // Each row carried exactly kFlatKeys keys; the materialized Map's offsets
+    // must be monotonically increasing with a constant step. A wrong
+    // `_base_offset` would surface here as a non-monotonic step or a wrong
+    // stride, even in builds where DCHECK is compiled out.
+    auto& map_col = assert_cast<ColumnMap&>(*map_dst);
+    const auto& offsets = map_col.get_offsets();
+    ASSERT_EQ(offsets.size(), kTotalRows);
+    int64_t prev = 0;
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        ASSERT_GE(offsets[i], prev) << "non-monotonic Map offsets at row " << i;
+        ASSERT_EQ(offsets[i] - prev, static_cast<int64_t>(kFlatKeys))
+                << "unexpected key count at row " << i;
+        prev = offsets[i];
+    }
+}
+
 // ============================================================
 // 5. _flush_batch stats lookup branches
 // ============================================================
