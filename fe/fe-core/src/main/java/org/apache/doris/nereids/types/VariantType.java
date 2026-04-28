@@ -137,15 +137,18 @@ public class VariantType extends PrimitiveType {
 
     @Override
     public boolean acceptsType(DataType other) {
-        return other instanceof VariantType;
+        // Variant types are only interchangeable when their configuration
+        // (max_subcolumns_count, enable_doc_mode, ...) matches. Different
+        // configurations represent different physical storage layouts and
+        // cannot be implicitly converted (BE has no real Variant->Variant
+        // conversion). Behaviour is intentionally aligned with DecimalV3Type.
+        return other.equals(this);
     }
 
     @Override
     public boolean isAssignableFrom(DataType targetDataType) {
-        // Any VariantType is assignable to any other VariantType,
-        // regardless of property differences (maxSubcolumns, etc.)
         if (targetDataType instanceof VariantType) {
-            return true;
+            return this.equals(targetDataType);
         }
         return super.isAssignableFrom(targetDataType);
     }
