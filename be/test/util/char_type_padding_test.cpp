@@ -25,11 +25,7 @@
 #include "core/column/column_string.h"
 #include "core/string_ref.h"
 #include "gtest/gtest_pred_impl.h"
-#include "storage/iterator/olap_data_convertor.h"
-
 namespace doris {
-
-using ConvertorChar = OlapBlockDataConvertor::OlapColumnDataConvertorChar;
 
 TEST(CharTypePaddingTest, CharTypePaddingFullTest) {
     auto input = ColumnString::create();
@@ -40,10 +36,10 @@ TEST(CharTypePaddingTest, CharTypePaddingFullTest) {
     for (size_t i = 0; i < rows; i++) {
         input->insert_data(str.data(), str.length());
     }
-    EXPECT_FALSE(ConvertorChar::should_padding(input.get(), str.length()));
+    EXPECT_FALSE(input->needs_char_padding(str.length()));
 
     input->insert_data(str.data(), str.length() - 1);
-    EXPECT_TRUE(ConvertorChar::should_padding(input.get(), str.length()));
+    EXPECT_TRUE(input->needs_char_padding(str.length()));
 }
 
 TEST(CharTypePaddingTest, CharTypePaddingDataTest) {
@@ -56,7 +52,7 @@ TEST(CharTypePaddingTest, CharTypePaddingDataTest) {
         input->insert_data(str.data(), str.length() - i);
     }
 
-    auto output = ConvertorChar::clone_and_padding(input.get(), str.length());
+    auto output = input->char_padded(str.length());
 
     for (int i = 0; i < rows; i++) {
         auto cell = output->get_data_at(i).to_string();

@@ -22,6 +22,7 @@
 #include "storage/olap_define.h"
 #include "storage/olap_utils.h"
 #include "storage/partial_update_info.h"
+#include "storage/segment/storage_view.h"
 #include "storage/tablet/tablet_fwd.h"
 
 namespace doris {
@@ -66,10 +67,15 @@ public:
     Status init(const HistoricalRowRetrieverContext& context) override;
 
     Status prepare_lookup_plan_from_source_columns(
-            const std::vector<IOlapColumnDataAccessor*>& key_columns,
-            const IOlapColumnDataAccessor* seq_column, std::shared_ptr<MowContext> mow_context) {
-        _key_columns = key_columns;
-        _seq_column = seq_column;
+            const std::vector<KeyEncodingTarget>& key_targets,
+            const KeyEncodingTarget* seq_target, std::shared_ptr<MowContext> mow_context) {
+        _key_targets = key_targets;
+        if (seq_target != nullptr) {
+            _seq_target = *seq_target;
+            _has_seq_target = true;
+        } else {
+            _has_seq_target = false;
+        }
         _mow_context = mow_context;
         return Status::OK();
     }
@@ -83,8 +89,8 @@ public:
                               size_t /*row_pos*/, size_t num_rows) override;
 
     void clear() override {
-        _key_columns.clear();
-        _seq_column = nullptr;
+        _key_targets.clear();
+        _has_seq_target = false;
         _use_default_or_null_flag.clear();
         _has_default_or_nullable = false;
         _rssid_to_rid.clear();
@@ -97,26 +103,20 @@ public:
 private:
     void _maybe_invalid_row_cache(const std::string& key);
 
-    // used for unique-key with merge on write and segment min_max key
-    std::string _full_encode_keys(const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                  size_t pos, bool null_first = true);
-
-    std::string _full_encode_keys(const std::vector<const KeyCoder*>& key_coders,
-                                  const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                  size_t pos, bool null_first = true);
+    // used for unique-key with merge on write and segment min_max key.
+    // Coders come from the KeyEncodingTargets themselves — no parallel state.
+    std::string _full_encode_keys(const std::vector<KeyEncodingTarget>& key_targets, size_t pos);
 
     // used for unique-key with merge on write
-    void _encode_seq_column(const IOlapColumnDataAccessor* seq_column, size_t pos,
+    void _encode_seq_column(const KeyEncodingTarget* seq_target, size_t pos,
                             std::string* encoded_keys);
 
-    // get key_columns, seq column, delete data from source block, prepare for searching historial data
-    std::vector<IOlapColumnDataAccessor*> _key_columns;
-    const IOlapColumnDataAccessor* _seq_column = nullptr;
+    // KeyEncodingTargets captured from the source block, used to encode keys
+    // for searching historical rows.
+    std::vector<KeyEncodingTarget> _key_targets;
+    KeyEncodingTarget _seq_target;
+    bool _has_seq_target = false;
     std::shared_ptr<MowContext> _mow_context;
-    // used for building primary key index during vectorized write.
-    // for mow table with cluster keys, this is cluster keys
-    std::vector<const KeyCoder*> _key_coders;
-    KeyCoder* _seq_coder = nullptr;
 
     // group every rowset-segment row id to speed up reader
     FixedReadPlan _rssid_to_rid;

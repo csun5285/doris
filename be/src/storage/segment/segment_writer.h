@@ -32,6 +32,7 @@
 #include "common/status.h" // Status
 #include "storage/index/index_file_writer.h"
 #include "storage/olap_define.h"
+#include "storage/segment/storage_view.h"
 #include "storage/segment/column_writer.h"
 #include "storage/tablet/tablet.h"
 #include "storage/tablet/tablet_schema.h"
@@ -40,8 +41,6 @@
 
 namespace doris {
 class Block;
-class IOlapColumnDataAccessor;
-class OlapBlockDataConvertor;
 
 // TODO(lingbin): Should be a conf that can be dynamically adjusted, or a member in the context
 const uint32_t MAX_SEGMENT_SIZE = static_cast<uint32_t>(OLAP_MAX_COLUMN_SEGMENT_FILE_SIZE *
@@ -166,36 +165,39 @@ private:
     Status _write_footer();
     Status _write_raw_data(const std::vector<Slice>& slices);
     void _maybe_invalid_row_cache(const std::string& key);
-    std::string _encode_keys(const std::vector<IOlapColumnDataAccessor*>& key_columns, size_t pos);
-    // used for unique-key with merge on write and segment min_max key
-    std::string _full_encode_keys(const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                  size_t pos, bool null_first = true);
-
-    static std::string _full_encode_keys(const std::vector<const KeyCoder*>& key_coders,
-                                         const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                         size_t pos, bool null_first = true);
-
-    // used for unique-key with merge on write
-    void _encode_seq_column(const IOlapColumnDataAccessor* seq_column, size_t pos,
-                            std::string* encoded_keys);
     void _encode_rowid(const uint32_t rowid, std::string* encoded_keys);
     void set_min_max_key(const Slice& key);
     void set_min_key(const Slice& key);
     void set_max_key(const Slice& key);
     void _serialize_block_to_row_column(Block& block);
-    Status _generate_primary_key_index(
-            const std::vector<const KeyCoder*>& primary_key_coders,
-            const std::vector<IOlapColumnDataAccessor*>& primary_key_columns,
-            IOlapColumnDataAccessor* seq_column, size_t num_rows, bool need_sort);
-    Status _generate_short_key_index(std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                     size_t num_rows, const std::vector<size_t>& short_key_pos);
+
+    // KeyEncodingTarget-based key encoders. Each target pairs a KeyCoder with
+    // a StorageView produced earlier in the same _append_block — typically
+    // borrowed from ScalarColumnWriter::view() after that writer appended.
+    Status _full_encode_keys(const std::vector<KeyEncodingTarget>& key_targets, size_t pos,
+                             std::string* encoded_keys);
+    Status _encode_keys(const std::vector<KeyEncodingTarget>& key_targets, size_t pos,
+                        std::string* encoded_keys);
+    Status _encode_seq_column(const KeyEncodingTarget* seq_target, size_t pos,
+                              std::string* encoded_keys);
+    Status _generate_primary_key_index_from_views(
+            const std::vector<KeyEncodingTarget>& primary_key_targets,
+            const KeyEncodingTarget* seq_target, size_t num_rows, bool need_sort);
+    Status _generate_short_key_index_from_views(const std::vector<KeyEncodingTarget>& key_targets,
+                                                size_t num_rows,
+                                                const std::vector<size_t>& short_key_pos);
     bool _is_mow();
     bool _is_mow_with_cluster_key();
 
 protected:
-    // Build key index for derived writers that override append_block.
-    Status build_key_index(std::vector<IOlapColumnDataAccessor*>& key_columns,
-                           IOlapColumnDataAccessor* seq_column, size_t num_rows);
+    // Build key index for derived writers that override append_block. The
+    // caller stages the key / cluster-key / seq columns before invoking this
+    // and passes the (KeyCoder, StorageView) pairs; the helper consumes them
+    // for primary / short / cluster key index construction.
+    Status build_key_index(const std::vector<KeyEncodingTarget>& key_targets,
+                           const KeyEncodingTarget* seq_target,
+                           const std::vector<KeyEncodingTarget>& cluster_key_targets,
+                           size_t num_rows);
 
     uint32_t _segment_id;
     TabletSchemaSPtr _tablet_schema;
@@ -219,7 +221,6 @@ protected:
     std::vector<std::unique_ptr<ColumnWriter>> _column_writers;
     std::unique_ptr<MemTracker> _mem_tracker;
 
-    std::unique_ptr<OlapBlockDataConvertor> _olap_data_convertor;
     // used for building short key index or primary key index during vectorized write.
     // for mow table with cluster keys, this is cluster keys
     std::vector<const KeyCoder*> _key_coders;

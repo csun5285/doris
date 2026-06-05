@@ -20,19 +20,21 @@
 #include <gen_cpp/AgentService_types.h>
 #include <gen_cpp/olap_file.pb.h>
 #include <gen_cpp/segment_v2.pb.h>
-#include <stddef.h>
-#include <stdint.h>
 
-#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory> // for unique_ptr
 #include <ostream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "common/status.h" // for Status
+#include "core/column/column.h"        // for ColumnPtr
+#include "core/column/column_string.h" // for ColumnString alias (CHAR padding helpers)
 #include "core/column/column_variant.h"
+#include "core/data_type/define_primitive_type.h" // for PrimitiveType
+#include "storage/segment/storage_view.h"          // for StorageView member
 #include "storage/index/ann/ann_index_writer.h"
 #include "storage/index/bloom_filter/bloom_filter.h"
 #include "storage/index/inverted/inverted_index_writer.h"
@@ -48,6 +50,8 @@
 namespace doris {
 
 class BlockCompressionCodec;
+class IColumn;
+class ColumnFixedLengthObject;
 class TabletColumn;
 class TabletIndex;
 struct RowsetWriterContext;
@@ -141,18 +145,6 @@ public:
 
     virtual Status init() = 0;
 
-    template <typename CellType>
-    Status append(const CellType& cell) {
-        if (_is_nullable) {
-            uint8_t nullmap = 0;
-            BitmapChange(&nullmap, 0, cell.is_null());
-            return append_nullable(&nullmap, cell.cell_ptr(), 1);
-        } else {
-            auto* cel_ptr = cell.cell_ptr();
-            return append_data((const uint8_t**)&cel_ptr, 1);
-        }
-    }
-
     // Now we only support append one by one, we should support append
     // multi rows in one call
     Status append(bool is_null, void* data) {
@@ -162,6 +154,20 @@ public:
     }
 
     Status append(const uint8_t* nullmap, const void* data, size_t num_rows);
+
+    // IColumn-based entry. Subclasses convert the in-memory representation to
+    // the on-disk format internally. row_pos / num_rows mark the slice of
+    // `column` to consume. Key encoding is handled at the caller by consuming
+    // ScalarColumnWriter::view() after append (see
+    // SegmentWriter::_full_encode_keys); ColumnWriter does not cache any
+    // post-conversion view for that purpose.
+    virtual Status append(const IColumn& column, size_t row_pos, size_t num_rows) {
+        return Status::NotSupported<false>(
+                "ColumnWriter::append(IColumn) not implemented for this writer");
+    }
+
+    // Convenience overload: consume the whole column.
+    Status append(const IColumn& column) { return append(column, 0, column.size()); }
 
     Status append_nullable(const uint8_t* nullmap, const void* data, size_t num_rows);
 
@@ -270,18 +276,27 @@ public:
     Status append_data(const uint8_t** ptr, size_t num_rows) override;
     Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
 
-    // used for append not null data. When page is full, will append data not reach num_rows.
-    Status append_data_in_current_page(const uint8_t** ptr, size_t* num_written);
+    // Expose the most-recent staged view so cross-row consumers
+    // (SegmentWriter key encoding) can read the same bytes without re-staging.
+    // Valid from an append() call until the NEXT append() on this writer (or
+    // destruction). finish() / write_data() do not touch _view — segment
+    // writers rely on that to encode key indexes after finalizing the column.
+    // Beware: for passthrough types the view aliases the source column's
+    // memory, so the source column must also stay alive while reading.
+    const StorageView& view() const { return _view; }
 
-    Status append_data_in_current_page(const uint8_t* ptr, size_t* num_written) {
-        RETURN_IF_CATCH_EXCEPTION(
-                { return _internal_append_data_in_current_page(ptr, num_written); });
-    }
+    // IColumn-based entry: IColumn::storage_view stages the slice
+    // [row_pos, row_pos + num_rows) into _view (passthrough types alias the
+    // column buffer; V1 dates/decimals repack; CHAR pads; string/object
+    // families build a Slice[] view), then the bytes feed the page builder.
+    // Callers that need the post-conversion bytes externally consume view()
+    // (SegmentWriter key encoding) or call IColumn::storage_view() directly.
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
+
     friend class ArrayColumnWriter;
     friend class OffsetColumnWriter;
-
-private:
-    Status _internal_append_data_in_current_page(const uint8_t* ptr, size_t* num_written);
+    friend class ObjectColumnWriter;
+    friend class AggStateColumnWriter;
 
 private:
     struct NullRun {
@@ -345,6 +360,32 @@ private:
 
     // call before flush data page.
     FlushPageCallback* _new_page_callback = nullptr;
+
+    // Per-append staging view. IColumn::storage_view(...) fills exactly the
+    // owned buffer it needs (repack_buf / slice_buf / object_serialize_buf /
+    // padded_string) and sets data/row_size/nullmap. Reused across appends.
+    StorageView _view;
+};
+
+// Marker subclass: writers for BITMAP / HLL / QUANTILE_STATE, where each
+// runtime row is a rich C++ object and the on-disk row is its serialized
+// bytes. The per-row conversion lives on the IColumn
+// (ColumnComplexType<T>::storage_view), so this class only exists to give the
+// factory a distinct entry point; the inherited ScalarColumnWriter::append
+// handles the rest.
+class ObjectColumnWriter final : public ScalarColumnWriter {
+public:
+    using ScalarColumnWriter::ScalarColumnWriter;
+};
+
+// Marker subclass: writer for OLAP_FIELD_TYPE_AGG_STATE. AGG_STATE is a
+// polymorphic schema-level type backed at runtime by ColumnString /
+// ColumnBitmap / ColumnFixedLengthObject. Virtual dispatch on
+// IColumn::storage_view picks the right staging without the writer needing
+// to know.
+class AggStateColumnWriter final : public ScalarColumnWriter {
+public:
+    using ScalarColumnWriter::ScalarColumnWriter;
 };
 
 // offsetColumnWriter is used column which has offset column, like array, map.
@@ -378,6 +419,9 @@ public:
 
     Status append_nullable(const uint8_t* null_map, const uint8_t** data, size_t num_rows) override;
     Status append_data(const uint8_t** ptr, size_t num_rows) override;
+
+    // IColumn-based entry. Recurses into each sub-column writer.
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
 
     uint64_t estimate_buffer_size() override;
 
@@ -445,6 +489,12 @@ public:
 
     Status append_data(const uint8_t** ptr, size_t num_rows) override;
 
+    // IColumn-based entry. Materializes offsets, recurses into _item_writer.
+    // Returns NotSupported when the column has inverted/ann index configured
+    // on a non-scalar item writer (index writers need contiguous storage-format
+    // bytes per element, which only a scalar item writer can produce).
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
+
     uint64_t estimate_buffer_size() override;
 
     Status finish() override;
@@ -506,6 +556,10 @@ private:
     std::unique_ptr<IndexColumnWriter> _inverted_index_writer;
     std::unique_ptr<AnnIndexColumnWriter> _ann_index_writer;
     ColumnWriterOptions _opts;
+    // Persistent base offset for IColumn-based append; accumulates across
+    // append calls so on-disk offsets monotonically grow within a segment.
+    uint64_t _array_base_offset = 0;
+    std::vector<uint64_t> _array_offsets_buffer;
 };
 
 class MapColumnWriter final : public ColumnWriter {
@@ -520,6 +574,10 @@ public:
 
     Status append_data(const uint8_t** ptr, size_t num_rows) override;
     Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
+
+    // IColumn-based entry. Materializes offsets, recurses into K and V.
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
+
     uint64_t estimate_buffer_size() override;
 
     Status finish() override;
@@ -579,6 +637,10 @@ private:
     std::unique_ptr<OffsetColumnWriter> _offsets_writer;
     std::unique_ptr<IndexColumnWriter> _index_builder;
     ColumnWriterOptions _opts;
+    // Persistent base offset for IColumn-based append; accumulates across
+    // append calls so on-disk offsets monotonically grow within a segment.
+    uint64_t _map_base_offset = 0;
+    std::vector<uint64_t> _map_offsets_buffer;
 };
 
 // used for compaction to write sub variant column
@@ -590,7 +652,10 @@ public:
 
     Status init() override;
 
-    Status append_data(const uint8_t** ptr, size_t num_rows) override;
+    // Variant writers only support the IColumn-based entry.
+    Status append_data(const uint8_t** /*ptr*/, size_t /*num_rows*/) override {
+        return Status::NotSupported("VariantSubcolumnWriter: use append(IColumn&)");
+    }
 
     uint64_t estimate_buffer_size() override;
 
@@ -619,7 +684,12 @@ public:
     Status append_nulls(size_t num_rows) override {
         return Status::NotSupported("variant writer can not append_nulls");
     }
-    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
+    Status append_nullable(const uint8_t* /*null_map*/, const uint8_t** /*ptr*/,
+                           size_t /*num_rows*/) override {
+        return Status::NotSupported("VariantSubcolumnWriter: use append(IColumn&)");
+    }
+
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
 
     Status finish_current_page() override {
         return Status::NotSupported("variant writer has no data, can not finish_current_page");
@@ -651,7 +721,12 @@ public:
 
     Status init() override;
 
-    Status append_data(const uint8_t** ptr, size_t num_rows) override;
+    // Variant writers only support the IColumn-based entry; the legacy byte
+    // API would have to reconstruct a ColumnVariant from a void* tuple, which
+    // we no longer carry.
+    Status append_data(const uint8_t** /*ptr*/, size_t /*num_rows*/) override {
+        return Status::NotSupported("VariantColumnWriter: use append(IColumn&)");
+    }
 
     uint64_t estimate_buffer_size() override;
 
@@ -680,7 +755,12 @@ public:
     Status append_nulls(size_t num_rows) override {
         return Status::NotSupported("variant writer can not append_nulls");
     }
-    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
+    Status append_nullable(const uint8_t* /*null_map*/, const uint8_t** /*ptr*/,
+                           size_t /*num_rows*/) override {
+        return Status::NotSupported("VariantColumnWriter: use append(IColumn&)");
+    }
+
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
 
     Status finish_current_page() override {
         return Status::NotSupported("variant writer has no data, can not finish_current_page");

@@ -28,15 +28,13 @@
 
 namespace doris {
 
-class OlapBlockDataConvertor;
-
 namespace segment_v2 {
 
 namespace variant_writer_helpers {
 
-Status convert_and_write_column(OlapBlockDataConvertor* converter, const TabletColumn& column,
-                                DataTypePtr data_type, ColumnWriter* writer,
-                                const ColumnPtr& src_column, size_t num_rows, int column_id);
+Status convert_and_write_column(const TabletColumn& column, DataTypePtr data_type,
+                                ColumnWriter* writer, const ColumnPtr& src_column,
+                                size_t num_rows);
 
 void maybe_remove_root_jsonb_with_empty_defaults(MutableColumnPtr* root_column, size_t num_rows,
                                                  bool remove_root_jsonb);

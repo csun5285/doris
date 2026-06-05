@@ -26,12 +26,15 @@
 #include <boost/iterator/iterator_facade.hpp>
 #include <cstring>
 
+#include "common/config.h"
 #include "core/arena.h"
 #include "core/assert_cast.h"
 #include "core/column/columns_common.h"
 #include "core/data_type/primitive_type.h"
 #include "core/memcmp_small.h"
 #include "exec/sort/sort_block.h"
+#include "storage/segment/storage_view.h"
+#include "storage/tablet/tablet_schema.h"
 #include "util/debug_points.h"
 #include "util/memcpy_inlined.h"
 #include "util/simd/bits.h"
@@ -761,6 +764,90 @@ bool ColumnStr<T>::is_valid_utf8() const {
         }
     }
     return true;
+}
+
+// Right-pad each row to `padding_length` bytes with zeros. Returns a new
+// ColumnStr; the caller must outlive the returned column for any Slice views
+// pointing into its chars to stay valid.
+template <typename T>
+ColumnPtr ColumnStr<T>::char_padded(size_t padding_length) const {
+    auto col = ColumnStr<T>::create();
+    auto* padded = col.get();
+    padded->get_offsets().resize(size());
+    padded->get_chars().resize(size() * padding_length);
+    std::memset(padded->get_chars().data(), 0, size() * padding_length);
+    for (size_t i = 0; i < size(); ++i) {
+        padded->get_offsets()[i] = static_cast<T>((i + 1) * padding_length);
+        auto str = get_data_at(i);
+        DCHECK(str.size <= padding_length)
+                << "char type data length over limit, padding_length=" << padding_length
+                << ", real=" << str.size;
+        if (str.size != 0) {
+            std::memcpy(padded->get_chars().data() + i * padding_length, str.data, str.size);
+        }
+    }
+    return col;
+}
+
+// storage_view: two-way branch on FieldType (one ColumnStr serves the whole
+// string family).
+//   - OLAP_FIELD_TYPE_CHAR: right-pad to schema length, then Slice[] over the
+//     padded copy (out->padded_string holds it alive).
+//   - everything else (VARCHAR / STRING / JSONB / VARIANT / AGG_STATE-as-
+//     string): Slice[] view directly over chars + offsets. STRING / JSONB
+//     enforce string_type_length_soft_limit_bytes.
+// Null-slot {nullptr, 0} convention is applied by ColumnNullable::storage_view
+// after this returns; here we always produce valid slices.
+template <typename T>
+Status ColumnStr<T>::storage_view(const TabletColumn& tablet_col, size_t row_pos,
+                                   size_t num_rows, StorageView* out) const {
+    DCHECK_LE(row_pos + num_rows, size());
+    const FieldType type = tablet_col.type();
+
+    if (type == FieldType::OLAP_FIELD_TYPE_CHAR) {
+        const size_t padding_length = tablet_col.length();
+        const ColumnStr<T>* source = this;
+        if (needs_char_padding(padding_length)) {
+            out->padded_string = char_padded(padding_length);
+            source = assert_cast<const ColumnStr<T>*>(out->padded_string.get());
+        } else {
+            out->padded_string.reset();
+        }
+        out->slice_buf.assign(num_rows, Slice());
+        for (size_t i = 0; i < num_rows; ++i) {
+            out->slice_buf[i] = source->get_data_at(i + row_pos).to_slice();
+            DCHECK(out->slice_buf[i].size == padding_length)
+                    << "char type data length not equal to schema, schema=" << padding_length
+                    << ", real=" << out->slice_buf[i].size;
+        }
+    } else {
+        // VARCHAR / STRING / JSONB / VARIANT
+        const bool check_length = (type == FieldType::OLAP_FIELD_TYPE_STRING ||
+                                   type == FieldType::OLAP_FIELD_TYPE_JSONB);
+        const auto* chars_ptr = reinterpret_cast<const char*>(chars.data());
+        out->slice_buf.assign(num_rows, Slice());
+        for (size_t i = 0; i < num_rows; ++i) {
+            const size_t global = i + row_pos;
+            const size_t string_offset = (global == 0) ? 0 : offsets[global - 1];
+            const size_t string_size = offsets[global] - string_offset;
+            out->slice_buf[i].data = const_cast<char*>(chars_ptr + string_offset);
+            out->slice_buf[i].size = string_size;
+            if (UNLIKELY(check_length &&
+                         string_size > config::string_type_length_soft_limit_bytes)) {
+                return Status::NotSupported(
+                        "Not support string len over than "
+                        "`string_type_length_soft_limit_bytes` in vec engine.");
+            }
+        }
+        out->padded_string.reset();
+    }
+
+    out->data = reinterpret_cast<const uint8_t*>(out->slice_buf.data());
+    out->row_size = sizeof(Slice);
+    out->num_rows = num_rows;
+    out->nullmap = nullptr;
+    out->is_slices = true;
+    return Status::OK();
 }
 
 template class ColumnStr<uint32_t>;

@@ -38,7 +38,6 @@
 namespace doris {
 
 class ColumnVariant;
-class OlapBlockDataConvertor;
 namespace segment_v2 {
 
 class ColumnWriter;
@@ -51,7 +50,7 @@ public:
     virtual Status init(const TabletColumn* parent_column, int bucket_num, int& column_id,
                         const ColumnWriterOptions& opts, SegmentFooterPB* footer) = 0;
     virtual Status append_data(const TabletColumn* parent_column, const ColumnVariant& src,
-                               size_t num_rows, OlapBlockDataConvertor* converter) = 0;
+                               size_t num_rows) = 0;
     virtual Status finish() = 0;
     virtual Status write_data() = 0;
     virtual Status write_ordinal_index() = 0;
@@ -67,8 +66,8 @@ public:
     ~VariantDocWriter() override = default;
     Status init(const TabletColumn* parent_column, int bucket_num, int& column_id,
                 const ColumnWriterOptions& opts, SegmentFooterPB* footer) override;
-    Status append_data(const TabletColumn* parent_column, const ColumnVariant& src, size_t num_rows,
-                       OlapBlockDataConvertor* converter) override;
+    Status append_data(const TabletColumn* parent_column, const ColumnVariant& src,
+                       size_t num_rows) override;
     Status finish() override;
     Status write_data() override;
     Status write_ordinal_index() override;
@@ -81,11 +80,10 @@ public:
 private:
     Status _write_materialized_subcolumn(const TabletColumn& parent_column, std::string_view path,
                                          ColumnVariant::Subcolumn& subcolumn, size_t num_rows,
-                                         OlapBlockDataConvertor* converter, int& column_id,
+                                         int& column_id,
                                          const std::vector<uint32_t>* rowids);
     Status _write_doc_value_column(
             const TabletColumn& parent_column, const ColumnVariant& src, size_t num_rows,
-            OlapBlockDataConvertor* converter,
             const phmap::flat_hash_map<StringRef, uint32_t, StringRefHash>& column_stats);
 
     const TabletColumn* _parent_column = nullptr;
@@ -122,8 +120,8 @@ public:
     ~UnifiedSparseColumnWriter() override = default;
     Status init(const TabletColumn* parent_column, int bucket_num, int& column_id,
                 const ColumnWriterOptions& opts, SegmentFooterPB* footer) override;
-    Status append_data(const TabletColumn* parent_column, const ColumnVariant& src, size_t num_rows,
-                       OlapBlockDataConvertor* converter) override;
+    Status append_data(const TabletColumn* parent_column, const ColumnVariant& src,
+                       size_t num_rows) override;
     uint64_t estimate_buffer_size() const override;
     Status finish() override;
     Status write_data() override;
@@ -143,11 +141,9 @@ private:
                         const ColumnWriterOptions& base_opts, SegmentFooterPB* footer);
 
     Status append_single_sparse(const ColumnVariant& src, size_t num_rows,
-                                OlapBlockDataConvertor* converter,
                                 const TabletColumn& parent_column);
 
     Status append_bucket_sparse(const ColumnVariant& src, size_t num_rows,
-                                OlapBlockDataConvertor* converter,
                                 const TabletColumn& parent_column);
 
     // Single sparse writer and its options/meta
@@ -173,7 +169,11 @@ public:
         return _streaming_compaction_writer != nullptr;
     }
 
-    Status append_data(const uint8_t** ptr, size_t num_rows);
+    // Typed entry: insert `num_rows` rows from `src[row_pos..)` into the
+    // variant column (or forward to the streaming compaction writer if active).
+    // `null_map` (if non-null) provides the outer NULL bits for the same window.
+    Status append_variant(const ColumnVariant& src, size_t row_pos, size_t num_rows,
+                          const uint8_t* null_map);
 
     Status finish();
     Status write_data();
@@ -182,7 +182,6 @@ public:
     Status write_inverted_index();
     Status write_bloom_filter_index();
     uint64_t estimate_buffer_size();
-    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows);
 
 private:
     Status _for_each_column_writer(const std::function<Status(ColumnWriter*)>& func);
@@ -190,15 +189,10 @@ private:
     Status _ensure_materialized_variant_finalized();
     void _assert_ready_for_index_writes() const;
     bool _has_extracted_variant_columns() const;
-    Status _process_root_column(ColumnVariant* ptr, OlapBlockDataConvertor* converter,
-                                size_t num_rows, int& column_id);
-    Status _process_subcolumns(ColumnVariant* ptr, OlapBlockDataConvertor* converter,
-                               size_t num_rows, int& column_id);
-    Status _process_doc_value_column(ColumnVariant* ptr, OlapBlockDataConvertor* converter,
-                                     size_t num_rows, int& column_id);
+    Status _process_root_column(ColumnVariant* ptr, size_t num_rows, int& column_id);
+    Status _process_subcolumns(ColumnVariant* ptr, size_t num_rows, int& column_id);
 
-    Status _process_binary_column(ColumnVariant* ptr, OlapBlockDataConvertor* converter,
-                                  size_t num_rows, int& column_id);
+    Status _process_binary_column(ColumnVariant* ptr, size_t num_rows, int& column_id);
     // prepare a column for finalize
     doris::ColumnVariant::MutablePtr _column;
     doris::ColumnUInt8::MutablePtr _null_column;
@@ -230,7 +224,12 @@ public:
     Status init() override;
     bool is_finalized() const { return _is_finalized; }
 
-    Status append_data(const uint8_t** ptr, size_t num_rows) override;
+    // Variant writers only support the IColumn-based entry.
+    Status append_data(const uint8_t** /*ptr*/, size_t /*num_rows*/) override {
+        return Status::NotSupported("VariantDocCompactWriter: use append(IColumn&)");
+    }
+
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
 
     uint64_t estimate_buffer_size() override;
 
@@ -259,7 +258,10 @@ public:
     Status append_nulls(size_t num_rows) override {
         return Status::NotSupported("variant writer can not append_nulls");
     }
-    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
+    Status append_nullable(const uint8_t* /*null_map*/, const uint8_t** /*ptr*/,
+                           size_t /*num_rows*/) override {
+        return Status::NotSupported("VariantDocCompactWriter: use append(IColumn&)");
+    }
 
     Status finish_current_page() override {
         return Status::NotSupported("variant writer has no data, can not finish_current_page");
@@ -270,11 +272,10 @@ public:
 private:
     Status _write_materialized_subcolumn(const TabletColumn& parent_column, std::string_view path,
                                          ColumnVariant::Subcolumn& subcolumn, size_t num_rows,
-                                         OlapBlockDataConvertor* converter, int& column_id,
+                                         int& column_id,
                                          const std::vector<uint32_t>* rowids);
     Status _write_doc_value_column(const TabletColumn& parent_column, ColumnVariant* variant_column,
-                                   OlapBlockDataConvertor* converter, int column_id,
-                                   size_t num_rows);
+                                   int column_id, size_t num_rows);
 
     ordinal_t _next_rowid = 0;
     MutableColumnPtr _column;

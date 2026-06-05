@@ -26,6 +26,8 @@
 #include "core/data_type/data_type.h"
 #include "exec/common/sip_hash.h"
 #include "exec/sort/sort_block.h"
+#include "storage/segment/storage_view.h"
+#include "storage/tablet/tablet_schema.h"
 
 namespace doris {
 namespace {
@@ -722,6 +724,31 @@ ColumnPtr remove_nullable(const ColumnPtr& column) {
     }
 
     return column;
+}
+
+// storage_view: delegate to the nested column for the type-specific byte view,
+// then attach the null map (pre-offset to row_pos). For slice-based views
+// (string-family / object-family), null slots are overwritten with the
+// {nullptr, 0} convention legacy inverted-index code relies on; for
+// fixed-width views the null bytes stay in the buffer and the outer nullmap
+// tells the page builder which rows to mark null.
+Status ColumnNullable::storage_view(const TabletColumn& tablet_col, size_t row_pos,
+                                     size_t num_rows, StorageView* out) const {
+    RETURN_IF_ERROR(_nested_column->storage_view(tablet_col, row_pos, num_rows, out));
+    const uint8_t* nullmap = get_null_map_data().data() + row_pos;
+    if (out->is_slices) {
+        // The nested call already pointed out->data at slice_buf; we only
+        // clobber the null slots.
+        DCHECK_EQ(out->slice_buf.size(), num_rows);
+        for (size_t i = 0; i < num_rows; ++i) {
+            if (nullmap[i] != 0) {
+                out->slice_buf[i].data = nullptr;
+                out->slice_buf[i].size = 0;
+            }
+        }
+    }
+    out->nullmap = nullmap;
+    return Status::OK();
 }
 
 } // namespace doris

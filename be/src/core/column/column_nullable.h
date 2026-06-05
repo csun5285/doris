@@ -267,6 +267,9 @@ public:
         return false;
     }
 
+    Status storage_view(const TabletColumn& tablet_col, size_t row_pos, size_t num_rows,
+                        StorageView* out) const override;
+
     bool is_nullable() const override { return true; }
     bool is_concrete_nullable() const override { return true; }
     bool is_column_string() const override { return get_nested_column().is_column_string(); }

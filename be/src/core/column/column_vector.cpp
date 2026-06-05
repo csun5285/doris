@@ -34,8 +34,12 @@
 #include "core/column/columns_common.h"
 #include "core/data_type/data_type.h"
 #include "core/data_type/define_primitive_type.h"
+#include "core/decimal12.h"
 #include "core/memcpy_small.h"
 #include "core/types.h"
+#include "core/uint24.h"
+#include "storage/segment/storage_view.h"
+#include "storage/tablet/tablet_schema.h"
 #include "exec/common/nan_utils.h"
 #include "exec/common/sip_hash.h"
 #include "exec/sort/sort_block.h"
@@ -525,6 +529,69 @@ void ColumnVector<T>::replace_float_special_values() {
             NormalizeFloat(data[i]);
         }
     }
+}
+
+// storage_view: produce the storage-format byte view for [row_pos, row_pos+num_rows).
+//
+// Each ColumnVector<T> instantiation is bound 1:1 to a FieldType in the storage
+// layer, so we branch by template parameter (compile-time):
+//   - V1 DATE / DATETIME: VecDateTimeValue is 8 bytes in memory; on-disk is
+//     uint24_t / uint64. Repack into out->repack_buf.
+//   - FLOAT / DOUBLE: passthrough but canonicalize NaN payloads in place so
+//     all NaN rows serialize to the same bit pattern (affects BIT_SHUFFLE
+//     compression and any byte-level comparison downstream).
+//   - All other types (int family / IP / V2 date/datetime / V3 decimal /
+//     TIMESTAMPTZ / TIMEV2 / UINT32 / UINT64): runtime layout already matches
+//     on-disk layout; point at the inner buffer.
+//
+// Nullable is handled by ColumnNullable::storage_view; this method does not
+// produce a nullmap (it just leaves `out->nullmap == nullptr`).
+template <PrimitiveType T>
+Status ColumnVector<T>::storage_view(const TabletColumn& /*tablet_col*/, size_t row_pos,
+                                      size_t num_rows, StorageView* out) const {
+    DCHECK_LE(row_pos + num_rows, size());
+    using ValueType = value_type;
+
+    if constexpr (T == TYPE_DATE) {
+        // V1 DATE: VecDateTimeValue -> uint24_t
+        out->repack_buf.resize(num_rows * sizeof(uint24_t));
+        auto* dst = reinterpret_cast<uint24_t*>(out->repack_buf.data());
+        const auto* src = data.data() + row_pos;
+        for (size_t i = 0; i < num_rows; ++i) {
+            dst[i] = static_cast<uint32_t>(src[i].to_olap_date());
+        }
+        out->data = out->repack_buf.data();
+        out->row_size = sizeof(uint24_t);
+    } else if constexpr (T == TYPE_DATETIME) {
+        // V1 DATETIME: VecDateTimeValue -> uint64_t
+        out->repack_buf.resize(num_rows * sizeof(uint64_t));
+        auto* dst = reinterpret_cast<uint64_t*>(out->repack_buf.data());
+        const auto* src = data.data() + row_pos;
+        for (size_t i = 0; i < num_rows; ++i) {
+            dst[i] = src[i].to_olap_datetime();
+        }
+        out->data = out->repack_buf.data();
+        out->row_size = sizeof(uint64_t);
+    } else if constexpr (T == TYPE_FLOAT || T == TYPE_DOUBLE) {
+        // NaN canonicalize in place; otherwise passthrough.
+        auto* values = const_cast<ValueType*>(data.data() + row_pos);
+        for (size_t i = 0; i < num_rows; ++i) {
+            if (std::isnan(values[i])) {
+                values[i] = std::numeric_limits<ValueType>::quiet_NaN();
+            }
+        }
+        out->data = reinterpret_cast<const uint8_t*>(values);
+        out->row_size = sizeof(ValueType);
+    } else {
+        // Passthrough: int family / IP / V2 date / V3 decimal / TIMESTAMPTZ /
+        // TIMEV2 / UINT32 / UINT64.
+        out->data = reinterpret_cast<const uint8_t*>(data.data() + row_pos);
+        out->row_size = sizeof(ValueType);
+    }
+    out->num_rows = num_rows;
+    out->nullmap = nullptr;
+    out->is_slices = false;
+    return Status::OK();
 }
 
 /// Explicit template instantiations - to avoid code bloat in headers.

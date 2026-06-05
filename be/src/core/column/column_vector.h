@@ -337,6 +337,9 @@ public:
         return StringRef(reinterpret_cast<const char*>(data.data()), data.size());
     }
 
+    Status storage_view(const TabletColumn& tablet_col, size_t row_pos, size_t num_rows,
+                        StorageView* out) const override;
+
     bool structure_equals(const IColumn& rhs) const override {
         return typeid(rhs) == typeid(ColumnVector<T>);
     }

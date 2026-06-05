@@ -28,7 +28,6 @@
 #include "core/block/block.h"
 #include "core/data_type/data_type_number.h" // IWYU pragma: keep
 #include "core/value/bitmap_value.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/olap_common.h"
 #include "storage/rowset/rowset.h"
 #include "storage/rowset/rowset_writer_context.h"
@@ -814,7 +813,23 @@ Status FlexibleReadPlan::fill_non_primary_key_columns_for_row_store(
 }
 
 BlockAggregator::BlockAggregator(segment_v2::VerticalSegmentWriter& vertical_segment_writer)
-        : _writer(vertical_segment_writer), _tablet_schema(*_writer._tablet_schema) {}
+        : _writer(vertical_segment_writer), _tablet_schema(*_writer._tablet_schema) {
+    // Owned StorageViews for the key columns + seq column (if any). The
+    // aggregator's key / seq compare path encodes keys from these views via
+    // _key_targets / _seq_target.
+    _key_views.resize(_tablet_schema.num_key_columns());
+    _key_targets.resize(_tablet_schema.num_key_columns());
+    for (uint32_t cid = 0; cid < _tablet_schema.num_key_columns(); ++cid) {
+        _key_targets[cid] = {get_key_coder(_tablet_schema.column(cid).type()), &_key_views[cid]};
+    }
+    if (_tablet_schema.has_sequence_col()) {
+        auto seq_idx = _tablet_schema.sequence_col_idx();
+        _seq_target = {get_key_coder(_tablet_schema.column(seq_idx).type()), &_seq_view};
+        _has_seq_target = true;
+    }
+}
+
+BlockAggregator::~BlockAggregator() = default;
 
 void BlockAggregator::merge_one_row(MutableBlock& dst_block, Block* src_block, int rid,
                                     BitmapValue& skip_bitmap) {
@@ -877,7 +892,7 @@ void BlockAggregator::append_or_merge_row(MutableBlock& dst_block, Block* src_bl
 Status BlockAggregator::aggregate_rows(
         MutableBlock& output_block, Block* block, int start, int end, std::string key,
         std::vector<BitmapValue>* skip_bitmaps, const signed char* delete_signs,
-        IOlapColumnDataAccessor* seq_column, const std::vector<RowsetSharedPtr>& specified_rowsets,
+        const std::vector<RowsetSharedPtr>& specified_rowsets,
         std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches) {
     VLOG_DEBUG << fmt::format("merge rows in range=[{}-{})", start, end);
     if (end - start == 1) {
@@ -915,7 +930,7 @@ Status BlockAggregator::aggregate_rows(
             // Discard all the rows whose seq value is smaller than previous_encoded_seq_value.
             if (row_has_sequence_col) {
                 std::string seq_val {};
-                _writer._encode_seq_column(seq_column, pos, &seq_val);
+                _encode_seq_column(pos, &seq_val);
                 if (Slice {seq_val}.compare(Slice {previous_encoded_seq_value}) < 0) {
                     continue;
                 }
@@ -932,7 +947,7 @@ Status BlockAggregator::aggregate_rows(
         if (row_has_sequence_col) {
             std::string seq_val {};
             // for rows that don't specify seqeunce col, seq_val will be encoded to minial value
-            _writer._encode_seq_column(seq_column, pos, &seq_val);
+            _encode_seq_column(pos, &seq_val);
             cur_seq_val = std::move(seq_val);
         } else {
             cur_seq_val.clear();
@@ -950,7 +965,7 @@ Status BlockAggregator::aggregate_rows(
             append_or_merge_row(output_block, block, rid, skip_bitmap, have_delete_sign);
         } else {
             std::string seq_val {};
-            _writer._encode_seq_column(seq_column, rid, &seq_val);
+            _encode_seq_column(rid, &seq_val);
             if (Slice {seq_val}.compare(Slice {cur_seq_val}) >= 0) {
                 append_or_merge_row(output_block, block, rid, skip_bitmap, have_delete_sign);
                 cur_seq_val = std::move(seq_val);
@@ -964,8 +979,7 @@ Status BlockAggregator::aggregate_rows(
 };
 
 Status BlockAggregator::aggregate_for_sequence_column(
-        Block* block, int num_rows, const std::vector<IOlapColumnDataAccessor*>& key_columns,
-        IOlapColumnDataAccessor* seq_column, const std::vector<RowsetSharedPtr>& specified_rowsets,
+        Block* block, int num_rows, const std::vector<RowsetSharedPtr>& specified_rowsets,
         std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches) {
     DCHECK_EQ(block->columns(), _tablet_schema.num_columns());
     // the process logic here is the same as MemTable::_aggregate_for_flexible_partial_update_without_seq_col()
@@ -981,15 +995,14 @@ Status BlockAggregator::aggregate_for_sequence_column(
     int same_key_rows {0};
     std::string previous_key {};
     for (int block_pos {0}; block_pos < num_rows; block_pos++) {
-        std::string key = _writer._full_encode_keys(key_columns, block_pos);
+        std::string key = _full_encode_keys(block_pos);
         if (block_pos > 0 && previous_key == key) {
             same_key_rows++;
         } else {
             if (same_key_rows > 0) {
                 RETURN_IF_ERROR(aggregate_rows(output_block, block, block_pos - same_key_rows,
                                                block_pos, std::move(previous_key), skip_bitmaps,
-                                               delete_signs, seq_column, specified_rowsets,
-                                               segment_caches));
+                                               delete_signs, specified_rowsets, segment_caches));
             }
             same_key_rows = 1;
         }
@@ -998,7 +1011,7 @@ Status BlockAggregator::aggregate_for_sequence_column(
     if (same_key_rows > 0) {
         RETURN_IF_ERROR(aggregate_rows(output_block, block, num_rows - same_key_rows, num_rows,
                                        std::move(previous_key), skip_bitmaps, delete_signs,
-                                       seq_column, specified_rowsets, segment_caches));
+                                       specified_rowsets, segment_caches));
     }
 
     block->swap(output_block.to_block());
@@ -1034,7 +1047,7 @@ Status BlockAggregator::fill_sequence_column(Block* block, size_t num_rows,
 }
 
 Status BlockAggregator::aggregate_for_insert_after_delete(
-        Block* block, size_t num_rows, const std::vector<IOlapColumnDataAccessor*>& key_columns,
+        Block* block, size_t num_rows,
         const std::vector<RowsetSharedPtr>& specified_rowsets,
         std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches) {
     DCHECK_EQ(block->columns(), _tablet_schema.num_columns());
@@ -1061,7 +1074,7 @@ Status BlockAggregator::aggregate_for_insert_after_delete(
     for (size_t block_pos {0}; block_pos < num_rows; block_pos++) {
         size_t delta_pos = block_pos;
         auto& skip_bitmap = skip_bitmaps->at(block_pos);
-        std::string key = _writer._full_encode_keys(key_columns, delta_pos);
+        std::string key = _full_encode_keys(delta_pos);
         bool have_delete_sign =
                 (!skip_bitmap.contains(delete_sign_col_unique_id) && delete_signs[block_pos] != 0);
         if (delta_pos > 0 && previous_key == key) {
@@ -1139,45 +1152,51 @@ Status BlockAggregator::filter_block(Block* block, size_t num_rows, MutableColum
     return Status::OK();
 }
 
-Status BlockAggregator::convert_pk_columns(Block* block, size_t row_pos, size_t num_rows,
-                                           std::vector<IOlapColumnDataAccessor*>& key_columns) {
-    key_columns.clear();
+Status BlockAggregator::convert_pk_columns(Block* block, size_t row_pos, size_t num_rows) {
     for (uint32_t cid {0}; cid < _tablet_schema.num_key_columns(); cid++) {
-        RETURN_IF_ERROR(_writer._olap_data_convertor->set_source_content_with_specifid_column(
-                block->get_by_position(cid), row_pos, num_rows, cid));
-        auto [status, column] = _writer._olap_data_convertor->convert_column_data(cid);
-        if (!status.ok()) {
-            return status;
-        }
-        key_columns.push_back(column);
+        RETURN_IF_ERROR(block->get_by_position(cid).column->storage_view(
+                _tablet_schema.column(cid), row_pos, num_rows, &_key_views[cid]));
     }
     return Status::OK();
 }
 
-Status BlockAggregator::convert_seq_column(Block* block, size_t row_pos, size_t num_rows,
-                                           IOlapColumnDataAccessor*& seq_column) {
-    seq_column = nullptr;
-    if (_tablet_schema.has_sequence_col()) {
+Status BlockAggregator::convert_seq_column(Block* block, size_t row_pos, size_t num_rows) {
+    if (_has_seq_target) {
         auto seq_col_idx = _tablet_schema.sequence_col_idx();
-        RETURN_IF_ERROR(_writer._olap_data_convertor->set_source_content_with_specifid_column(
-                block->get_by_position(seq_col_idx), row_pos, num_rows, seq_col_idx));
-        auto [status, column] = _writer._olap_data_convertor->convert_column_data(seq_col_idx);
-        if (!status.ok()) {
-            return status;
-        }
-        seq_column = column;
+        RETURN_IF_ERROR(block->get_by_position(seq_col_idx).column->storage_view(
+                _tablet_schema.column(seq_col_idx), row_pos, num_rows, &_seq_view));
     }
     return Status::OK();
-};
+}
+
+std::string BlockAggregator::_full_encode_keys(size_t pos) {
+    std::string buf;
+    for (const auto& t : _key_targets) {
+        auto st = segment_v2::storage_view_encode_full_key_ascending(t.coder, *t.view, pos, &buf);
+        DCHECK(st.ok()) << "storage_view_encode_full_key_ascending failed: " << st;
+    }
+    return buf;
+}
+
+void BlockAggregator::_encode_seq_column(size_t pos, std::string* encoded_keys) {
+    DCHECK(_has_seq_target);
+    if (segment_v2::storage_view_is_null_at(_seq_view, pos)) {
+        encoded_keys->push_back(static_cast<char>(KeyConsts::KEY_NULL_FIRST_MARKER));
+        const size_t seq_col_length =
+                _tablet_schema.column(_tablet_schema.sequence_col_idx()).length();
+        encoded_keys->append(seq_col_length, static_cast<char>(KeyConsts::KEY_MINIMAL_MARKER));
+        return;
+    }
+    auto st = segment_v2::storage_view_encode_full_key_ascending(_seq_target.coder, _seq_view, pos,
+                                                                  encoded_keys);
+    DCHECK(st.ok()) << "storage_view_encode_full_key_ascending failed: " << st;
+}
 
 Status BlockAggregator::aggregate_for_flexible_partial_update(
         Block* block, size_t num_rows, const std::vector<RowsetSharedPtr>& specified_rowsets,
         std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches) {
-    std::vector<IOlapColumnDataAccessor*> key_columns {};
-    IOlapColumnDataAccessor* seq_column {nullptr};
-
-    RETURN_IF_ERROR(convert_pk_columns(block, 0, num_rows, key_columns));
-    RETURN_IF_ERROR(convert_seq_column(block, 0, num_rows, seq_column));
+    RETURN_IF_ERROR(convert_pk_columns(block, 0, num_rows));
+    RETURN_IF_ERROR(convert_seq_column(block, 0, num_rows));
 
     // 1. merge duplicate rows when table has sequence column
     // When there are multiple rows with the same keys in memtable, some of them specify specify the sequence column,
@@ -1185,20 +1204,18 @@ Status BlockAggregator::aggregate_for_flexible_partial_update(
     // de-duplicate them here.
     if (_tablet_schema.has_sequence_col()) {
         RETURN_IF_ERROR(aggregate_for_sequence_column(block, static_cast<int>(num_rows),
-                                                      key_columns, seq_column, specified_rowsets,
-                                                      segment_caches));
+                                                      specified_rowsets, segment_caches));
     }
 
     // 2. merge duplicate rows and handle insert after delete
     if (block->rows() != num_rows) {
         num_rows = block->rows();
-        // data in block has changed, should re-encode key columns, sequence column
-        _writer._olap_data_convertor->clear_source_content();
-        RETURN_IF_ERROR(convert_pk_columns(block, 0, num_rows, key_columns));
-        RETURN_IF_ERROR(convert_seq_column(block, 0, num_rows, seq_column));
+        // data in block has changed, should re-stage key columns + seq column.
+        RETURN_IF_ERROR(convert_pk_columns(block, 0, num_rows));
+        RETURN_IF_ERROR(convert_seq_column(block, 0, num_rows));
     }
-    RETURN_IF_ERROR(aggregate_for_insert_after_delete(block, num_rows, key_columns,
-                                                      specified_rowsets, segment_caches));
+    RETURN_IF_ERROR(
+            aggregate_for_insert_after_delete(block, num_rows, specified_rowsets, segment_caches));
     return Status::OK();
 }
 

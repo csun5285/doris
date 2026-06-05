@@ -24,7 +24,6 @@
 
 #include "common/status.h"
 #include "core/column/column.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/segment/column_writer.h"
 #include "storage/segment/variant/nested_group_provider.h"
 #include "storage/segment/variant/nested_group_streaming_write_plan.h"
@@ -50,7 +49,8 @@ public:
                                      VariantStatistics* statistics);
 
     Status init();
-    Status append_data(const uint8_t** ptr, size_t num_rows, const uint8_t* outer_null_map);
+    Status append_chunk(const ColumnVariant& src, size_t row_pos, size_t num_rows,
+                        const uint8_t* outer_null_map);
     bool is_initialized() const { return _phase != Phase::UNINITIALIZED; }
     bool is_finalized() const { return _phase == Phase::CLOSED; }
     Phase phase() const { return _phase; }
@@ -67,14 +67,11 @@ private:
     struct StreamingRegularSubcolumnWriter {
         NestedGroupStreamingRegularSubcolumnPlan plan;
         TabletColumn tablet_column;
-        std::unique_ptr<OlapBlockDataConvertor> converter;
     };
 
     Status _for_each_column_writer(const std::function<Status(ColumnWriter*)>& func);
     Status _init_root_writer();
     Status _init_regular_subcolumn_writers(int& column_id);
-    Status _append_input_from_raw(const uint8_t** ptr, size_t num_rows,
-                                  const uint8_t* outer_null_map);
     Status _append_input(const ColumnVariant& src, size_t row_pos, size_t num_rows,
                          const uint8_t* outer_null_map);
     Status _append_chunk(const ColumnVariant& chunk_variant, const uint8_t* outer_null_map);

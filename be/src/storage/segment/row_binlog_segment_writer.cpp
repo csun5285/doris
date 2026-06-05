@@ -23,7 +23,6 @@
 #include "core/column/column_nullable.h"
 #include "core/column/column_vector.h"
 #include "storage/binlog.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/olap_utils.h"
 #include "storage/rowset/rowset_writer_context.h" // RowsetWriterContext
 
@@ -189,7 +188,7 @@ Status RowBinlogSegmentWriter::append_block(const Block* block, size_t row_pos, 
                 dynamic_cast<PrimaryKeyModelRowRetriever*>(_historical_data_writer.get());
         DCHECK(pk_retriever != nullptr);
         RETURN_IF_ERROR(pk_retriever->prepare_lookup_plan_from_source_columns(
-                _source_data_writer->source_key_columns(), _source_data_writer->seq_column(),
+                _source_data_writer->source_key_targets(), _source_data_writer->seq_target(),
                 _binlog_opts.source.mow_context));
         RETURN_IF_ERROR(_historical_data_writer->retrieve_historical_row(delete_sign_column_data,
                                                                          row_pos, num_rows));
@@ -204,29 +203,25 @@ Status RowBinlogSegmentWriter::append_block(const Block* block, size_t row_pos, 
         // build AFTER block (fill missing columns in full_block)
         RETURN_IF_ERROR(_historical_data_writer->build_after_block(&full_block, row_pos, num_rows));
 
-        // write AFTER missing columns from full_block to segment
-        auto& after_convertor = _source_data_writer->olap_data_convertor();
-        RETURN_IF_ERROR(after_convertor->set_source_content_with_specifid_columns(
-                &full_block, row_pos, num_rows, row_binlog_missing_column_ids));
+        // write AFTER missing columns from full_block to segment via the
+        // ColumnWriter::append(IColumn&) path.
         for (auto cid : row_binlog_missing_column_ids) {
-            auto converted_cid = _normal_col_start_id + cid;
-            auto converted_result = after_convertor->convert_column_data(cid);
-            if (!converted_result.first.ok()) {
-                return converted_result.first;
-            }
-            RETURN_IF_ERROR(_column_writers[converted_cid]->append(
-                    converted_result.second->get_nullmap(), converted_result.second->get_data(),
-                    num_rows));
+            auto dest_cid = _normal_col_start_id + cid;
+            const auto& col = full_block.get_by_position(cid).column;
+            RETURN_IF_ERROR(_column_writers[dest_cid]->append(*col, row_pos, num_rows));
         }
     }
 
-    // get key column, we use them to construct key index and search historical data.
+    // Snapshot writer views for source key columns; the source PK writers were
+    // append()-ed in fill_normal_columns above. _fill_binlog_columns will fill
+    // the remaining binlog-prefix slots into the leading positions of
+    // _key_targets. build_key_index then consumes _key_targets.
     DCHECK(!_tablet_schema->has_sequence_col());
-    // _converted_key_columns must be resized before fill binlog columns
-    _converted_key_columns.resize(_tablet_schema->num_key_columns());
+    _key_targets.assign(_tablet_schema->num_key_columns(), KeyEncodingTarget {});
     for (size_t i = _normal_col_start_id; i < _tablet_schema->num_key_columns(); i++) {
-        _converted_key_columns[i] = _source_data_writer->get_converted_column(
-                cast_set<uint32_t>(i - _normal_col_start_id));
+        auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[i].get());
+        _key_targets[i] = {get_key_coder(_tablet_schema->column(i).type()),
+                           &scalar_writer->view()};
     }
 
     std::vector<int64_t> no_operators = std::vector<int64_t> {};
@@ -245,18 +240,21 @@ Status RowBinlogSegmentWriter::append_block(const Block* block, size_t row_pos, 
         }
     }
 
-    RETURN_IF_ERROR(_fill_binlog_columns(num_rows, operators));
+    // The prefix block must outlive build_key_index below: for passthrough
+    // types (LARGEINT lsn / BIGINT op,ts) the writer's staged view aliases the
+    // block's column memory, and _key_targets point at those views.
+    Block binlog_prefix_block;
+    RETURN_IF_ERROR(_fill_binlog_columns(binlog_prefix_block, num_rows, operators));
 
     // row-binlog key don't need seq column
-    RETURN_IF_ERROR(build_key_index(_converted_key_columns, nullptr, num_rows));
+    RETURN_IF_ERROR(build_key_index(_key_targets, /*seq_target=*/nullptr,
+                                    /*cluster_key_targets=*/{}, num_rows));
 
     if (_write_before) {
         RETURN_IF_ERROR(_fill_before_columns(num_rows));
     }
 
     _num_rows_written += num_rows;
-    // need to clean olap_data_convertor that be used when fill binlog columns and build key index
-    _olap_data_convertor->clear_source_content();
     _source_data_writer->clear();
     if (_historical_data_writer) {
         _historical_data_writer->clear();
@@ -266,37 +264,34 @@ Status RowBinlogSegmentWriter::append_block(const Block* block, size_t row_pos, 
 
 Status RowBinlogSegmentWriter::_append_direct_block(const Block* block, size_t row_pos,
                                                     size_t num_rows) {
-    _olap_data_convertor->set_source_content(block, row_pos, num_rows);
-
-    // convert column data from endgine format to storage layer format
-    std::vector<IOlapColumnDataAccessor*> key_columns;
+    // ColumnWriter::append(IColumn&) feeds bytes through the writer chain; for
+    // key columns we snapshot the writer's just-staged view into a per-batch
+    // KeyEncodingTarget so build_key_index can encode keys without consulting
+    // ColumnWriter internals.
+    std::vector<KeyEncodingTarget> key_targets;
     for (size_t id = 0; id < _column_writers.size(); ++id) {
-        // olap data convertor always start from id = 0
-        auto converted_result = _olap_data_convertor->convert_column_data(id);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
-        }
         auto cid = _column_ids[id];
+        const auto& col = block->get_by_position(id).column;
+        RETURN_IF_ERROR(_column_writers[id]->append(*col, row_pos, num_rows));
         if (_has_key && cid < _tablet_schema->num_key_columns()) {
-            key_columns.push_back(converted_result.second);
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[id].get());
+            key_targets.push_back(
+                    {get_key_coder(_tablet_schema->column(cid).type()), &scalar_writer->view()});
         }
-        RETURN_IF_ERROR(_column_writers[id]->append(converted_result.second->get_nullmap(),
-                                                    converted_result.second->get_data(), num_rows));
     }
 
-    RETURN_IF_ERROR(build_key_index(key_columns, nullptr, num_rows));
+    RETURN_IF_ERROR(build_key_index(key_targets, /*seq_target=*/nullptr,
+                                    /*cluster_key_targets=*/{}, num_rows));
 
     _num_rows_written += num_rows;
-    _olap_data_convertor->clear_source_content();
-
     return Status::OK();
 }
 
-Status RowBinlogSegmentWriter::_fill_binlog_columns(size_t num_rows,
+Status RowBinlogSegmentWriter::_fill_binlog_columns(Block& binlog_prefix_block, size_t num_rows,
                                                     const std::vector<int64_t>& op_types) {
     std::vector<uint32_t> binlog_cids = {_binlog_col_start_id, _binlog_col_start_id + 1,
                                          _binlog_col_start_id + 2};
-    Block binlog_prefix_block = _tablet_schema->create_block_by_cids(binlog_cids);
+    binlog_prefix_block = _tablet_schema->create_block_by_cids(binlog_cids);
     {
         auto binlog_prefix_columns_guard = binlog_prefix_block.mutate_columns_scoped();
         auto& binlog_prefix_columns = binlog_prefix_columns_guard.mutable_columns();
@@ -353,19 +348,13 @@ Status RowBinlogSegmentWriter::_fill_binlog_columns(size_t num_rows,
 
     size_t col_pos_in_block = 0;
     for (auto& cid : binlog_cids) {
-        // convert to olap data
-        RETURN_IF_ERROR(_olap_data_convertor->set_source_content_with_specifid_column(
-                binlog_prefix_block.get_by_position(col_pos_in_block++), 0, num_rows, cid));
-        auto converted_result = _olap_data_convertor->convert_column_data(cid);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
-        }
+        const auto& col = binlog_prefix_block.get_by_position(col_pos_in_block++).column;
+        RETURN_IF_ERROR(_column_writers[cid]->append(*col, 0, num_rows));
         if (cid < _tablet_schema->num_key_columns()) {
-            _converted_key_columns[cid] = converted_result.second;
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[cid].get());
+            _key_targets[cid] = {get_key_coder(_tablet_schema->column(cid).type()),
+                                  &scalar_writer->view()};
         }
-        RETURN_IF_ERROR(_column_writers[cid]->append(converted_result.second->get_nullmap(),
-                                                     converted_result.second->get_data(),
-                                                     num_rows));
     }
 
     return Status::OK();
@@ -417,62 +406,47 @@ Status RowBinlogSegmentWriter::_fill_before_columns(size_t num_rows) {
 
     size_t col_pos_in_block = 0;
     for (auto& cid : before_cids) {
-        RETURN_IF_ERROR(_olap_data_convertor->set_source_content_with_specifid_column(
-                before_block.get_by_position(col_pos_in_block++), 0, num_rows, cid));
-        auto converted_result = _olap_data_convertor->convert_column_data(cid);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
-        }
-        RETURN_IF_ERROR(_column_writers[cid]->append(converted_result.second->get_nullmap(),
-                                                     converted_result.second->get_data(),
-                                                     num_rows));
+        const auto& col = before_block.get_by_position(col_pos_in_block++).column;
+        RETURN_IF_ERROR(_column_writers[cid]->append(*col, 0, num_rows));
     }
 
     return Status::OK();
 }
 
 Status RowBinlogSourceDataWriter::init() {
-    _olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
-    // _normal_column_ids: the columns which we need to write into binlog from source block
     if (UNLIKELY(_opt.source.tablet_schema == nullptr)) {
         return Status::InternalError("row binlog writer missing source_tablet_schema");
     }
-    for (uint32_t i = 0; i < _opt.source.tablet_schema->num_visible_columns(); i++) {
+    const auto& schema = *_opt.source.tablet_schema;
+    for (uint32_t i = 0; i < schema.num_visible_columns(); i++) {
         _normal_column_ids.emplace_back(i);
     }
-    _olap_data_convertor->reserve(_opt.source.tablet_schema->num_columns());
-    for (size_t cid = 0; cid < _opt.source.tablet_schema->num_columns(); cid++) {
-        _olap_data_convertor->add_column_data_convertor(_opt.source.tablet_schema->column(cid));
-    }
+    // One slot per source-schema column. view/coder/pin are lazily filled on
+    // first use, so we only pay KeyCoder lookup for cids that are actually
+    // staged.
+    _per_cid.resize(schema.num_columns());
     return Status::OK();
 }
 
 Status RowBinlogSourceDataWriter::prepare_by_source_block(
         const Block* block, size_t row_pos, size_t num_rows,
         std::vector<uint32_t>& partial_source_cids, Block* full_block) {
-    _converted_columns.resize(_normal_column_ids.size());
-
-    // LOG(INFO) << block->dump_data(0, num_rows);
-
-    // convert column data from engine format to storage layer format
     size_t col_pos_in_block = 0;
     TabletSchemaSPtr tablet_schema = _opt.source.tablet_schema;
     const auto& including_cids =
             partial_source_cids.empty() ? _normal_column_ids : partial_source_cids;
     for (auto& cid : including_cids) {
         const ColumnWithTypeAndName& col = block->get_by_position(col_pos_in_block++);
-
-        RETURN_IF_ERROR(_olap_data_convertor->set_source_content_with_specifid_column(
-                col, row_pos, num_rows, cid));
-        // olap data convertor alway start from id = 0
-        auto converted_result = _olap_data_convertor->convert_column_data(cid);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
+        auto& slot = _per_cid[cid];
+        RETURN_IF_ERROR(col.column->storage_view(tablet_schema->column(cid), row_pos, num_rows,
+                                                  &slot.view));
+        if (slot.coder == nullptr) {
+            slot.coder = get_key_coder(tablet_schema->column(cid).type());
         }
-        _converted_columns[cid] = converted_result.second;
+        slot.pin = col.column;
 
         if (cid < tablet_schema->num_key_columns()) {
-            _key_columns.push_back(converted_result.second);
+            _key_targets.push_back({slot.coder, &slot.view});
         }
         full_block->replace_by_position(cid, col.column);
     }
@@ -484,13 +458,16 @@ Status RowBinlogSourceDataWriter::prepare_by_source_block(
 Status RowBinlogSourceDataWriter::prepare_seq_column(const ColumnWithTypeAndName& col,
                                                      int32_t seq_col_id_in_schema, size_t row_pos,
                                                      size_t num_rows) {
-    RETURN_IF_ERROR(_olap_data_convertor->set_source_content_with_specifid_column(
-            col, row_pos, num_rows, seq_col_id_in_schema));
-    auto converted_result = _olap_data_convertor->convert_column_data(seq_col_id_in_schema);
-    if (!converted_result.first.ok()) {
-        return converted_result.first;
+    const auto& tablet_schema = *_opt.source.tablet_schema;
+    auto& slot = _per_cid[seq_col_id_in_schema];
+    RETURN_IF_ERROR(col.column->storage_view(tablet_schema.column(seq_col_id_in_schema), row_pos,
+                                              num_rows, &slot.view));
+    if (slot.coder == nullptr) {
+        slot.coder = get_key_coder(tablet_schema.column(seq_col_id_in_schema).type());
     }
-    _seq_column = converted_result.second;
+    slot.pin = col.column;
+    _seq_target = {slot.coder, &slot.view};
+    _has_seq_target = true;
     return Status::OK();
 }
 
@@ -505,21 +482,23 @@ Status RowBinlogSourceDataWriter::fill_normal_columns(
         DCHECK(column_writers[start + cid]->get_column()->type() ==
                _opt.source.tablet_schema->columns()[cid]->type())
                 << cid;
-        RETURN_IF_ERROR(column_writers[start + cid]->append(_converted_columns[cid]->get_nullmap(),
-                                                            _converted_columns[cid]->get_data(),
-                                                            _num_rows));
+        // The source column was pinned in _per_cid[cid].pin during prepare_*;
+        // hand it to ColumnWriter::append(IColumn&) which drives the
+        // storage-byte conversion internally.
+        RETURN_IF_ERROR(
+                column_writers[start + cid]->append(*_per_cid[cid].pin, 0, _num_rows));
     }
 
     return Status::OK();
 }
 
 void RowBinlogSourceDataWriter::clear() {
-    if (_olap_data_convertor) {
-        _olap_data_convertor->clear_source_content();
-    }
     _num_rows = 0;
-    _key_columns.clear();
-    _seq_column = nullptr;
+    _key_targets.clear();
+    _has_seq_target = false;
+    for (auto& slot : _per_cid) {
+        slot.pin.reset();
+    }
 }
 
 } // namespace segment_v2

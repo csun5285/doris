@@ -42,9 +42,9 @@
 #include "storage/index/inverted/inverted_index_desc.h"
 #include "storage/index/inverted/inverted_index_fs_directory.h"
 #include "storage/index/inverted/inverted_index_reader.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/tablet/tablet_schema.h"
 #include "storage/types.h"
+#include "test_storage_staging_helpers.h"
 #include "util/faststring.h"
 #include "util/slice.h"
 
@@ -1127,21 +1127,12 @@ TEST_F(InvertedIndexWriterTest, ArrayValuesWithNulls) {
     Block block;
     block.insert(type_and_name);
 
-    // Use OlapBlockDataConvertor to convert (reference inverted_index_array_test.cpp)
-    OlapBlockDataConvertor convertor(tablet_schema.get(), {0});
-    convertor.set_source_content(&block, 0, block.rows());
-    auto [st, accessor] = convertor.convert_column_data(0);
-    EXPECT_EQ(st, Status::OK());
-
-    // The conversion result is an array of 4 pointers:
-    //   [0]: Total number of elements (elem_cnt)
-    //   [1]: Offsets array pointer
-    //   [2]: Nested item data pointer
-    //   [3]: Nested nullmap pointer
-    const auto* data_ptr = reinterpret_cast<const uint64_t*>(accessor->get_data());
-    const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(data_ptr[1]);
-    const void* item_data = reinterpret_cast<const void*>(data_ptr[2]);
-    const auto* item_nullmap = reinterpret_cast<const uint8_t*>(data_ptr[3]);
+    test_helpers::ArrayStaged staged;
+    auto st = test_helpers::stage_array(*field, *column_array, &staged);
+    ASSERT_TRUE(st.ok());
+    const auto* offsets_ptr = staged.offsets_ptr();
+    const void* item_data = staged.item_data();
+    const auto* item_nullmap = staged.item_nullmap();
 
     // Get the length of the subfield
     auto field_size = field_type_size(field->get_sub_column(0).type());
@@ -1152,7 +1143,7 @@ TEST_F(InvertedIndexWriterTest, ArrayValuesWithNulls) {
     EXPECT_TRUE(status.ok()) << status;
 
     // Add array nulls
-    const auto* null_map = accessor->get_nullmap();
+    const auto* null_map = staged.outer_nullmap;
     status = column_writer->add_array_nulls(null_map, block.rows());
     EXPECT_TRUE(status.ok()) << status;
 
@@ -1258,21 +1249,12 @@ TEST_F(InvertedIndexWriterTest, NumericArrayWithErrorConditions) {
     Block block;
     block.insert(type_and_name);
 
-    // Use OlapBlockDataConvertor to convert (reference inverted_index_array_test.cpp)
-    OlapBlockDataConvertor convertor(tablet_schema.get(), {0});
-    convertor.set_source_content(&block, 0, block.rows());
-    auto [st, accessor] = convertor.convert_column_data(0);
-    EXPECT_EQ(st, Status::OK());
-
-    // The conversion result is an array of 4 pointers:
-    //   [0]: Total number of elements (elem_cnt)
-    //   [1]: Offsets array pointer
-    //   [2]: Nested item data pointer
-    //   [3]: Nested nullmap pointer
-    const auto* data_ptr = reinterpret_cast<const uint64_t*>(accessor->get_data());
-    const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(data_ptr[1]);
-    const void* item_data = reinterpret_cast<const void*>(data_ptr[2]);
-    const auto* item_nullmap = reinterpret_cast<const uint8_t*>(data_ptr[3]);
+    test_helpers::ArrayStaged staged;
+    auto st = test_helpers::stage_array(*field, *column_array, &staged);
+    ASSERT_TRUE(st.ok());
+    const auto* offsets_ptr = staged.offsets_ptr();
+    const void* item_data = staged.item_data();
+    const auto* item_nullmap = staged.item_nullmap();
 
     // Get the length of the subfield
     auto field_size = field_type_size(field->get_sub_column(0).type());
@@ -1283,7 +1265,7 @@ TEST_F(InvertedIndexWriterTest, NumericArrayWithErrorConditions) {
     EXPECT_TRUE(status.ok()) << status;
 
     // Add array nulls
-    const auto* null_map = accessor->get_nullmap();
+    const auto* null_map = staged.outer_nullmap;
     status = column_writer->add_array_nulls(null_map, block.rows());
     EXPECT_TRUE(status.ok()) << status;
 

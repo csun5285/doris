@@ -25,8 +25,8 @@
 #include "core/column/column_variant.h"
 #include "exec/common/variant_util.h"
 #include "storage/index/indexed_column_writer.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/rowset/rowset_writer_context.h"
+#include "storage/segment/storage_view.h"
 #include "storage/segment/variant/variant_writer_helpers.h"
 #include "storage/types.h"
 
@@ -91,37 +91,27 @@ Status VariantStreamingCompactionWriter::_init_regular_subcolumn_writers(int& co
                 _opts, *_tablet_column, column_id, plan_entry.path_in_data, plan_entry.data_type, 0,
                 0, nullptr /* existing_subcolumn_info */, false /* check_storage_type */,
                 &subcolumn_indexes, &opts, &writer, &tablet_column));
-        auto converter = std::make_unique<OlapBlockDataConvertor>();
-        converter->add_column_data_convertor(tablet_column);
         _subcolumns_indexes.push_back(std::move(subcolumn_indexes));
         _subcolumn_opts.push_back(opts);
         _subcolumn_writers.push_back(std::move(writer));
         _streaming_regular_subcolumn_writers.push_back(
                 StreamingRegularSubcolumnWriter {.plan = plan_entry,
-                                                 .tablet_column = std::move(tablet_column),
-                                                 .converter = std::move(converter)});
+                                                 .tablet_column = std::move(tablet_column)});
         ++column_id;
     }
     return Status::OK();
 }
 
-Status VariantStreamingCompactionWriter::append_data(const uint8_t** ptr, size_t num_rows,
-                                                     const uint8_t* outer_null_map) {
-    RETURN_IF_ERROR(_check_initialized("append_data"));
-    RETURN_IF_ERROR(_append_input_from_raw(ptr, num_rows, outer_null_map));
+Status VariantStreamingCompactionWriter::append_chunk(const ColumnVariant& src, size_t row_pos,
+                                                       size_t num_rows,
+                                                       const uint8_t* outer_null_map) {
+    RETURN_IF_ERROR(_check_initialized("append_chunk"));
+    RETURN_IF_ERROR(src.sanitize());
+    RETURN_IF_ERROR(_append_input(src, row_pos, num_rows, outer_null_map));
     if (num_rows > 0 && _phase == Phase::INITIALIZED) {
         _phase = Phase::APPENDING;
     }
     return Status::OK();
-}
-
-Status VariantStreamingCompactionWriter::_append_input_from_raw(const uint8_t** ptr,
-                                                                size_t num_rows,
-                                                                const uint8_t* outer_null_map) {
-    const auto* column = reinterpret_cast<const VariantColumnData*>(*ptr);
-    const auto& src = *reinterpret_cast<const ColumnVariant*>(column->column_data);
-    RETURN_IF_ERROR(src.sanitize());
-    return _append_input(src, column->row_pos, num_rows, outer_null_map);
 }
 
 Status VariantStreamingCompactionWriter::_append_input(const ColumnVariant& src, size_t row_pos,
@@ -165,14 +155,12 @@ Status VariantStreamingCompactionWriter::_append_root_column(const ColumnVariant
                                              ColumnUInt8::create(root_column_size, 0));
     }
 
-    auto converter = std::make_unique<OlapBlockDataConvertor>();
-    converter->add_column_data_convertor(*_tablet_column);
-    RETURN_IF_ERROR(converter->set_source_content_with_specifid_column(
-            {root_column->get_ptr(), nullptr, ""}, 0, num_rows, 0));
-    auto [status, column] = converter->convert_column_data(0);
-    RETURN_IF_ERROR(status);
-    RETURN_IF_ERROR(_root_writer->append(nullmap, column->get_data(), num_rows));
-    converter->clear_source_content(0);
+    // Stage root_column (which is ColumnNullable-wrapped) into storage bytes
+    // and feed _root_writer with the outer `nullmap` (mirrors
+    // VariantColumnWriterImpl::_process_root_column).
+    StorageView view;
+    RETURN_IF_ERROR(root_column->storage_view(*_tablet_column, 0, num_rows, &view));
+    RETURN_IF_ERROR(_root_writer->append(nullmap, view.data, num_rows));
     _opts.meta->set_num_rows(_root_writer->get_next_rowid());
     return Status::OK();
 }
@@ -209,13 +197,9 @@ Status VariantStreamingCompactionWriter::_append_regular_subcolumns(
             current_type = state.plan.data_type;
         }
         DCHECK_EQ(current_column->size(), num_rows);
-        // Keep one converter per writer so array/map offsets stay rebased across streaming chunks.
-        RETURN_IF_ERROR(state.converter->set_source_content_with_specifid_column(
-                {current_column, current_type, ""}, 0, num_rows, 0));
-        auto [status, converted] = state.converter->convert_column_data(0);
-        RETURN_IF_ERROR(status);
-        RETURN_IF_ERROR(writer->append(converted->get_nullmap(), converted->get_data(), num_rows));
-        state.converter->clear_source_content(0);
+        // ColumnWriter::append(IColumn&) carries its own per-writer state
+        // (e.g. Array/Map base offsets) across streaming chunks.
+        RETURN_IF_ERROR(writer->append(*current_column, 0, num_rows));
         _subcolumn_opts[i].meta->set_num_rows(writer->get_next_rowid());
     }
     return Status::OK();

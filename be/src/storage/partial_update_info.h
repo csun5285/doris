@@ -28,6 +28,8 @@
 #include "common/status.h"
 #include "core/column/column.h"
 #include "storage/rowset/rowset_fwd.h"
+#include "storage/key_coder.h"
+#include "storage/segment/storage_view.h"
 #include "storage/tablet/tablet_fwd.h"
 
 namespace doris {
@@ -37,7 +39,6 @@ class BitmapValue;
 struct RowLocation;
 class Block;
 class MutableBlock;
-class IOlapColumnDataAccessor;
 namespace segment_v2 {
 struct HistoricalRowRetrieverContext;
 }
@@ -192,25 +193,35 @@ private:
 
 class BlockAggregator {
 public:
-    ~BlockAggregator() = default;
+    ~BlockAggregator();
     BlockAggregator(segment_v2::VerticalSegmentWriter& vertical_segment_writer);
 
-    Status convert_pk_columns(Block* block, size_t row_pos, size_t num_rows,
-                              std::vector<IOlapColumnDataAccessor*>& key_columns);
-    Status convert_seq_column(Block* block, size_t row_pos, size_t num_rows,
-                              IOlapColumnDataAccessor*& seq_column);
+    // Stage PK / seq columns into the internal owned StorageView slots. The
+    // staged bytes are later consumed via _full_encode_keys / _encode_seq_column
+    // (BlockAggregator-internal helpers) for cross-row key compare.
+    Status convert_pk_columns(Block* block, size_t row_pos, size_t num_rows);
+    Status convert_seq_column(Block* block, size_t row_pos, size_t num_rows);
+
+    // Per-PK-column KeyEncodingTargets that point at the most-recent
+    // convert_pk_columns staging. The caller must invoke convert_pk_columns
+    // first; the targets are only valid until the next convert_pk_columns call.
+    const std::vector<segment_v2::KeyEncodingTarget>& key_targets() const { return _key_targets; }
+    // KeyEncodingTarget for the seq column (or nullptr if the schema has none).
+    // Valid only between convert_seq_column and the next convert_seq_column.
+    const segment_v2::KeyEncodingTarget* seq_target() const {
+        return _has_seq_target ? &_seq_target : nullptr;
+    }
     Status aggregate_for_flexible_partial_update(
             Block* block, size_t num_rows, const std::vector<RowsetSharedPtr>& specified_rowsets,
             std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches);
 
 private:
     Status aggregate_for_sequence_column(
-            Block* block, int num_rows, const std::vector<IOlapColumnDataAccessor*>& key_columns,
-            IOlapColumnDataAccessor* seq_column,
+            Block* block, int num_rows,
             const std::vector<RowsetSharedPtr>& specified_rowsets,
             std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches);
     Status aggregate_for_insert_after_delete(
-            Block* block, size_t num_rows, const std::vector<IOlapColumnDataAccessor*>& key_columns,
+            Block* block, size_t num_rows,
             const std::vector<RowsetSharedPtr>& specified_rowsets,
             std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches);
     Status filter_block(Block* block, size_t num_rows, MutableColumnPtr filter_column,
@@ -229,12 +240,24 @@ private:
     // aggregate rows with same keys in range [start, end) from block to output_block
     Status aggregate_rows(MutableBlock& output_block, Block* block, int start, int end,
                           std::string key, std::vector<BitmapValue>* skip_bitmaps,
-                          const signed char* delete_signs, IOlapColumnDataAccessor* seq_column,
+                          const signed char* delete_signs,
                           const std::vector<RowsetSharedPtr>& specified_rowsets,
                           std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches);
 
+    // Encode the most-recent staged window's key (PK + maybe seq) at `pos`.
+    std::string _full_encode_keys(size_t pos);
+    void _encode_seq_column(size_t pos, std::string* encoded_keys);
+
     segment_v2::VerticalSegmentWriter& _writer;
     TabletSchema& _tablet_schema;
+    // Owned StorageViews for the PK columns (one per key cid) and the seq
+    // column (if the schema has one). The PK / seq compare path inside
+    // aggregate_* encodes keys from these views via key_targets() / seq_target().
+    std::vector<StorageView> _key_views;
+    std::vector<segment_v2::KeyEncodingTarget> _key_targets;
+    StorageView _seq_view;
+    segment_v2::KeyEncodingTarget _seq_target;
+    bool _has_seq_target = false;
 
     // used to store state when aggregating rows in block
     struct AggregateState {

@@ -29,6 +29,7 @@
 #include "core/memcmp_small.h"
 #include "core/pod_array.h"
 #include "exec/common/sip_hash.h"
+#include "storage/segment/storage_view.h"
 
 namespace doris {
 
@@ -36,7 +37,6 @@ class ColumnFixedLengthObject final : public COWHelper<IColumn, ColumnFixedLengt
 private:
     using Self = ColumnFixedLengthObject;
     friend class COWHelper<IColumn, ColumnFixedLengthObject>;
-    friend class OlapBlockDataConvertor;
 
 public:
     using Container = PaddedPODArray<uint8_t>;
@@ -121,6 +121,18 @@ public:
 
     StringRef get_raw_data() const override {
         return {reinterpret_cast<const char*>(_data.data()), _data.size()};
+    }
+
+    Status storage_view(const TabletColumn& /*tablet_col*/, size_t row_pos, size_t num_rows,
+                        StorageView* out) const override {
+        DCHECK_LE(row_pos + num_rows, size());
+        build_slices(out->slice_buf, row_pos, num_rows);
+        out->data = reinterpret_cast<const uint8_t*>(out->slice_buf.data());
+        out->row_size = sizeof(Slice);
+        out->num_rows = num_rows;
+        out->nullmap = nullptr;
+        out->is_slices = true;
+        return Status::OK();
     }
 
     void insert(const Field& x) override {
@@ -299,6 +311,20 @@ public:
     }
 
     size_t serialize_size_at(size_t row) const override { return sizeof(_item_size); }
+
+    // Compute-layer -> storage-layer transform: rows are already laid out as
+    // fixed-width items in `_data`, so we just slice — no serialization. Used
+    // by ObjectColumnWriter for AGG_STATE-as-FixedLengthObject (legacy
+    // OlapColumnDataConvertorAggState).
+    void build_slices(std::vector<Slice>& slices, size_t row_pos, size_t num_rows) const {
+        const auto* base = _data.data() + (_item_size * row_pos);
+        slices.assign(num_rows, Slice());
+        for (size_t i = 0; i < num_rows; ++i) {
+            slices[i].data =
+                    reinterpret_cast<char*>(const_cast<uint8_t*>(base + i * _item_size));
+            slices[i].size = _item_size;
+        }
+    }
 
 protected:
     size_t _item_size;

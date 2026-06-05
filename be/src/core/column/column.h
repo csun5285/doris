@@ -41,6 +41,8 @@
 
 namespace doris {
 class SipHash;
+class TabletColumn;
+struct StorageView;
 }
 
 namespace doris {
@@ -647,6 +649,22 @@ public:
     virtual StringRef get_raw_data() const {
         throw doris::Exception(ErrorCode::NOT_IMPLEMENTED_ERROR,
                                "Column {} is not a contiguous block of memory", get_name());
+    }
+
+    // Materialize the storage-format byte view of [row_pos, row_pos+num_rows)
+    // into `out`. Each column subclass knows how to produce the bytes its
+    // schema-mapped FieldType expects: passthrough (point at inner buffer),
+    // repack (V1 layouts), pad+slice (CHAR), slice array (string/object), etc.
+    // `tablet_col` carries the schema FieldType / length / etc. needed by
+    // columns that serve multiple FieldTypes (e.g. ColumnString → CHAR vs
+    // VARCHAR vs STRING vs JSONB vs VARIANT).
+    // Composite types (Array / Map / Struct / Variant) and ColumnConst leave
+    // this unimplemented — they're handled by writer recursion, not via this
+    // generic byte view.
+    virtual Status storage_view(const TabletColumn& /*tablet_col*/, size_t /*row_pos*/,
+                                 size_t /*num_rows*/, StorageView* /*out*/) const {
+        return Status::NotSupported<false>(
+                "storage_view not implemented for column type {}", get_name());
     }
 
     // Column is ColumnString/ColumnArray/ColumnMap or other variable length column at every row

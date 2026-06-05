@@ -195,6 +195,9 @@ public:
     }
     void get(size_t n, Field& res) const override { res = (*this)[n]; }
 
+    Status storage_view(const TabletColumn& tablet_col, size_t row_pos, size_t num_rows,
+                        StorageView* out) const override;
+
     void clear() override { data.clear(); }
 
     ColumnPtr filter(const IColumn::Filter& filt, ssize_t result_size_hint) const override;

@@ -32,6 +32,7 @@
 #include "core/field.h"
 #include "core/types.h"
 #include "core/value/hll.h"
+#include "storage/segment/storage_view.h"
 
 namespace doris {
 
@@ -208,6 +209,22 @@ public:
         return StringRef(reinterpret_cast<const char*>(data.data()), data.size());
     }
 
+    // Materialize the column's BITMAP / HLL / QUANTILE_STATE values into the
+    // out-buffer's slice array (one Slice per row pointing into
+    // object_serialize_buf). Null slots get {nullptr, 0}.
+    Status storage_view(const TabletColumn& /*tablet_col*/, size_t row_pos, size_t num_rows,
+                        StorageView* out) const override {
+        DCHECK_LE(row_pos + num_rows, this->size());
+        build_slices(out->object_serialize_buf, out->slice_buf, row_pos, num_rows,
+                     /*nullmap=*/nullptr);
+        out->data = reinterpret_cast<const uint8_t*>(out->slice_buf.data());
+        out->row_size = sizeof(Slice);
+        out->num_rows = num_rows;
+        out->nullmap = nullptr;
+        out->is_slices = true;
+        return Status::OK();
+    }
+
     bool structure_equals(const IColumn& rhs) const override {
         return typeid(rhs) == typeid(ColumnComplexType<T>);
     }
@@ -250,6 +267,52 @@ public:
     }
 
     size_t serialize_size_at(size_t row) const override { return sizeof(data[row]); }
+
+    // Compute-layer -> storage-layer transform: serialize each row in
+    // [row_pos, row_pos + num_rows) into `serialize_buf`, populate `slices`
+    // pointing inside. Null rows (when `nullmap[row_pos + i] != 0`) get
+    // {nullptr, 0} to match the legacy OlapColumnDataConvertorBitMap/HLL/Quantile
+    // convention — inverted_index_writer skips rows on data == nullptr.
+    // Mirrors StarRocks ObjectColumn<T>::build_slices.
+    void build_slices(std::vector<char>& serialize_buf, std::vector<Slice>& slices,
+                      size_t row_pos, size_t num_rows, const uint8_t* nullmap) const {
+        const value_type* values = data.data() + row_pos;
+        size_t total = 0;
+        for (size_t i = 0; i < num_rows; ++i) {
+            if (nullmap != nullptr && nullmap[row_pos + i] != 0) continue;
+            if constexpr (T == TYPE_BITMAP) {
+                total += values[i].getSizeInBytes();
+            } else if constexpr (T == TYPE_HLL) {
+                // HLL::serialize returns <= max_serialized_size; over-allocate
+                // to the upper bound here, the slice records the actual count.
+                total += values[i].max_serialized_size();
+            } else if constexpr (T == TYPE_QUANTILE_STATE) {
+                total += values[i].get_serialized_size();
+            }
+        }
+        serialize_buf.resize(total);
+        slices.assign(num_rows, Slice());
+        char* raw = serialize_buf.data();
+        for (size_t i = 0; i < num_rows; ++i) {
+            if (nullmap != nullptr && nullmap[row_pos + i] != 0) {
+                slices[i].data = nullptr;
+                slices[i].size = 0;
+                continue;
+            }
+            size_t sz = 0;
+            if constexpr (T == TYPE_BITMAP) {
+                sz = values[i].getSizeInBytes();
+                values[i].write_to(raw);
+            } else if constexpr (T == TYPE_HLL) {
+                sz = values[i].serialize(reinterpret_cast<uint8_t*>(raw));
+            } else if constexpr (T == TYPE_QUANTILE_STATE) {
+                sz = values[i].serialize(reinterpret_cast<uint8_t*>(raw));
+            }
+            slices[i].data = raw;
+            slices[i].size = sz;
+            raw += sz;
+        }
+    }
 
 private:
     Container data;

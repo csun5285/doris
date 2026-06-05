@@ -19,8 +19,8 @@
 
 #include "storage/index/index_file_writer.h"
 #include "storage/index/inverted/inverted_index_desc.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/merger.h"
+#include "storage/segment/storage_view.h"
 #include "storage/olap_common.h"
 #include "storage/olap_define.h"
 #include "storage/rowset/pending_rowset_helper.h"
@@ -33,7 +33,6 @@ namespace segment_v2 {
 class IndexColumnWriter;
 class IndexFileWriter;
 } // namespace segment_v2
-class OlapBlockDataConvertor;
 
 class StorageEngine;
 class RowsetWriter;
@@ -67,7 +66,6 @@ private:
                          const TabletColumn* column, const uint8_t* null_map, const uint8_t** ptr,
                          size_t num_rows);
 
-private:
     StorageEngine& _engine;
     TabletSharedPtr _tablet;
     std::vector<TColumn> _columns;
@@ -79,7 +77,30 @@ private:
     std::vector<RowsetSharedPtr> _output_rowsets;
     std::vector<PendingRowsetGuard> _pending_rs_guards;
     std::vector<RowsetReaderSharedPtr> _input_rs_readers;
-    std::unique_ptr<OlapBlockDataConvertor> _olap_data_convertor;
+    // Owned StorageView per indexed column (keyed by index in
+    // _alter_inverted_indexes — entries are skipped for columns that don't
+    // support inverted/ann index). Each entry carries the view plus its
+    // 0-based position in the projected block read by next_batch (the iteration
+    // counter at the time the entry was added — also the same as the position
+    // of the cid in `return_columns` built alongside).
+    // Used to convert IColumn -> storage bytes for IndexColumnWriter::add_values
+    // feeds during the rebuild.
+    struct AlterIndexStager {
+        // Scalar columns: column->storage_view fills `view` for the bytes that
+        // feed IndexColumnWriter::add_values. ARRAY columns: scalar view is
+        // unused; item_view holds the item-column staging, offsets/null bits
+        // are read from the ColumnArray directly during write.
+        StorageView view;
+        StorageView item_view;
+        std::vector<uint64_t> array_offsets_buffer;
+        bool is_array {false};
+        size_t block_position {0};
+    };
+    Status _add_array(const std::string& column_name,
+                      const std::pair<int64_t, int64_t>& index_writer_sign,
+                      const TabletColumn* column, const IColumn& src, AlterIndexStager& entry,
+                      size_t num_rows);
+    std::map<int, AlterIndexStager> _stagers;
     // "<segment_id, index_id>" -> IndexColumnWriter
     std::unordered_map<std::pair<int64_t, int64_t>, std::unique_ptr<segment_v2::IndexColumnWriter>>
             _index_column_writers;

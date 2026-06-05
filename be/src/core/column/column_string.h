@@ -80,7 +80,6 @@ private:
     static constexpr size_t MAX_STRING_SIZE = 4294967295;
 
     friend class COWHelper<IColumn, ColumnStr<T>>;
-    friend class OlapBlockDataConvertor;
 
     /// Maps i'th position to offset to i+1'th element. Last offset maps to the end of all chars (is the size of all chars).
     PaddedPODArray<T> offsets;
@@ -154,6 +153,17 @@ public:
         sanity_check_simple();
         return StringRef(&chars[offset_at(n)], size_at(n));
     }
+
+    Status storage_view(const TabletColumn& tablet_col, size_t row_pos, size_t num_rows,
+                        StorageView* out) const override;
+
+    // CHAR helpers: O(1) check whether any row is shorter than the schema
+    // length, plus a right-pad-with-zeros clone that returns a new ColumnStr
+    // every row is exactly `padding_length` bytes.
+    bool needs_char_padding(size_t padding_length) const {
+        return size() * padding_length != chars.size();
+    }
+    ColumnPtr char_padded(size_t padding_length) const;
 
     String get_element(size_t n) const { return get_data_at(n).to_string(); }
 

@@ -34,7 +34,6 @@
 #include "service/point_query_executor.h"
 #include "storage/binlog.h"
 #include "storage/data_dir.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/key_coder.h"
 #include "storage/rowset/beta_rowset.h"
 #include "storage/rowset/rowset.h"
@@ -69,17 +68,6 @@ void insert_value_to_nullable_column(IColumn* dst_column, const IColumn& src_col
 
 Status PrimaryKeyModelRowRetriever::init(const HistoricalRowRetrieverContext& context) {
     _context = context;
-    _key_columns.resize(_context.tablet_schema->num_key_columns());
-    auto& tablet_schema = _context.tablet_schema;
-    for (size_t cid = 0; cid < tablet_schema->num_key_columns(); ++cid) {
-        const auto& column = tablet_schema->column(cid);
-        _key_coders.push_back(get_key_coder(column.type()));
-    }
-    // encode the sequence id into the primary key index
-    if (tablet_schema->has_sequence_col()) {
-        const auto& column = tablet_schema->column(tablet_schema->sequence_col_idx());
-        _seq_coder = const_cast<KeyCoder*>(get_key_coder(column.type()));
-    }
     return Status::OK();
 }
 
@@ -101,11 +89,11 @@ Status PrimaryKeyModelRowRetriever::retrieve_historical_row(const Int8* delete_s
         // After converting to olap column, [0, num_rows) in the result column is corresponding to
         // [row_pos, row_pos + num_rows) in the original block
         size_t delta_pos = block_pos - row_pos;
-        std::string key = _full_encode_keys(_key_columns, delta_pos);
+        std::string key = _full_encode_keys(_key_targets, delta_pos);
 
         _maybe_invalid_row_cache(key);
-        if (_seq_column != nullptr) {
-            _encode_seq_column(_seq_column, delta_pos, &key);
+        if (_has_seq_target) {
+            _encode_seq_column(&_seq_target, delta_pos, &key);
         }
 
         // mark key with delete sign as deleted.
@@ -115,7 +103,7 @@ Status PrimaryKeyModelRowRetriever::retrieve_historical_row(const Int8* delete_s
         RowLocation loc;
         // save rowset shared ptr so this rowset wouldn't delete
         RowsetSharedPtr rowset;
-        auto st = tablet->lookup_row_key(key, tablet->tablet_schema().get(), _seq_column != nullptr,
+        auto st = tablet->lookup_row_key(key, tablet->tablet_schema().get(), _has_seq_target,
                                          specified_rowsets, &loc, _mow_context->max_version,
                                          segment_caches, &rowset);
         if (st.is<KEY_NOT_FOUND>()) {
@@ -226,51 +214,31 @@ Status PrimaryKeyModelRowRetriever::build_before_block(Block* before_block,
 }
 
 std::string PrimaryKeyModelRowRetriever::_full_encode_keys(
-        const std::vector<IOlapColumnDataAccessor*>& key_columns, size_t pos, bool null_first) {
-    return _full_encode_keys(_key_coders, key_columns, pos, null_first);
-}
-
-std::string PrimaryKeyModelRowRetriever::_full_encode_keys(
-        const std::vector<const KeyCoder*>& key_coders,
-        const std::vector<IOlapColumnDataAccessor*>& key_columns, size_t pos, bool null_first) {
-    assert(key_columns.size() == key_coders.size());
-
+        const std::vector<KeyEncodingTarget>& key_targets, size_t pos) {
     std::string encoded_keys;
-    size_t cid = 0;
-    for (const auto& column : key_columns) {
-        auto field = column->get_data_at(pos);
-        if (UNLIKELY(!field)) {
-            if (null_first) {
-                encoded_keys.push_back(KeyConsts::KEY_NULL_FIRST_MARKER);
-            } else {
-                encoded_keys.push_back(KeyConsts::KEY_NORMAL_MARKER);
-            }
-            ++cid;
-            continue;
-        }
-        encoded_keys.push_back(KeyConsts::KEY_NORMAL_MARKER);
-        DCHECK(key_coders[cid] != nullptr);
-        key_coders[cid]->full_encode_ascending(field, &encoded_keys);
-        ++cid;
+    for (const auto& t : key_targets) {
+        DCHECK(t.coder != nullptr && t.view != nullptr);
+        auto st = storage_view_encode_full_key_ascending(t.coder, *t.view, pos, &encoded_keys);
+        DCHECK(st.ok()) << "storage_view_encode_full_key_ascending failed: " << st;
     }
     return encoded_keys;
 }
 
-void PrimaryKeyModelRowRetriever::_encode_seq_column(const IOlapColumnDataAccessor* seq_column,
+void PrimaryKeyModelRowRetriever::_encode_seq_column(const KeyEncodingTarget* seq_target,
                                                      size_t pos, std::string* encoded_keys) {
-    auto field = seq_column->get_data_at(pos);
     // To facilitate the use of the primary key index, encode the seq column
     // to the minimum value of the corresponding length when the seq column
     // is null
-    if (UNLIKELY(!field)) {
+    if (UNLIKELY(storage_view_is_null_at(*seq_target->view, pos))) {
         auto& tablet_schema = _context.tablet_schema;
         encoded_keys->push_back(KeyConsts::KEY_NULL_FIRST_MARKER);
         size_t seq_col_length = tablet_schema->column(tablet_schema->sequence_col_idx()).length();
         encoded_keys->append(seq_col_length, KeyConsts::KEY_MINIMAL_MARKER);
         return;
     }
-    encoded_keys->push_back(KeyConsts::KEY_NORMAL_MARKER);
-    _seq_coder->full_encode_ascending(field, encoded_keys);
+    auto st = storage_view_encode_full_key_ascending(seq_target->coder, *seq_target->view, pos,
+                                                      encoded_keys);
+    DCHECK(st.ok()) << "storage_view_encode_full_key_ascending failed: " << st;
 }
 
 void PrimaryKeyModelRowRetriever::_maybe_invalid_row_cache(const std::string& key) {

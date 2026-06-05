@@ -32,6 +32,8 @@
 #include "core/data_type/data_type_decimal.h"
 #include "core/decimal12.h"
 #include "core/value/decimalv2_value.h"
+#include "storage/segment/storage_view.h"
+#include "storage/tablet/tablet_schema.h"
 #include "exec/common/int_exp.h"
 #include "exec/common/sip_hash.h"
 #include "exec/sort/sort_block.h"
@@ -551,6 +553,38 @@ typename ColumnDecimal<T>::CppNativeType ColumnDecimal<T>::get_fractional_part(s
     } else {
         return data[n].value % DataTypeDecimal<T>::get_scale_multiplier(scale);
     }
+}
+
+// storage_view: ColumnDecimal<T> is bound 1:1 to a FieldType in storage:
+//   - TYPE_DECIMALV2 -> OLAP_FIELD_TYPE_DECIMAL (V1): in-memory Int128 wrapped
+//     in DecimalV2Value (9-digit integer + 9-digit fraction), on-disk is
+//     decimal12_t (8-byte integer + 4-byte fraction). Repack.
+//   - TYPE_DECIMAL32 / 64 / 128I / 256: passthrough (runtime native int matches
+//     on-disk layout).
+template <PrimitiveType T>
+Status ColumnDecimal<T>::storage_view(const TabletColumn& /*tablet_col*/, size_t row_pos,
+                                      size_t num_rows, StorageView* out) const {
+    DCHECK_LE(row_pos + num_rows, size());
+
+    if constexpr (T == TYPE_DECIMALV2) {
+        // V1 DECIMAL: DecimalV2Value -> decimal12_t
+        out->repack_buf.resize(num_rows * sizeof(decimal12_t));
+        auto* dst = reinterpret_cast<decimal12_t*>(out->repack_buf.data());
+        const auto* src = reinterpret_cast<const DecimalV2Value*>(data.data() + row_pos);
+        for (size_t i = 0; i < num_rows; ++i) {
+            dst[i] = decimal12_t {src[i].int_value(), src[i].frac_value()};
+        }
+        out->data = out->repack_buf.data();
+        out->row_size = sizeof(decimal12_t);
+    } else {
+        // V3 DECIMAL32/64/128I/256: native int, layout already matches disk.
+        out->data = reinterpret_cast<const uint8_t*>(data.data() + row_pos);
+        out->row_size = sizeof(typename ColumnDecimal<T>::value_type);
+    }
+    out->num_rows = num_rows;
+    out->nullmap = nullptr;
+    out->is_slices = false;
+    return Status::OK();
 }
 
 template class ColumnDecimal<TYPE_DECIMAL32>;

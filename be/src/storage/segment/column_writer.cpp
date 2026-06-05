@@ -25,10 +25,25 @@
 #include <memory>
 
 #include "common/config.h"
+#include "common/consts.h"
 #include "common/logging.h"
+#include "core/column/column.h"
+#include "core/column/column_array.h"
+#include "core/column/column_complex.h"
+#include "core/column/column_decimal.h"
+#include "core/column/column_fixed_length_object.h"
+#include "core/column/column_map.h"
+#include "core/column/column_nullable.h"
+#include "core/column/column_string.h"
+#include "core/column/column_struct.h"
+#include "core/column/column_vector.h"
 #include "core/data_type/data_type_agg_state.h"
 #include "core/data_type/data_type_factory.hpp"
+#include "core/decimal12.h"
 #include "core/types.h"
+#include "core/uint24.h"
+#include "core/value/decimalv2_value.h"
+#include "core/value/vdatetime_value.h"
 #include "io/fs/file_writer.h"
 #include "storage/index/bloom_filter/bloom_filter_index_writer.h"
 #include "storage/index/inverted/inverted_index_writer.h"
@@ -50,6 +65,8 @@
 #include "util/simd/bits.h"
 
 namespace doris::segment_v2 {
+
+using namespace KeyConsts;
 
 class NullBitmapBuilder {
 public:
@@ -308,8 +325,11 @@ Status ColumnWriter::create_agg_state_writer(const ColumnWriterOptions& opts,
     auto type = agg_state_type->get_serialized_type()->get_primitive_type();
     if (type == PrimitiveType::TYPE_STRING || type == PrimitiveType::INVALID_TYPE ||
         type == PrimitiveType::TYPE_FIXED_LENGTH_OBJECT || type == PrimitiveType::TYPE_BITMAP) {
-        *writer = std::unique_ptr<ColumnWriter>(
-                new ScalarColumnWriter(opts, std::make_shared<TabletColumn>(*column), file_writer));
+        // The runtime IColumn (ColumnString / ColumnBitmap / ColumnFixedLengthObject)
+        // implements its own storage_view; virtual dispatch picks the right
+        // staging path. AggStateColumnWriter is just a marker subclass.
+        *writer = std::unique_ptr<ColumnWriter>(new AggStateColumnWriter(
+                opts, std::make_shared<TabletColumn>(*column), file_writer));
     } else if (type == PrimitiveType::TYPE_ARRAY) {
         RETURN_IF_ERROR(create_array_writer(opts, column, file_writer, writer));
     } else if (type == PrimitiveType::TYPE_MAP) {
@@ -349,6 +369,15 @@ Status ColumnWriter::create_variant_writer(const ColumnWriterOptions& opts,
 Status ColumnWriter::create(const ColumnWriterOptions& opts, const TabletColumn* column,
                             io::FileWriter* file_writer, std::unique_ptr<ColumnWriter>* writer) {
     auto column_ptr = std::make_shared<TabletColumn>(*column);
+    // Object types (per-row C++ object -> serialized bytes) get their own writer
+    // even though is_scalar_type() classifies them as scalar.
+    if (column->type() == FieldType::OLAP_FIELD_TYPE_BITMAP ||
+        column->type() == FieldType::OLAP_FIELD_TYPE_HLL ||
+        column->type() == FieldType::OLAP_FIELD_TYPE_QUANTILE_STATE) {
+        *writer = std::unique_ptr<ColumnWriter>(
+                new ObjectColumnWriter(opts, std::move(column_ptr), file_writer));
+        return Status::OK();
+    }
     if (is_scalar_type(column->type())) {
         *writer = std::unique_ptr<ColumnWriter>(
                 new ScalarColumnWriter(opts, std::move(column_ptr), file_writer));
@@ -598,52 +627,48 @@ Status ScalarColumnWriter::append_nulls(size_t num_rows) {
     return Status::OK();
 }
 
-// append data to page builder. this function will make sure that
-// num_rows must be written before return. And ptr will be modified
-// to next data should be written
+// Write num_rows rows starting at *ptr. May fill the current page partway, finish
+// it, and start a new one. On return *ptr points past the last byte consumed so
+// the caller can chain further appends.
+//
+// All per-batch work lives inside this loop: page-builder add, zone-map /
+// inverted-index / bloom-filter feed, _next_rowid advance, and null-bitmap run
+// emit. RETURN_IF_CATCH_EXCEPTION wraps the body because page-builder buffer
+// growth can throw bad_alloc; we surface that as Status without unwinding past
+// ColumnWriter.
 Status ScalarColumnWriter::append_data(const uint8_t** ptr, size_t num_rows) {
+    const uint8_t* data = *ptr;
     size_t remaining = num_rows;
+    const auto& column_name = get_column()->name();
     while (remaining > 0) {
-        size_t num_written = remaining;
-        RETURN_IF_ERROR(append_data_in_current_page(ptr, &num_written));
-
-        remaining -= num_written;
-
+        size_t n = remaining;
+        RETURN_IF_CATCH_EXCEPTION({
+            RETURN_IF_ERROR(_page_builder->add(data, &n));
+            if (_opts.need_zone_map) {
+                _zone_map_index_builder->add_values(data, n);
+            }
+            if (_opts.need_inverted_index) {
+                for (const auto& builder : _inverted_index_builders) {
+                    RETURN_IF_ERROR(builder->add_values(column_name, data, n));
+                }
+            }
+            if (_opts.need_bloom_filter) {
+                RETURN_IF_ERROR(_bloom_filter_index_builder->add_values(data, n));
+            }
+            _next_rowid += n;
+            // Null bits must be written after data: the page builder may take
+            // fewer rows than requested, so we only know the final count here.
+            if (is_nullable()) {
+                _null_bitmap_builder->add_run(false, n);
+            }
+        });
+        data += cell_size() * n;
+        remaining -= n;
         if (_page_builder->is_page_full()) {
             RETURN_IF_ERROR(finish_current_page());
         }
     }
-    return Status::OK();
-}
-
-Status ScalarColumnWriter::_internal_append_data_in_current_page(const uint8_t* data,
-                                                                 size_t* num_written) {
-    RETURN_IF_ERROR(_page_builder->add(data, num_written));
-    if (_opts.need_zone_map) {
-        _zone_map_index_builder->add_values(data, *num_written);
-    }
-    if (_opts.need_inverted_index) {
-        for (const auto& builder : _inverted_index_builders) {
-            RETURN_IF_ERROR(builder->add_values(get_column()->name(), data, *num_written));
-        }
-    }
-    if (_opts.need_bloom_filter) {
-        RETURN_IF_ERROR(_bloom_filter_index_builder->add_values(data, *num_written));
-    }
-
-    _next_rowid += *num_written;
-
-    // we must write null bits after write data, because we don't
-    // know how many rows can be written into current page
-    if (is_nullable()) {
-        _null_bitmap_builder->add_run(false, *num_written);
-    }
-    return Status::OK();
-}
-
-Status ScalarColumnWriter::append_data_in_current_page(const uint8_t** data, size_t* num_written) {
-    RETURN_IF_ERROR(append_data_in_current_page(*data, num_written));
-    *data += cell_size() * (*num_written);
+    *ptr = data;
     return Status::OK();
 }
 
@@ -880,6 +905,28 @@ Status ScalarColumnWriter::finish_current_page() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// IColumn-based entry to scalar column writing.
+//
+//     Block -> ScalarColumnWriter::append(IColumn&, row_pos, num_rows)
+//            -> IColumn::storage_view stages storage-format bytes into _view
+//            -> forwards to the byte-level ColumnWriter::append, which feeds
+//               the page builder.
+////////////////////////////////////////////////////////////////////////////////
+
+Status ScalarColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
+    DCHECK(num_rows > 0);
+    DCHECK_LE(row_pos + num_rows, column.size());
+
+    // Per-type staging lives on the IColumn itself (virtual dispatch). The
+    // returned view holds storage-format bytes in `data` plus a pre-offset
+    // nullmap. ColumnNullable handles its own peeling + slice null-clobbering
+    // inside its storage_view(). Downstream PageBuilder is FieldType-templated
+    // and reinterprets `data` as POD-rows vs Slice[] per its own kind — both
+    // shapes forward through the same byte-level entry.
+    RETURN_IF_ERROR(column.storage_view(*get_column(), row_pos, num_rows, &_view));
+    return ColumnWriter::append(_view.nullmap, _view.data, _view.num_rows);
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // offset column writer
@@ -901,21 +948,43 @@ Status OffsetColumnWriter::init() {
     return Status::OK();
 }
 
+// Same loop shape as ScalarColumnWriter::append_data, plus: after each batch,
+// stash the next array tail offset that the caller appended one slot past the
+// last written row, so the page footer can record next_array_item_ordinal when
+// the page finishes.
 Status OffsetColumnWriter::append_data(const uint8_t** ptr, size_t num_rows) {
+    const uint8_t* data = *ptr;
     size_t remaining = num_rows;
+    const auto& column_name = get_column()->name();
     while (remaining > 0) {
-        size_t num_written = remaining;
-        RETURN_IF_ERROR(append_data_in_current_page(ptr, &num_written));
-        // Callers provide one extra tail offset after the written rows so the page footer can
-        // store the next array item ordinal for the current page.
-        _next_offset = *(const uint64_t*)(*ptr);
-        remaining -= num_written;
-
+        size_t n = remaining;
+        RETURN_IF_CATCH_EXCEPTION({
+            RETURN_IF_ERROR(_page_builder->add(data, &n));
+            if (_opts.need_zone_map) {
+                _zone_map_index_builder->add_values(data, n);
+            }
+            if (_opts.need_inverted_index) {
+                for (const auto& builder : _inverted_index_builders) {
+                    RETURN_IF_ERROR(builder->add_values(column_name, data, n));
+                }
+            }
+            if (_opts.need_bloom_filter) {
+                RETURN_IF_ERROR(_bloom_filter_index_builder->add_values(data, n));
+            }
+            _next_rowid += n;
+            if (is_nullable()) {
+                _null_bitmap_builder->add_run(false, n);
+            }
+        });
+        data += cell_size() * n;
+        // Callers provide one extra tail offset past the written rows.
+        _next_offset = *reinterpret_cast<const uint64_t*>(data);
+        remaining -= n;
         if (_page_builder->is_page_full()) {
-            // get next data for next array_item_rowid
             RETURN_IF_ERROR(finish_current_page());
         }
     }
+    *ptr = data;
     return Status::OK();
 }
 
@@ -1266,8 +1335,8 @@ Status MapColumnWriter::append_nullable(const uint8_t* null_map, const uint8_t**
 // write key value data with offsets
 Status MapColumnWriter::append_data(const uint8_t** ptr, size_t num_rows) {
     // data_ptr contains
-    // [size, offset_ptr, key_data_ptr, val_data_ptr, k_nullmap_ptr, v_nullmap_pr]
-    // which converted results from olap_map_convertor and later will use a structure to replace it
+    // [size, offset_ptr, key_data_ptr, val_data_ptr, k_nullmap_ptr, v_nullmap_ptr]
+    // — a legacy packed-pointer tuple; a proper struct should replace it.
     auto data_ptr = reinterpret_cast<const uint64_t*>(*ptr);
     // total number length
     size_t element_cnt = size_t((unsigned long)(*data_ptr));
@@ -1350,11 +1419,6 @@ Status VariantColumnWriter::init() {
     return _impl->init();
 }
 
-Status VariantColumnWriter::append_data(const uint8_t** ptr, size_t num_rows) {
-    _next_rowid += num_rows;
-    return _impl->append_data(ptr, num_rows);
-}
-
 uint64_t VariantColumnWriter::estimate_buffer_size() {
     return _impl->estimate_buffer_size();
 }
@@ -1380,9 +1444,209 @@ Status VariantColumnWriter::write_bloom_filter_index() {
     return _impl->write_bloom_filter_index();
 }
 
-Status VariantColumnWriter::append_nullable(const uint8_t* null_map, const uint8_t** ptr,
-                                            size_t num_rows) {
-    return _impl->append_nullable(null_map, ptr, num_rows);
+// IColumn-based entry — forwards a typed `ColumnVariant&` window to the impl,
+// which handles both the regular and streaming-compaction paths. We only accept
+// `ColumnVariant` (optionally wrapped in `ColumnNullable`); the legacy
+// OlapColumnDataConvertorVariant non-variant root-data branch never reaches a
+// VariantColumnWriter at SegmentWriter level.
+Status VariantColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
+    _next_rowid += num_rows;
+    const auto* nullable = check_and_get_column<ColumnNullable>(&column);
+    const IColumn& nested = nullable ? nullable->get_nested_column() : column;
+    const uint8_t* null_map_full = nullable ? nullable->get_null_map_data().data() : nullptr;
+    const auto* col_variant = check_and_get_column<ColumnVariant>(&nested);
+    if (UNLIKELY(col_variant == nullptr)) {
+        return Status::NotSupported<false>(
+                "VariantColumnWriter::append(IColumn&) only supports ColumnVariant input");
+    }
+    // Impl reads num_rows bytes from null_map starting at the supplied pointer,
+    // so offset by row_pos here to match the window consumed.
+    const uint8_t* null_map = null_map_full ? null_map_full + row_pos : nullptr;
+    return _impl->append_variant(*col_variant, row_pos, num_rows, null_map);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Composite-type append(IColumn&). Array / Map / Struct each recurse into
+// sub-writer(s) via ColumnWriter::append(IColumn&), then write offsets / null
+// bits themselves.
+////////////////////////////////////////////////////////////////////////////////
+
+Status ArrayColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
+    const auto* nullable = check_and_get_column<ColumnNullable>(&column);
+    const IColumn& nested = nullable ? nullable->get_nested_column() : column;
+    const auto* col_array = check_and_get_column<ColumnArray>(&nested);
+    if (UNLIKELY(col_array == nullptr)) {
+        return Status::InternalError(
+                "ArrayColumnWriter::append(IColumn&) got unexpected column: {}",
+                nested.get_name());
+    }
+
+    // Inverted / ann index code paths read post-conversion item bytes. We only
+    // support scalar item writers because the index writers expect contiguous
+    // storage-format byte arrays (one entry per element) — composite item
+    // writers don't have that shape.
+    const bool need_index = _opts.need_inverted_index || _opts.need_ann_index;
+    if (need_index && dynamic_cast<ScalarColumnWriter*>(_item_writer.get()) == nullptr) {
+        return Status::NotSupported<false>(
+                "ArrayColumnWriter::append(IColumn&): inverted / ann index requires a scalar "
+                "item writer");
+    }
+
+    const size_t start_offset = col_array->offset_at(cast_set<ssize_t, size_t, false>(row_pos));
+    const size_t end_offset =
+            col_array->offset_at(cast_set<ssize_t, size_t, false>(row_pos + num_rows));
+    const size_t elem_size = end_offset - start_offset;
+
+    // Produce num_rows+1 offsets so the offset writer can read offsets[num_rows]
+    // as the next page marker. _array_base_offset accumulates across calls
+    // within the segment.
+    _array_offsets_buffer.clear();
+    _array_offsets_buffer.reserve(num_rows + 1);
+    for (size_t i = 0; i <= num_rows; ++i) {
+        _array_offsets_buffer.push_back(
+                col_array->offset_at(cast_set<ssize_t, size_t, false>(i + row_pos)) -
+                start_offset + _array_base_offset);
+    }
+    _array_base_offset += elem_size;
+
+    if (elem_size > 0) {
+        RETURN_IF_ERROR(_item_writer->append(*col_array->get_data_ptr(), start_offset, elem_size));
+    }
+
+    const uint8_t* offsets_ptr = reinterpret_cast<const uint8_t*>(_array_offsets_buffer.data());
+    if (need_index) {
+        // add_array_values must be called per batch even when elem_size == 0 so the
+        // inverted-index writer's per-row counter (_rid) advances; otherwise a
+        // subsequent add_array_nulls underflows _rid - num_rows. When there are
+        // items, borrow the item writer's just-staged view (the append above
+        // staged exactly [start_offset, elem_size); the writer is guaranteed
+        // scalar by the need_index check) instead of staging a second copy.
+        const uint8_t* item_data = nullptr;
+        const uint8_t* item_null = nullptr;
+        if (elem_size > 0) {
+            const auto& item_view =
+                    assert_cast<ScalarColumnWriter*>(_item_writer.get())->view();
+            DCHECK_EQ(item_view.num_rows, elem_size);
+            item_data = item_view.data;
+            item_null = item_view.nullmap;
+        }
+        if (_opts.need_inverted_index) {
+            RETURN_IF_ERROR(_inverted_index_writer->add_array_values(
+                    field_type_size(_item_writer->get_column()->type()),
+                    reinterpret_cast<const void*>(item_data), item_null, offsets_ptr,
+                    num_rows));
+        }
+        if (_opts.need_ann_index) {
+            RETURN_IF_ERROR(_ann_index_writer->add_array_values(
+                    field_type_size(_item_writer->get_column()->type()),
+                    reinterpret_cast<const void*>(item_data), item_null, offsets_ptr,
+                    num_rows));
+        }
+    }
+
+    RETURN_IF_ERROR(_offset_writer->append_data(&offsets_ptr, num_rows));
+
+    if (is_nullable()) {
+        const uint8_t* null_ptr =
+                nullable ? nullable->get_null_map_data().data() + row_pos : nullptr;
+        if (null_ptr != nullptr) {
+            if (_opts.need_inverted_index) {
+                RETURN_IF_ERROR(_inverted_index_writer->add_array_nulls(null_ptr, num_rows));
+            }
+            RETURN_IF_ERROR(_null_writer->append_data(&null_ptr, num_rows));
+        } else {
+            // Schema is nullable but the runtime column isn't ColumnNullable —
+            // append zeros for the null bits.
+            std::vector<uint8_t> zeros(num_rows, 0);
+            const uint8_t* ptr = zeros.data();
+            if (_opts.need_inverted_index) {
+                RETURN_IF_ERROR(_inverted_index_writer->add_array_nulls(ptr, num_rows));
+            }
+            RETURN_IF_ERROR(_null_writer->append_data(&ptr, num_rows));
+        }
+    }
+    return Status::OK();
+}
+
+Status MapColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
+    const auto* nullable = check_and_get_column<ColumnNullable>(&column);
+    const IColumn& nested = nullable ? nullable->get_nested_column() : column;
+    const auto* col_map = check_and_get_column<ColumnMap>(&nested);
+    if (UNLIKELY(col_map == nullptr)) {
+        return Status::InternalError("MapColumnWriter::append(IColumn&) got unexpected column: {}",
+                                      nested.get_name());
+    }
+
+    const size_t start_offset = col_map->offset_at(cast_set<ssize_t, size_t, false>(row_pos));
+    const size_t end_offset =
+            col_map->offset_at(cast_set<ssize_t, size_t, false>(row_pos + num_rows));
+    const size_t elem_size = end_offset - start_offset;
+
+    _map_offsets_buffer.clear();
+    _map_offsets_buffer.reserve(num_rows + 1);
+    for (size_t i = 0; i <= num_rows; ++i) {
+        _map_offsets_buffer.push_back(
+                col_map->offset_at(cast_set<ssize_t, size_t, false>(i + row_pos)) -
+                start_offset + _map_base_offset);
+    }
+    _map_base_offset += elem_size;
+
+    if (elem_size > 0) {
+        RETURN_IF_ERROR(_kv_writers[0]->append(*col_map->get_keys_ptr(), start_offset, elem_size));
+        RETURN_IF_ERROR(
+                _kv_writers[1]->append(*col_map->get_values_ptr(), start_offset, elem_size));
+    }
+
+    // Order matters: offset writer sets next_array_item_ordinal from kv writers'
+    // get_next_rowid() during finish_current_page(), so kv writes must run first.
+    const uint8_t* offsets_ptr = reinterpret_cast<const uint8_t*>(_map_offsets_buffer.data());
+    RETURN_IF_ERROR(_offsets_writer->append_data(&offsets_ptr, num_rows));
+
+    if (is_nullable()) {
+        const uint8_t* null_ptr =
+                nullable ? nullable->get_null_map_data().data() + row_pos : nullptr;
+        if (null_ptr != nullptr) {
+            RETURN_IF_ERROR(_null_writer->append_data(&null_ptr, num_rows));
+        } else {
+            std::vector<uint8_t> zeros(num_rows, 0);
+            const uint8_t* ptr = zeros.data();
+            RETURN_IF_ERROR(_null_writer->append_data(&ptr, num_rows));
+        }
+    }
+    return Status::OK();
+}
+
+Status StructColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
+    const auto* nullable = check_and_get_column<ColumnNullable>(&column);
+    const IColumn& nested = nullable ? nullable->get_nested_column() : column;
+    const auto* col_struct = check_and_get_column<ColumnStruct>(&nested);
+    if (UNLIKELY(col_struct == nullptr)) {
+        return Status::InternalError(
+                "StructColumnWriter::append(IColumn&) got unexpected column: {}",
+                nested.get_name());
+    }
+    if (UNLIKELY(col_struct->tuple_size() != _num_sub_column_writers)) {
+        return Status::InternalError(
+                "StructColumnWriter::append(IColumn&) sub-column count mismatch: "
+                "struct={} writers={}",
+                col_struct->tuple_size(), _num_sub_column_writers);
+    }
+    for (size_t i = 0; i < _num_sub_column_writers; ++i) {
+        RETURN_IF_ERROR(
+                _sub_column_writers[i]->append(*col_struct->get_column_ptr(i), row_pos, num_rows));
+    }
+    if (is_nullable()) {
+        const uint8_t* null_ptr =
+                nullable ? nullable->get_null_map_data().data() + row_pos : nullptr;
+        if (null_ptr != nullptr) {
+            RETURN_IF_ERROR(_null_writer->append_data(&null_ptr, num_rows));
+        } else {
+            std::vector<uint8_t> zeros(num_rows, 0);
+            const uint8_t* ptr = zeros.data();
+            RETURN_IF_ERROR(_null_writer->append_data(&ptr, num_rows));
+        }
+    }
+    return Status::OK();
 }
 
 } // namespace doris::segment_v2

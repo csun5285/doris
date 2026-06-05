@@ -54,7 +54,6 @@
 #include "storage/index/inverted/inverted_index_fs_directory.h"
 #include "storage/index/primary_key_index.h"
 #include "storage/index/short_key_index.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/key_coder.h"
 #include "storage/olap_common.h"
 #include "storage/olap_define.h"
@@ -311,8 +310,6 @@ Status SegmentWriter::_create_column_writer(uint32_t cid, const TabletColumn& co
     RETURN_IF_ERROR(ColumnWriter::create(opts, &column, _file_writer, &writer));
     RETURN_IF_ERROR(writer->init());
     _column_writers.push_back(std::move(writer));
-
-    _olap_data_convertor->add_column_data_convertor(column);
     return Status::OK();
 }
 
@@ -322,7 +319,6 @@ Status SegmentWriter::init(const std::vector<uint32_t>& col_ids, bool has_key) {
     _has_key = has_key;
     _column_writers.reserve(_tablet_schema->columns().size());
     _column_ids.insert(_column_ids.end(), col_ids.begin(), col_ids.end());
-    _olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     if (_opts.compression_type == UNKNOWN_COMPRESSION) {
         _opts.compression_type = _tablet_schema->compression_type();
     }
@@ -363,7 +359,6 @@ Status SegmentWriter::init(const std::vector<uint32_t>& col_ids, bool has_key) {
 
 Status SegmentWriter::_create_writers(const TabletSchemaSPtr& tablet_schema,
                                       const std::vector<uint32_t>& col_ids) {
-    _olap_data_convertor->reserve(col_ids.size());
     for (auto& cid : col_ids) {
         RETURN_IF_ERROR(_create_column_writer(cid, tablet_schema->column(cid), tablet_schema));
     }
@@ -502,12 +497,12 @@ Status SegmentWriter::partial_update_preconditions_check(size_t row_pos) {
 }
 
 // for partial update, we should do following steps to fill content of block:
-// 1. set block data to data convertor, and get all key_column's converted slice
-// 2. get pk of input block, and read missing columns
-//       2.1 first find key location{rowset_id, segment_id, row_id}
-//       2.2 build read plan to read by batch
-//       2.3 fill block
-// 3. set columns to data convertor and then write all columns
+// 1. append the including (update) columns; snapshot their writers' staged
+//    views into KeyEncodingTargets for the key / seq columns
+// 2. encode each row's pk from the staged views, look up its location
+//    {rowset_id, segment_id, row_id}, build a read plan, and fill the
+//    missing columns into full_block
+// 3. append the filled missing columns and build the primary key index
 Status SegmentWriter::append_block_with_partial_content(const Block* block, size_t row_pos,
                                                         size_t num_rows) {
     if (block->columns() < _tablet_schema->num_key_columns() ||
@@ -536,32 +531,32 @@ Status SegmentWriter::append_block_with_partial_content(const Block* block, size
         RETURN_IF_ERROR(variant_util::parse_and_materialize_variant_columns(
                 full_block, *_tablet_schema, including_cids));
     }
-    RETURN_IF_ERROR(_olap_data_convertor->set_source_content_with_specifid_columns(
-            &full_block, row_pos, num_rows, including_cids));
-
     bool have_input_seq_column = false;
-    // write including columns
-    std::vector<IOlapColumnDataAccessor*> key_columns;
-    IOlapColumnDataAccessor* seq_column = nullptr;
+    // write including columns via the IColumn-based path; for key / seq
+    // columns, snapshot the writer's just-staged view into a per-batch
+    // KeyEncodingTarget so the row-by-row key encode reads the same bytes.
+    std::vector<KeyEncodingTarget> key_targets;
+    KeyEncodingTarget seq_target;
+    bool has_seq_target = false;
     size_t segment_start_pos = 0;
     for (auto cid : including_cids) {
-        // here we get segment column row num before append data.
         segment_start_pos = _column_writers[cid]->get_next_rowid();
-        // olap data convertor alway start from id = 0
-        auto converted_result = _olap_data_convertor->convert_column_data(cid);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
-        }
+        const auto& col = full_block.get_by_position(cid).column;
+        RETURN_IF_ERROR(_column_writers[cid]->append(*col, row_pos, num_rows));
+        // Key / seq columns are always scalar; reuse the writer's just-staged
+        // view (cast only inside the branches that need it — composite writers
+        // never appear here).
         if (cid < _num_sort_key_columns) {
-            key_columns.push_back(converted_result.second);
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[cid].get());
+            key_targets.push_back(
+                    {get_key_coder(_tablet_schema->column(cid).type()), &scalar_writer->view()});
         } else if (_tablet_schema->has_sequence_col() &&
                    cid == _tablet_schema->sequence_col_idx()) {
-            seq_column = converted_result.second;
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[cid].get());
+            seq_target = {_seq_coder, &scalar_writer->view()};
+            has_seq_target = true;
             have_input_seq_column = true;
         }
-        RETURN_IF_ERROR(_column_writers[cid]->append(converted_result.second->get_nullmap(),
-                                                     converted_result.second->get_data(),
-                                                     num_rows));
     }
 
     bool has_default_or_nullable = false;
@@ -587,10 +582,13 @@ Status SegmentWriter::append_block_with_partial_content(const Block* block, size
         // here row_pos = 2, num_rows = 4.
         size_t delta_pos = block_pos - row_pos;
         size_t segment_pos = segment_start_pos + delta_pos;
-        std::string key = _full_encode_keys(key_columns, delta_pos);
+        std::string key;
+        RETURN_IF_ERROR(_full_encode_keys(key_targets, delta_pos, &key));
         _maybe_invalid_row_cache(key);
         if (have_input_seq_column) {
-            _encode_seq_column(seq_column, delta_pos, &key);
+            // have_input_seq_column implies has_seq_target (set together above).
+            DCHECK(has_seq_target);
+            RETURN_IF_ERROR(_encode_seq_column(&seq_target, delta_pos, &key));
         }
         // If the table have sequence column, and the include-cids don't contain the sequence
         // column, we need to update the primary key index builder at the end of this method.
@@ -639,28 +637,23 @@ Status SegmentWriter::append_block_with_partial_content(const Block* block, size
     _serialize_block_to_row_column(full_block);
 
     // convert missing columns and send to column writer
-    RETURN_IF_ERROR(_olap_data_convertor->set_source_content_with_specifid_columns(
-            &full_block, row_pos, num_rows, missing_cids));
     for (auto cid : missing_cids) {
-        auto converted_result = _olap_data_convertor->convert_column_data(cid);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
-        }
+        const auto& col = full_block.get_by_position(cid).column;
+        RETURN_IF_ERROR(_column_writers[cid]->append(*col, row_pos, num_rows));
         if (_tablet_schema->has_sequence_col() && !have_input_seq_column &&
             cid == _tablet_schema->sequence_col_idx()) {
-            DCHECK_EQ(seq_column, nullptr);
-            seq_column = converted_result.second;
+            DCHECK(!has_seq_target);
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[cid].get());
+            seq_target = {_seq_coder, &scalar_writer->view()};
+            has_seq_target = true;
         }
-        RETURN_IF_ERROR(_column_writers[cid]->append(converted_result.second->get_nullmap(),
-                                                     converted_result.second->get_data(),
-                                                     num_rows));
     }
     _num_rows_updated += stats.num_rows_updated;
     _num_rows_deleted += stats.num_rows_deleted;
     _num_rows_new_added += stats.num_rows_new_added;
     _num_rows_filtered += stats.num_rows_filtered;
     if (_tablet_schema->has_sequence_col() && !have_input_seq_column) {
-        DCHECK_NE(seq_column, nullptr);
+        DCHECK(has_seq_target);
         if (_num_rows_written != row_pos ||
             _primary_key_index_builder->num_rows() != _num_rows_written) {
             return Status::InternalError(
@@ -668,15 +661,14 @@ Status SegmentWriter::append_block_with_partial_content(const Block* block, size
                     "index builder num rows: {}",
                     _num_rows_written, row_pos, _primary_key_index_builder->num_rows());
         }
-        RETURN_IF_ERROR(
-                _generate_primary_key_index(_key_coders, key_columns, seq_column, num_rows, false));
+        RETURN_IF_ERROR(_generate_primary_key_index_from_views(key_targets, &seq_target, num_rows,
+                                                               /*need_sort=*/false));
     }
 
     _num_rows_written += num_rows;
     DCHECK_EQ(_primary_key_index_builder->num_rows(), _num_rows_written)
             << "primary key index builder num rows(" << _primary_key_index_builder->num_rows()
             << ") not equal to segment writer's num rows written(" << _num_rows_written << ")";
-    _olap_data_convertor->clear_source_content();
 
     return Status::OK();
 }
@@ -720,41 +712,93 @@ Status SegmentWriter::append_block(const Block* block, size_t row_pos, size_t nu
                 const_cast<Block&>(*block), *_tablet_schema, _column_ids));
     }
 
-    _olap_data_convertor->set_source_content(block, row_pos, num_rows);
+    // ColumnWriter::append(IColumn&) feeds the page builder; for key / seq /
+    // cluster-key columns we snapshot the writer's just-staged view into a
+    // KeyEncodingTarget so the key index can be encoded from storage-format
+    // bytes without consulting the writer's internal state.
+    std::vector<KeyEncodingTarget> key_targets;
+    KeyEncodingTarget seq_target;
+    bool has_seq_target = false;
+    std::map<int32_t /*field_index*/, KeyEncodingTarget> cluster_key_targets_by_idx;
+    // For vertical compaction, value-group batches set _has_key=false and don't
+    // carry cluster-key columns; only key-group batches contribute to the short
+    // key index. Gate the cluster-key staging by _has_key to match build_key_index.
+    const bool need_cluster_key_targets = _has_key && _is_mow_with_cluster_key();
 
-    // convert column data from engine format to storage layer format
-    std::vector<IOlapColumnDataAccessor*> key_columns;
-    IOlapColumnDataAccessor* seq_column = nullptr;
     for (size_t id = 0; id < _column_writers.size(); ++id) {
-        // olap data convertor alway start from id = 0
-        auto converted_result = _olap_data_convertor->convert_column_data(id);
-        if (!converted_result.first.ok()) {
-            return converted_result.first;
-        }
         auto cid = _column_ids[id];
+        const auto& col = block->get_by_position(id).column;
+        RETURN_IF_ERROR(_column_writers[id]->append(*col, row_pos, num_rows));
+        // Key / seq / cluster columns are always scalar; cast inside the
+        // branches that actually need it. Composite writers (variant / array /
+        // map / struct) reach this loop too but never match these conditions.
+
         if (_has_key && cid < _tablet_schema->num_key_columns()) {
-            key_columns.push_back(converted_result.second);
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[id].get());
+            // _key_coders is keyed by sort-key position; for non-cluster MoW
+            // (the only case here when num_key_columns covers sort keys) cid
+            // == sort-key position. For cluster-key MoW we fall through to the
+            // cluster-key branch below.
+            key_targets.push_back(
+                    {get_key_coder(_tablet_schema->column(cid).type()), &scalar_writer->view()});
         } else if (_has_key && _tablet_schema->has_sequence_col() &&
                    cid == _tablet_schema->sequence_col_idx()) {
-            seq_column = converted_result.second;
+            auto* scalar_writer = assert_cast<ScalarColumnWriter*>(_column_writers[id].get());
+            seq_target = {_seq_coder, &scalar_writer->view()};
+            has_seq_target = true;
         }
-        RETURN_IF_ERROR(_column_writers[id]->append(converted_result.second->get_nullmap(),
-                                                    converted_result.second->get_data(), num_rows));
+
+        if (need_cluster_key_targets) {
+            // Cluster keys are looked up by uid -> field_index; adopt the
+            // writer's view for any column whose cid matches a cluster key.
+            auto it = std::find(_tablet_schema->cluster_key_uids().begin(),
+                                _tablet_schema->cluster_key_uids().end(),
+                                _tablet_schema->column(cid).unique_id());
+            if (it != _tablet_schema->cluster_key_uids().end()) {
+                auto* scalar_writer =
+                        assert_cast<ScalarColumnWriter*>(_column_writers[id].get());
+                cluster_key_targets_by_idx[cid] = {
+                        get_key_coder(_tablet_schema->column(cid).type()), &scalar_writer->view()};
+            }
+        }
     }
+
+    std::vector<KeyEncodingTarget> cluster_key_targets;
+    if (need_cluster_key_targets) {
+        for (const auto& uid : _tablet_schema->cluster_key_uids()) {
+            auto ck_idx = _tablet_schema->field_index(uid);
+            if (ck_idx < 0) {
+                return Status::InternalError(
+                        "could not find cluster key column with unique_id={} in tablet schema",
+                        uid);
+            }
+            auto it = cluster_key_targets_by_idx.find(ck_idx);
+            if (it == cluster_key_targets_by_idx.end()) {
+                return Status::InternalError(
+                        "cluster key column with unique_id={}, field_index={} not staged in this "
+                        "block",
+                        uid, ck_idx);
+            }
+            cluster_key_targets.push_back(it->second);
+        }
+    }
+
     if (_opts.write_type == DataWriteType::TYPE_COMPACTION) {
         RETURN_IF_ERROR(
                 _variant_stats_calculator->calculate_variant_stats(block, row_pos, num_rows));
     }
 
-    RETURN_IF_ERROR(build_key_index(key_columns, seq_column, num_rows));
+    RETURN_IF_ERROR(build_key_index(key_targets, has_seq_target ? &seq_target : nullptr,
+                                    cluster_key_targets, num_rows));
 
     _num_rows_written += num_rows;
-    _olap_data_convertor->clear_source_content();
     return Status::OK();
 }
 
-Status SegmentWriter::build_key_index(std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                      IOlapColumnDataAccessor* seq_column, size_t num_rows) {
+Status SegmentWriter::build_key_index(const std::vector<KeyEncodingTarget>& key_targets,
+                                      const KeyEncodingTarget* seq_target,
+                                      const std::vector<KeyEncodingTarget>& cluster_key_targets,
+                                      size_t num_rows) {
     if (!_has_key) {
         return Status::OK();
     }
@@ -770,42 +814,17 @@ Status SegmentWriter::build_key_index(std::vector<IOlapColumnDataAccessor*>& key
     }
 
     if (_is_mow_with_cluster_key()) {
-        // For CLUSTER BY tables:
-        // 1) generate primary key index (unique keys)
-        RETURN_IF_ERROR(_generate_primary_key_index(_primary_key_coders, key_columns, seq_column,
-                                                    num_rows, true));
-        // 2) generate short key index (cluster keys)
-        key_columns.clear();
-        for (const auto& cid : _tablet_schema->cluster_key_uids()) {
-            auto cluster_key_index = _tablet_schema->field_index(cid);
-            if (cluster_key_index == -1) {
-                return Status::InternalError("could not find cluster key column with unique_id=" +
-                                             std::to_string(cid) + " in tablet schema");
-            }
-            bool found = false;
-            for (auto i = 0; i < _column_ids.size(); ++i) {
-                if (_column_ids[i] == cluster_key_index) {
-                    auto converted_result = _olap_data_convertor->convert_column_data(i);
-                    if (!converted_result.first.ok()) {
-                        return converted_result.first;
-                    }
-                    key_columns.push_back(converted_result.second);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                return Status::InternalError(
-                        "could not found cluster key column with unique_id=" + std::to_string(cid) +
-                        ", tablet schema index=" + std::to_string(cluster_key_index));
-            }
-        }
-        return _generate_short_key_index(key_columns, num_rows, short_key_pos);
+        // CLUSTER BY tables: 1) primary key index uses unique keys
+        //                    2) short key index uses cluster keys
+        RETURN_IF_ERROR(_generate_primary_key_index_from_views(key_targets, seq_target, num_rows,
+                                                               /*need_sort=*/true));
+        return _generate_short_key_index_from_views(cluster_key_targets, num_rows, short_key_pos);
     }
     if (_is_mow()) {
-        return _generate_primary_key_index(_key_coders, key_columns, seq_column, num_rows, false);
+        return _generate_primary_key_index_from_views(key_targets, seq_target, num_rows,
+                                                      /*need_sort=*/false);
     }
-    return _generate_short_key_index(key_columns, num_rows, short_key_pos);
+    return _generate_short_key_index_from_views(key_targets, num_rows, short_key_pos);
 }
 
 int64_t SegmentWriter::max_row_to_add(size_t row_avg_size_in_bytes) {
@@ -820,79 +839,9 @@ int64_t SegmentWriter::max_row_to_add(size_t row_avg_size_in_bytes) {
     return std::min(size_rows, count_rows);
 }
 
-std::string SegmentWriter::_full_encode_keys(
-        const std::vector<IOlapColumnDataAccessor*>& key_columns, size_t pos, bool null_first) {
-    assert(_key_index_size.size() == _num_sort_key_columns);
-    assert(key_columns.size() == _num_sort_key_columns &&
-           _key_coders.size() == _num_sort_key_columns);
-    return _full_encode_keys(_key_coders, key_columns, pos, null_first);
-}
-
-std::string SegmentWriter::_full_encode_keys(
-        const std::vector<const KeyCoder*>& key_coders,
-        const std::vector<IOlapColumnDataAccessor*>& key_columns, size_t pos, bool null_first) {
-    assert(key_columns.size() == key_coders.size());
-
-    std::string encoded_keys;
-    size_t cid = 0;
-    for (const auto& column : key_columns) {
-        auto field = column->get_data_at(pos);
-        if (UNLIKELY(!field)) {
-            if (null_first) {
-                encoded_keys.push_back(KEY_NULL_FIRST_MARKER);
-            } else {
-                encoded_keys.push_back(KEY_NORMAL_MARKER);
-            }
-            ++cid;
-            continue;
-        }
-        encoded_keys.push_back(KEY_NORMAL_MARKER);
-        DCHECK(key_coders[cid] != nullptr);
-        key_coders[cid]->full_encode_ascending(field, &encoded_keys);
-        ++cid;
-    }
-    return encoded_keys;
-}
-
-void SegmentWriter::_encode_seq_column(const IOlapColumnDataAccessor* seq_column, size_t pos,
-                                       std::string* encoded_keys) {
-    auto field = seq_column->get_data_at(pos);
-    // To facilitate the use of the primary key index, encode the seq column
-    // to the minimum value of the corresponding length when the seq column
-    // is null
-    if (UNLIKELY(!field)) {
-        encoded_keys->push_back(KEY_NULL_FIRST_MARKER);
-        size_t seq_col_length = _tablet_schema->column(_tablet_schema->sequence_col_idx()).length();
-        encoded_keys->append(seq_col_length, KEY_MINIMAL_MARKER);
-        return;
-    }
-    encoded_keys->push_back(KEY_NORMAL_MARKER);
-    _seq_coder->full_encode_ascending(field, encoded_keys);
-}
-
 void SegmentWriter::_encode_rowid(const uint32_t rowid, std::string* encoded_keys) {
     encoded_keys->push_back(KEY_NORMAL_MARKER);
     _rowid_coder->full_encode_ascending(&rowid, encoded_keys);
-}
-
-std::string SegmentWriter::_encode_keys(const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                        size_t pos) {
-    assert(key_columns.size() == _num_short_key_columns);
-
-    std::string encoded_keys;
-    size_t cid = 0;
-    for (const auto& column : key_columns) {
-        auto field = column->get_data_at(pos);
-        if (UNLIKELY(!field)) {
-            encoded_keys.push_back(KEY_NULL_FIRST_MARKER);
-            ++cid;
-            continue;
-        }
-        encoded_keys.push_back(KEY_NORMAL_MARKER);
-        _key_coders[cid]->encode_ascending(field, _key_index_size[cid], &encoded_keys);
-        ++cid;
-    }
-    return encoded_keys;
 }
 
 // TODO(lingbin): Currently this function does not include the size of various indexes,
@@ -1036,7 +985,6 @@ void SegmentWriter::clear() {
     }
     _column_writers.clear();
     _column_ids.clear();
-    _olap_data_convertor.reset();
 }
 
 // write column data to file one by one
@@ -1187,18 +1135,57 @@ void SegmentWriter::set_mow_context(std::shared_ptr<MowContext> mow_context) {
     _mow_context = mow_context;
 }
 
-Status SegmentWriter::_generate_primary_key_index(
-        const std::vector<const KeyCoder*>& primary_key_coders,
-        const std::vector<IOlapColumnDataAccessor*>& primary_key_columns,
-        IOlapColumnDataAccessor* seq_column, size_t num_rows, bool need_sort) {
+// Key encoders. Each KeyEncodingTarget pairs a KeyCoder with the
+// already-staged storage-byte view for the current write batch, keeping data
+// write and key encode as separate consumers of one staging.
+
+Status SegmentWriter::_full_encode_keys(const std::vector<KeyEncodingTarget>& key_targets,
+                                        size_t pos, std::string* encoded_keys) {
+    for (const auto& t : key_targets) {
+        DCHECK(t.coder != nullptr && t.view != nullptr);
+        RETURN_IF_ERROR(
+                storage_view_encode_full_key_ascending(t.coder, *t.view, pos, encoded_keys));
+    }
+    return Status::OK();
+}
+
+Status SegmentWriter::_encode_keys(const std::vector<KeyEncodingTarget>& key_targets, size_t pos,
+                                   std::string* encoded_keys) {
+    for (size_t cid = 0; cid < key_targets.size(); ++cid) {
+        const auto& t = key_targets[cid];
+        DCHECK(t.coder != nullptr && t.view != nullptr);
+        RETURN_IF_ERROR(storage_view_encode_short_key_ascending(t.coder, *t.view, pos, encoded_keys,
+                                                                  _key_index_size[cid]));
+    }
+    return Status::OK();
+}
+
+Status SegmentWriter::_encode_seq_column(const KeyEncodingTarget* seq_target, size_t pos,
+                                         std::string* encoded_keys) {
+    DCHECK(seq_target != nullptr && seq_target->coder != nullptr && seq_target->view != nullptr);
+    if (storage_view_is_null_at(*seq_target->view, pos)) {
+        // A null sequence value encodes as null marker + min-byte padding for
+        // the seq column's full length, so it sorts before any real value.
+        encoded_keys->push_back(KEY_NULL_FIRST_MARKER);
+        size_t seq_col_length = _tablet_schema->column(_tablet_schema->sequence_col_idx()).length();
+        encoded_keys->append(seq_col_length, KEY_MINIMAL_MARKER);
+        return Status::OK();
+    }
+    return storage_view_encode_full_key_ascending(seq_target->coder, *seq_target->view, pos,
+                                                   encoded_keys);
+}
+
+Status SegmentWriter::_generate_primary_key_index_from_views(
+        const std::vector<KeyEncodingTarget>& primary_key_targets,
+        const KeyEncodingTarget* seq_target, size_t num_rows, bool need_sort) {
     if (!need_sort) { // mow table without cluster key
         std::string last_key;
         for (size_t pos = 0; pos < num_rows; pos++) {
-            // use _key_coders
-            std::string key = _full_encode_keys(primary_key_columns, pos);
+            std::string key;
+            RETURN_IF_ERROR(_full_encode_keys(primary_key_targets, pos, &key));
             _maybe_invalid_row_cache(key);
             if (_tablet_schema->has_sequence_col()) {
-                _encode_seq_column(seq_column, pos, &key);
+                RETURN_IF_ERROR(_encode_seq_column(seq_target, pos, &key));
             }
             DCHECK(key.compare(last_key) > 0)
                     << "found duplicate key or key is not sorted! current key: " << key
@@ -1207,12 +1194,12 @@ Status SegmentWriter::_generate_primary_key_index(
             last_key = std::move(key);
         }
     } else { // mow table with cluster key
-        // generate primary keys in memory
         for (uint32_t pos = 0; pos < num_rows; pos++) {
-            std::string key = _full_encode_keys(primary_key_coders, primary_key_columns, pos);
+            std::string key;
+            RETURN_IF_ERROR(_full_encode_keys(primary_key_targets, pos, &key));
             _maybe_invalid_row_cache(key);
             if (_tablet_schema->has_sequence_col()) {
-                _encode_seq_column(seq_column, pos, &key);
+                RETURN_IF_ERROR(_encode_seq_column(seq_target, pos, &key));
             }
             _encode_rowid(pos + _num_rows_written, &key);
             _primary_keys_size += key.size();
@@ -1222,20 +1209,28 @@ Status SegmentWriter::_generate_primary_key_index(
     return Status::OK();
 }
 
-Status SegmentWriter::_generate_short_key_index(std::vector<IOlapColumnDataAccessor*>& key_columns,
-                                                size_t num_rows,
-                                                const std::vector<size_t>& short_key_pos) {
-    // use _key_coders
-    set_min_key(_full_encode_keys(key_columns, 0));
-    set_max_key(_full_encode_keys(key_columns, num_rows - 1));
+Status SegmentWriter::_generate_short_key_index_from_views(
+        const std::vector<KeyEncodingTarget>& key_targets, size_t num_rows,
+        const std::vector<size_t>& short_key_pos) {
+    std::string min_key;
+    std::string max_key;
+    RETURN_IF_ERROR(_full_encode_keys(key_targets, 0, &min_key));
+    RETURN_IF_ERROR(_full_encode_keys(key_targets, num_rows - 1, &max_key));
+    set_min_key(Slice(min_key));
+    set_max_key(Slice(max_key));
     DCHECK(Slice(_max_key.data(), _max_key.size())
                    .compare(Slice(_min_key.data(), _min_key.size())) >= 0)
             << "key is not sorted! min key: " << _min_key << ", max key: " << _max_key;
 
-    key_columns.resize(_num_short_key_columns);
+    // Drop value columns from key_targets — only the first _num_short_key_columns
+    // contribute to the short key index.
+    std::vector<KeyEncodingTarget> short_targets(key_targets.begin(),
+                                                  key_targets.begin() + _num_short_key_columns);
+
     std::string last_key;
     for (const auto pos : short_key_pos) {
-        std::string key = _encode_keys(key_columns, pos);
+        std::string key;
+        RETURN_IF_ERROR(_encode_keys(short_targets, pos, &key));
         DCHECK(key.compare(last_key) >= 0)
                 << "key is not sorted! current key: " << key << ", last key: " << last_key;
         RETURN_IF_ERROR(_short_key_index_builder->add_item(key));

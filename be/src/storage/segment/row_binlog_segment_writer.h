@@ -16,13 +16,18 @@
 // under the License.
 
 #include "storage/binlog.h"
+#include "storage/key_coder.h"
 #include "storage/segment/historical_row_retriever.h"
 #include "storage/segment/segment_writer.h"
+#include "storage/segment/storage_view.h"
 namespace doris {
 
 namespace segment_v2 {
 #define BINLOG_COLNUM 3
 
+// Source-block staging for binlog<row>. Each source column is staged into a
+// per-cid StorageView so the historical-row retriever can encode lookup keys,
+// and so the normal-column writers can receive IColumn&-shaped appends.
 class RowBinlogSourceDataWriter {
 public:
     explicit RowBinlogSourceDataWriter(const SegmentWriteBinlogOptions& opt);
@@ -44,14 +49,14 @@ public:
 
     void clear();
 
-    IOlapColumnDataAccessor* get_converted_column(uint32_t cid) { return _converted_columns[cid]; }
-
     bool need_before() const { return _opt.write_before; }
 
-    const std::vector<IOlapColumnDataAccessor*>& source_key_columns() const { return _key_columns; }
-    const IOlapColumnDataAccessor* seq_column() const { return _seq_column; }
-
-    std::unique_ptr<OlapBlockDataConvertor>& olap_data_convertor() { return _olap_data_convertor; }
+    // KeyEncodingTargets for the source PK columns in schema order, populated
+    // by the current prepare_*() call.
+    const std::vector<KeyEncodingTarget>& source_key_targets() const { return _key_targets; }
+    const KeyEncodingTarget* seq_target() const {
+        return _has_seq_target ? &_seq_target : nullptr;
+    }
 
     void filter_source_ids(std::vector<uint32_t>& full_cids, std::vector<uint32_t>& res_cids) {
         res_cids.reserve(full_cids.size());
@@ -60,14 +65,31 @@ public:
     }
 
 private:
+    // Per-source-schema-cid scratch state used between prepare_* and the
+    // subsequent fill_normal_columns / HistoricalRowRetriever consumers.
+    //   view: storage-format bytes for HRR key lookup (lazily filled on first
+    //         use of the cid).
+    //   coder: cached KeyCoder for the cid's FieldType, used to encode keys
+    //          via storage_view_* helpers.
+    //   pin:  the source IColumn kept alive so the view's data pointer (which
+    //         can point into the source for direct-passthrough types) and
+    //         fill_normal_columns's append(IColumn&) both stay valid until
+    //         clear().
+    struct PerCid {
+        StorageView view;
+        const KeyCoder* coder = nullptr;
+        ColumnPtr pin;
+    };
+
     const SegmentWriteBinlogOptions& _opt;
-    std::unique_ptr<OlapBlockDataConvertor> _olap_data_convertor;
     std::vector<uint32_t> _normal_column_ids;
-    std::vector<IOlapColumnDataAccessor*> _converted_columns;
+    std::vector<PerCid> _per_cid;
     size_t _num_rows = 0;
 
-    std::vector<IOlapColumnDataAccessor*> _key_columns;
-    IOlapColumnDataAccessor* _seq_column = nullptr;
+    // Scoped to the current prepare_* call.
+    std::vector<KeyEncodingTarget> _key_targets;
+    KeyEncodingTarget _seq_target;
+    bool _has_seq_target = false;
 };
 
 class RowBinlogSegmentWriter : public SegmentWriter {
@@ -86,7 +108,11 @@ public:
     // append block directly for binlog compaction
     Status _append_direct_block(const Block* block, size_t row_pos, size_t num_rows);
 
-    Status _fill_binlog_columns(size_t num_rows, const std::vector<int64_t>& op_types);
+    // Fills `binlog_prefix_block` (caller-owned so it outlives the
+    // build_key_index that reads writer views aliasing its columns) and
+    // appends lsn/op/ts to their writers.
+    Status _fill_binlog_columns(Block& binlog_prefix_block, size_t num_rows,
+                                const std::vector<int64_t>& op_types);
 
     Status _fill_before_columns(size_t num_rows);
 
@@ -103,7 +129,10 @@ private:
 
     const SegmentWriteBinlogOptions& _binlog_opts;
 
-    std::vector<IOlapColumnDataAccessor*> _converted_key_columns;
+    // KeyEncodingTargets accumulated as the binlog prefix / source key columns
+    // are appended in this segment. Used by build_key_index after
+    // _fill_binlog_columns.
+    std::vector<KeyEncodingTarget> _key_targets;
     std::shared_ptr<const std::vector<int64_t>> _lsn_ids;
 };
 
