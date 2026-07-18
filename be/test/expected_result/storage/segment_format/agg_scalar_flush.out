@@ -1,0 +1,4 @@
+agg_scalar_flush_vertical|seg0|rows=100|size=9912|byte=287d0811214c341e68e98968526f1e0b|content=f9fc69df52cb88f930d0566dab7cb023|order=1,2,3,4,5,6,7,8,9,10
+agg_scalar_flush_vertical|seg1|rows=50|size=6214|byte=b180d5f6351f40c2249b9253e61e4b18|content=8f836ca7fe0cb2e3c7c852de5863879f|order=1,2,3,4,5,6,7,8,9,10
+agg_scalar_flush_horizontal|seg0|rows=100|size=9912|byte=287d0811214c341e68e98968526f1e0b|content=f9fc69df52cb88f930d0566dab7cb023|order=1,2,3,4,5,6,7,8,9,10
+agg_scalar_flush_horizontal|seg1|rows=50|size=6214|byte=b180d5f6351f40c2249b9253e61e4b18|content=8f836ca7fe0cb2e3c7c852de5863879f|order=1,2,3,4,5,6,7,8,9,10

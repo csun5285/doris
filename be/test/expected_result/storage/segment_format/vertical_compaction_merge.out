@@ -1,0 +1,4 @@
+vcomp_dup_numeric|seg0|rows=300|size=3739|byte=2ccc332897a76755e2124af825530029|content=16b14e19bc1c68d9e2863766136519d7|order=1,2,3,4,5,6,7
+vcomp_agg|seg0|rows=200|size=3852|byte=c0ed7630ca5479cbe9758b84c687377e|content=904c82bb42d37758324923334659c4b4|order=1,2,3,4
+vcomp_mow_seq|seg0|rows=200|size=5556|byte=864b2b4e6c6653dc04967a938cbf552b|content=86d91c615c780f85d87c7d1d9c80ec86|order=1,2,4,5,3
+vcomp_mow_ck|seg0|rows=300|size=5892|byte=2cf12103a57e0063074ec5499c1db670|content=bd5040845fe60e2e872a9d9d3a45094b|order=1,2,5,3,4

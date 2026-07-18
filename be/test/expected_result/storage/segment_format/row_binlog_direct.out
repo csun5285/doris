@@ -1,0 +1,16 @@
+binlog_dup_cfg_horizontal_data|seg0|rows=100|size=901|byte=b4cacb8629ac22209b29203e5ad3b985|content=8edb0d6cb2578510fe6befb881403780|order=0,1
+binlog_dup_cfg_horizontal_data|seg1|rows=50|size=769|byte=e1b0182f1a3fb59f9e734e57ddc9eb7f|content=84bccf055f7515f508543a845472b4b1|order=0,1
+binlog_dup_cfg_horizontal_binlog|seg0|rows=100|size=1647|byte=39884d64a0b1c41fa8ae1de104626c4b|content=75159b26e3b5dcea174bd7edd3548bf0|order=0,1,2,3,4
+binlog_dup_cfg_horizontal_binlog|seg1|rows=50|size=1492|byte=921245a31cb4ed23aa88038582303a8e|content=66d5b4c46ecc627f47b3d39e6363584f|order=0,1,2,3,4
+binlog_mow_cfg_horizontal_data|seg0|rows=100|size=1527|byte=5c5662d8f78465b5efc60188af46841b|content=556721368e8fd91de26e2457d10591bc|order=0,1,2
+binlog_mow_cfg_horizontal_data|seg1|rows=50|size=1304|byte=466443b122d1f927524124e5eb682bd7|content=661b798985813ddd7f9653f4ade31c47|order=0,1,2
+binlog_mow_cfg_horizontal_binlog|seg0|rows=100|size=1866|byte=0ee6bda382d0846f4396be2aa58ab00b|content=41ea003f5b0a5bc1e34cdb78a86aa46b|order=0,1,2,3,4,5
+binlog_mow_cfg_horizontal_binlog|seg1|rows=50|size=1709|byte=fb6bc13d1a12ee1e2e80e88957f5ac1d|content=daa229ac6067d47e181e405db444e59f|order=0,1,2,3,4,5
+binlog_dup_cfg_vertical_data|seg0|rows=100|size=901|byte=b4cacb8629ac22209b29203e5ad3b985|content=8edb0d6cb2578510fe6befb881403780|order=0,1
+binlog_dup_cfg_vertical_data|seg1|rows=50|size=769|byte=e1b0182f1a3fb59f9e734e57ddc9eb7f|content=84bccf055f7515f508543a845472b4b1|order=0,1
+binlog_dup_cfg_vertical_binlog|seg0|rows=100|size=1647|byte=39884d64a0b1c41fa8ae1de104626c4b|content=75159b26e3b5dcea174bd7edd3548bf0|order=0,1,2,3,4
+binlog_dup_cfg_vertical_binlog|seg1|rows=50|size=1492|byte=921245a31cb4ed23aa88038582303a8e|content=66d5b4c46ecc627f47b3d39e6363584f|order=0,1,2,3,4
+binlog_mow_cfg_vertical_data|seg0|rows=100|size=1527|byte=5c5662d8f78465b5efc60188af46841b|content=556721368e8fd91de26e2457d10591bc|order=0,1,2
+binlog_mow_cfg_vertical_data|seg1|rows=50|size=1304|byte=466443b122d1f927524124e5eb682bd7|content=661b798985813ddd7f9653f4ade31c47|order=0,1,2
+binlog_mow_cfg_vertical_binlog|seg0|rows=100|size=1866|byte=0ee6bda382d0846f4396be2aa58ab00b|content=41ea003f5b0a5bc1e34cdb78a86aa46b|order=0,1,2,3,4,5
+binlog_mow_cfg_vertical_binlog|seg1|rows=50|size=1709|byte=fb6bc13d1a12ee1e2e80e88957f5ac1d|content=daa229ac6067d47e181e405db444e59f|order=0,1,2,3,4,5

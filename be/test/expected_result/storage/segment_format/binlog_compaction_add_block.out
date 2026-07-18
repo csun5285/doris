@@ -1,0 +1,2 @@
+binlog_compaction_add_block|seg0|rows=100|size=2988|byte=0906f536d78aebed96eb8b0c9784c120|content=1a9673ea0696d9c363ed400aae916374|order=1,2,3,4,5
+binlog_compaction_add_block|seg1|rows=50|size=2342|byte=053e3ee16308a6410c1c2408c8cd76b3|content=84332d5ccdade3737874cc835556cc59|order=1,2,3,4,5

@@ -1,0 +1,5 @@
+segcompaction_dup|seg0|rows=200|size=3050|byte=e36ea9125fdfd4e93e0eeb6de7e60f63|content=8846d94b02e6bda32766a6166c57cc41|order=1,2,3,4,5,6,7
+segcompaction_dup|seg1|rows=50|size=2444|byte=190c0f5c5d4c45e1043ea580423dd932|content=91beb54434dae7eba6df97b21c5ab9e0|order=1,2,3,4,5,6,7
+segcompaction_dup|seg2|rows=50|size=2478|byte=4e4eaa44f73f4d23d934b8ae0ea861f6|content=91beb54434dae7eba6df97b21c5ab9e0|order=1,2,3,4,5,6,7
+segcompaction_dup|seg3|rows=50|size=2457|byte=392a9dcb1d95f9913cd94d7a47cfd963|content=91beb54434dae7eba6df97b21c5ab9e0|order=1,2,3,4,5,6,7
+segcompaction_dup|seg4|rows=50|size=2433|byte=b72755c4505095a2fbf9cf36119790ba|content=91beb54434dae7eba6df97b21c5ab9e0|order=1,2,3,4,5,6,7

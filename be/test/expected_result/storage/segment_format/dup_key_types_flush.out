@@ -1,0 +1,16 @@
+dup_numeric_flush_vertical|seg0|rows=100|size=2772|byte=feee7bd3d91df709c2a302ed992ca585|content=4c093e79af61e61d68480359c06d6451|order=1,2,3,4,5,6,7
+dup_numeric_flush_vertical|seg1|rows=50|size=2450|byte=2053615314b25471f28150d68f121bfa|content=838a2fb868c35b5f3f8b743f171cd534|order=1,2,3,4,5,6,7
+dup_numeric_flush_horizontal|seg0|rows=100|size=2772|byte=feee7bd3d91df709c2a302ed992ca585|content=4c093e79af61e61d68480359c06d6451|order=1,2,3,4,5,6,7
+dup_numeric_flush_horizontal|seg1|rows=50|size=2450|byte=2053615314b25471f28150d68f121bfa|content=838a2fb868c35b5f3f8b743f171cd534|order=1,2,3,4,5,6,7
+dup_date_flush_vertical|seg0|rows=100|size=2757|byte=cf43ebad68285dded9cc2d89416b4dc4|content=80440df2cd2d7341e09ae6ba3c597d3a|order=1,2,3,4,5
+dup_date_flush_vertical|seg1|rows=50|size=2359|byte=5ba72945e4bc478e5bb13c8446f45a41|content=0e91cee9ede9e854eeada883a727c5bf|order=1,2,3,4,5
+dup_date_flush_horizontal|seg0|rows=100|size=2757|byte=cf43ebad68285dded9cc2d89416b4dc4|content=80440df2cd2d7341e09ae6ba3c597d3a|order=1,2,3,4,5
+dup_date_flush_horizontal|seg1|rows=50|size=2359|byte=5ba72945e4bc478e5bb13c8446f45a41|content=0e91cee9ede9e854eeada883a727c5bf|order=1,2,3,4,5
+dup_decimal_flush_vertical|seg0|rows=100|size=3708|byte=5d8d062083819e4922a8118d5cd773b9|content=84c810853a6738c1f9d3149c71a85d09|order=1,2,3,4,5,6
+dup_decimal_flush_vertical|seg1|rows=50|size=2974|byte=d0e1cec703b1c9c489d072ca9d073488|content=009e9e34120e6d49fa1ff7ecbcc614a8|order=1,2,3,4,5,6
+dup_decimal_flush_horizontal|seg0|rows=100|size=3708|byte=5d8d062083819e4922a8118d5cd773b9|content=84c810853a6738c1f9d3149c71a85d09|order=1,2,3,4,5,6
+dup_decimal_flush_horizontal|seg1|rows=50|size=2974|byte=d0e1cec703b1c9c489d072ca9d073488|content=009e9e34120e6d49fa1ff7ecbcc614a8|order=1,2,3,4,5,6
+dup_string_ip_flush_vertical|seg0|rows=100|size=5675|byte=4aa5906ce00a82f1b77509af19d8fc3a|content=1acf6986ae631d0fd99ea3e4320c3479|order=1,2,3,4,5
+dup_string_ip_flush_vertical|seg1|rows=50|size=3714|byte=d6712153c9c033dffe9b853ceaec02a9|content=9245af3c217b533f508e0986f991c8bf|order=1,2,3,4,5
+dup_string_ip_flush_horizontal|seg0|rows=100|size=5675|byte=4aa5906ce00a82f1b77509af19d8fc3a|content=1acf6986ae631d0fd99ea3e4320c3479|order=1,2,3,4,5
+dup_string_ip_flush_horizontal|seg1|rows=50|size=3714|byte=d6712153c9c033dffe9b853ceaec02a9|content=9245af3c217b533f508e0986f991c8bf|order=1,2,3,4,5
