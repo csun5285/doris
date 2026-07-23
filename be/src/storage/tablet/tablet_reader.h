@@ -54,6 +54,7 @@ namespace doris {
 class RuntimeState;
 class BloomFilterFuncBase;
 class ColumnPredicate;
+class DenseReadSchema;
 class DeleteBitmap;
 class HybridSetBase;
 class RuntimeProfile;
@@ -322,6 +323,7 @@ protected:
 
     Arena _predicate_arena;
     std::vector<ColumnId> _return_columns;
+    std::shared_ptr<const DenseReadSchema> _read_schema;
 
     // used for special optimization for query : ORDER BY key [ASC|DESC] LIMIT n
     // columns for orderby keys

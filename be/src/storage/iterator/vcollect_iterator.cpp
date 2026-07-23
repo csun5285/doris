@@ -43,6 +43,7 @@
 #include "runtime/runtime_profile.h"
 #include "runtime/runtime_state.h"
 #include "storage/binlog.h"
+#include "storage/dense_read_schema.h"
 #include "storage/olap_common.h"
 #include "storage/olap_define.h"
 #include "storage/rowset/rowset.h"
@@ -475,14 +476,14 @@ VCollectIterator::Level0Iterator::Level0Iterator(RowsetReaderSharedPtr rs_reader
                                                  TabletReader* reader)
         : LevelIterator(reader), _rs_reader(rs_reader), _reader(reader) {
     DCHECK_EQ(RowsetTypePB::BETA_ROWSET, rs_reader->type());
+    DORIS_CHECK(_reader->_read_schema != nullptr);
 }
 
 Status VCollectIterator::Level0Iterator::init(bool get_data_by_ref) {
     _is_merge_iterator = _rs_reader->is_merge_iterator();
     _get_data_by_ref = get_data_by_ref && _is_merge_iterator;
     if (!_get_data_by_ref) {
-        _block = std::make_shared<Block>(_schema.create_block(
-                _reader->_return_columns, _reader->_tablet_columns_convert_to_null_set));
+        _block = std::make_shared<Block>(_reader->_read_schema->create_block());
     }
 
     auto st = refresh_current_row();
@@ -525,8 +526,7 @@ Status VCollectIterator::Level0Iterator::refresh_current_row() {
 
     do {
         if (_block == nullptr && !_get_data_by_ref) {
-            _block = std::make_shared<Block>(_schema.create_block(
-                    _reader->_return_columns, _reader->_tablet_columns_convert_to_null_set));
+            _block = std::make_shared<Block>(_reader->_read_schema->create_block());
             _ref.block = _block;
         }
 

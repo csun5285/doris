@@ -46,6 +46,7 @@
 #include "runtime/runtime_predicate.h"
 #include "runtime/runtime_state.h"
 #include "storage/delete/delete_handler.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/bloom_filter/bloom_filter.h"
 #include "storage/itoken_extractor.h"
 #include "storage/olap_common.h"
@@ -270,6 +271,8 @@ Status TabletReader::_init_params(const ReaderParams& read_params) {
         LOG(WARNING) << "fail to init return columns. res = " << res;
         return res;
     }
+    _read_schema = DORIS_TRY(DenseReadSchema::create(*_tablet_schema, _return_columns,
+                                                     _tablet_columns_convert_to_null_set));
 
     res = _init_keys_param(read_params);
     if (!res.ok()) {
