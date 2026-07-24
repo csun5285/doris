@@ -20,6 +20,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "storage/index/inverted/inverted_index_parser.h"
 #include "storage/olap_common.h"
 #include "storage/rowset/beta_rowset.h"
 #include "storage/rowset/rowset_factory.h"
@@ -500,7 +501,7 @@ TEST_F(IndexBuilderTest, DropAnnIndexTest) {
     EXPECT_EQ(new_dat_file_count, 1) << "Tablet path should have 1 .dat file after drop";
 }
 
-TEST_F(IndexBuilderTest, BuildInvertedIndexAfterWritingDataTest) {
+TEST_F(IndexBuilderTest, BuildMultipleInvertedIndexesOnSameColumnAfterWritingDataTest) {
     // 0. prepare tablet path
     auto tablet_path = _absolute_dir + "/" + std::to_string(14673);
     _tablet->_tablet_path = tablet_path;
@@ -510,6 +511,9 @@ TEST_F(IndexBuilderTest, BuildInvertedIndexAfterWritingDataTest) {
     // 1. Prepare data for writing
     RowsetSharedPtr rowset;
     const int num_rows = 1000;
+    auto& indexed_column = _tablet_schema->mutable_column(1);
+    indexed_column.set_type(FieldType::OLAP_FIELD_TYPE_VARCHAR);
+    indexed_column.set_length(65535);
 
     // 2. Create a rowset writer context
     RowsetWriterContext writer_context;
@@ -542,9 +546,9 @@ TEST_F(IndexBuilderTest, BuildInvertedIndexAfterWritingDataTest) {
             int32_t k1 = i * 10;
             columns[0]->insert_data((const char*)&k1, sizeof(k1));
 
-            // k2 column (int)
-            int32_t k2 = i % 100;
-            columns[1]->insert_data((const char*)&k2, sizeof(k2));
+            // k2 column (varchar)
+            std::string k2 = "value_" + std::to_string(i % 100);
+            columns[1]->insert_data(k2.data(), k2.size());
         }
 
         block.set_columns(std::move(columns));
@@ -577,7 +581,16 @@ TEST_F(IndexBuilderTest, BuildInvertedIndexAfterWritingDataTest) {
     index2.columns.emplace_back("k2");
     index2.index_name = "k2_index";
     index2.index_type = TIndexType::INVERTED;
+    index2.__set_properties({{INVERTED_INDEX_PARSER_KEY, INVERTED_INDEX_PARSER_ENGLISH}});
     _alter_indexes.push_back(index2);
+
+    TOlapTableIndex index3;
+    index3.index_id = 3;
+    index3.columns.emplace_back("k2");
+    index3.index_name = "k2_unicode_index";
+    index3.index_type = TIndexType::INVERTED;
+    index3.__set_properties({{INVERTED_INDEX_PARSER_KEY, INVERTED_INDEX_PARSER_UNICODE}});
+    _alter_indexes.push_back(index3);
 
     // 6. Create IndexBuilder
     IndexBuilder builder(ExecEnv::GetInstance()->storage_engine().to_local(), _tablet, _columns,
@@ -586,7 +599,7 @@ TEST_F(IndexBuilderTest, BuildInvertedIndexAfterWritingDataTest) {
     // 7. Initialize and verify
     auto status = builder.init();
     EXPECT_TRUE(status.ok()) << status.to_string();
-    EXPECT_EQ(builder._alter_index_ids.size(), 2);
+    EXPECT_EQ(builder._alter_index_ids.size(), 3);
 
     // 8. Build index
     status = builder.do_build_inverted_index();

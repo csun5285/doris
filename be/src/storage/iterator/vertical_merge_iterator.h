@@ -148,24 +148,22 @@ private:
 class VerticalMergeIteratorContext {
 public:
     VerticalMergeIteratorContext(RowwiseIteratorUPtr&& iter, RowsetId rowset_id,
-                                 size_t ori_return_cols, uint32_t order, int32_t seq_col_idx,
+                                 size_t ori_return_cols, uint32_t order, int32_t seq_col_position,
                                  bool use_insert_order_when_same = false,
                                  std::vector<uint32_t> key_group_cluster_key_idxes = {})
             : _iter(std::move(iter)),
               _rowset_id(rowset_id),
               _ori_return_cols(ori_return_cols),
               _order(order),
+              _seq_col_idx(seq_col_position),
               _use_insert_order_when_same(use_insert_order_when_same),
               _key_group_cluster_key_idxes(std::move(key_group_cluster_key_idxes)) {
         _key_positions.reserve(_iter->schema().key_positions().size());
         for (ReadPosition position : _iter->schema().key_positions()) {
             _key_positions.push_back(position.value());
         }
-        if (seq_col_idx >= 0) {
-            const auto sequence_position =
-                    _iter->schema().position_of_tablet_cid(static_cast<ColumnId>(seq_col_idx));
-            DORIS_CHECK(sequence_position.has_value());
-            _seq_col_idx = static_cast<int32_t>(sequence_position->value());
+        if (_seq_col_idx >= 0) {
+            DORIS_CHECK_LT(static_cast<size_t>(_seq_col_idx), _iter->schema().size());
         }
     }
 
@@ -280,7 +278,7 @@ public:
     VerticalHeapMergeIterator(std::vector<RowwiseIteratorUPtr>&& iters,
                               std::vector<bool> iterator_init_flags,
                               std::vector<RowsetId> rowset_ids, size_t ori_return_cols,
-                              KeysType keys_type, int32_t seq_col_idx,
+                              KeysType keys_type, int32_t seq_col_position,
                               RowSourcesBuffer* row_sources_buf,
                               std::vector<uint32_t> key_group_cluster_key_idxes)
             : _origin_iters(std::move(iters)),
@@ -288,7 +286,7 @@ public:
               _rowset_ids(std::move(rowset_ids)),
               _ori_return_cols(ori_return_cols),
               _keys_type(keys_type),
-              _seq_col_idx(seq_col_idx),
+              _seq_col_idx(seq_col_position),
               _row_sources_buf(row_sources_buf),
               _key_group_cluster_key_idxes(std::move(key_group_cluster_key_idxes)) {}
 
@@ -348,14 +346,14 @@ public:
     VerticalFifoMergeIterator(std::vector<RowwiseIteratorUPtr>&& iters,
                               std::vector<bool> iterator_init_flags,
                               std::vector<RowsetId> rowset_ids, size_t ori_return_cols,
-                              KeysType keys_type, int32_t seq_col_idx,
+                              KeysType keys_type, int32_t seq_col_position,
                               RowSourcesBuffer* row_sources_buf)
             : _origin_iters(std::move(iters)),
               _iterator_init_flags(std::move(iterator_init_flags)),
               _rowset_ids(std::move(rowset_ids)),
               _ori_return_cols(ori_return_cols),
               _keys_type(keys_type),
-              _seq_col_idx(seq_col_idx),
+              _seq_col_idx(seq_col_position),
               _row_sources_buf(row_sources_buf) {}
 
     ~VerticalFifoMergeIterator() override = default;
@@ -460,13 +458,13 @@ private:
 std::shared_ptr<RowwiseIterator> new_vertical_heap_merge_iterator(
         std::vector<RowwiseIteratorUPtr>&& inputs, const std::vector<bool>& iterator_init_flag,
         const std::vector<RowsetId>& rowset_ids, size_t _ori_return_cols, KeysType key_type,
-        int32_t seq_col_idx, RowSourcesBuffer* row_sources_buf,
+        int32_t seq_col_position, RowSourcesBuffer* row_sources_buf,
         std::vector<uint32_t> key_group_cluster_key_idxes);
 
 std::shared_ptr<RowwiseIterator> new_vertical_fifo_merge_iterator(
         std::vector<RowwiseIteratorUPtr>&& inputs, const std::vector<bool>& iterator_init_flag,
         const std::vector<RowsetId>& rowset_ids, size_t _ori_return_cols, KeysType key_type,
-        int32_t seq_col_idx, RowSourcesBuffer* row_sources_buf);
+        int32_t seq_col_position, RowSourcesBuffer* row_sources_buf);
 
 std::shared_ptr<RowwiseIterator> new_vertical_mask_merge_iterator(
         std::vector<RowwiseIteratorUPtr>&& inputs, size_t ori_return_cols,

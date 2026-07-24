@@ -19,6 +19,8 @@ package org.apache.doris.nereids.glue.translator;
 
 import org.apache.doris.analysis.Expr;
 import org.apache.doris.analysis.GroupingInfo;
+import org.apache.doris.analysis.SlotDescriptor;
+import org.apache.doris.analysis.SlotId;
 import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.SortInfo;
 import org.apache.doris.analysis.TupleDescriptor;
@@ -111,6 +113,14 @@ public class PhysicalPlanTranslatorTest extends TestWithFeService {
                 + "'enable_unique_key_merge_on_write' = 'true',"
                 + "'binlog.enable' = 'true','binlog.format' = 'ROW',"
                 + "'binlog.need_historical_value' = 'true');");
+        createTable("create table test_db.binlog_scan_schema_no_history_t(\n"
+                + "k1 int, k2 int, v1 int, v2 int)\n"
+                + "unique key(k1, k2)\n"
+                + "distributed by hash(k1) buckets 1\n"
+                + "properties('replication_num' = '1',"
+                + "'enable_unique_key_merge_on_write' = 'true',"
+                + "'binlog.enable' = 'true','binlog.format' = 'ROW',"
+                + "'binlog.need_historical_value' = 'false');");
         createTable("create table test_db.sequence_scan_schema_t(\n"
                 + "k1 int, k2 int, v1 int, v2 int)\n"
                 + "unique key(k1, k2)\n"
@@ -247,6 +257,105 @@ public class PhysicalPlanTranslatorTest extends TestWithFeService {
                 .collect(Collectors.toSet());
         Assertions.assertTrue(thriftScanNode.olap_scan_node.getOutputColumnUniqueIds()
                 .containsAll(dependencyUniqueIds));
+    }
+
+    @Test
+    public void testDetailBinlogPhysicalScanSchemaWithoutHistoricalValues() throws Exception {
+        OlapScanNode scanNode = getFirstOlapScanNode(
+                "select v1 from test_db.binlog_scan_schema_no_history_t"
+                        + "@incr(\"incrementType\" = \"DETAIL\")");
+        List<String> scanColumns = scanNode.getTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toList());
+
+        Assertions.assertTrue(scanColumns.containsAll(ImmutableList.of(
+                "k1", "k2", "v1", Column.BINLOG_LSN_COL,
+                Column.BINLOG_OPERATION_COL, Column.BINLOG_TSO_COL)));
+        Assertions.assertFalse(scanColumns.contains("v2"));
+        Assertions.assertFalse(scanColumns.contains(Column.generateBeforeColName("v1")));
+
+        Set<String> storageDependencyColumns = scanNode.getTupleDesc().getSlots().stream()
+                .filter(slot -> scanNode.getStorageSemanticDependencySlotIds().contains(slot.getId().asInt()))
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertEquals(ImmutableSet.of(
+                "k1", "k2", Column.BINLOG_LSN_COL,
+                Column.BINLOG_OPERATION_COL, Column.BINLOG_TSO_COL), storageDependencyColumns);
+        Assertions.assertEquals(ImmutableList.of("v1"), scanNode.getOutputTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toList()));
+    }
+
+    @Test
+    public void testBinlogPhysicalScanProjectionWithoutUserProject() throws Exception {
+        boolean originalShowHiddenColumns = connectContext.getSessionVariable().showHiddenColumns;
+        connectContext.getSessionVariable().showHiddenColumns = true;
+        try {
+            OlapScanNode scanNode = getFirstOlapScanNode(
+                    "select * from test_db.binlog_scan_schema_t"
+                            + "@incr(\"incrementType\" = \"MIN_DELTA\")");
+            Assertions.assertTrue(scanNode.hasPhysicalScanProjection());
+            Assertions.assertTrue(scanNode.getTupleDesc().getSlots().stream()
+                    .map(slot -> slot.getColumn().getName())
+                    .anyMatch(name -> name.startsWith(Column.BINLOG_BEFORE_PREFIX)));
+            Assertions.assertTrue(scanNode.getOutputTupleDesc().getSlots().stream()
+                    .map(slot -> slot.getColumn().getName())
+                    .noneMatch(name -> name.startsWith(Column.BINLOG_BEFORE_PREFIX)));
+
+            Set<SlotId> physicalSlotIds = scanNode.getTupleDesc().getSlots().stream()
+                    .map(SlotDescriptor::getId)
+                    .collect(Collectors.toSet());
+            Assertions.assertFalse(scanNode.getProjectList().isEmpty());
+            for (Expr projection : scanNode.getProjectList()) {
+                Assertions.assertInstanceOf(SlotRef.class, projection);
+                Assertions.assertTrue(physicalSlotIds.contains(((SlotRef) projection).getSlotId()));
+            }
+
+            TPlanNode thriftScanNode = scanNode.treeToThrift().getNodes().get(0);
+            Assertions.assertTrue(thriftScanNode.isSetProjections());
+            Assertions.assertTrue(thriftScanNode.isSetOutputTupleId());
+
+            OlapScanNode filteredScanNode = getFirstOlapScanNode(
+                    "select * from test_db.binlog_scan_schema_t"
+                            + "@incr(\"incrementType\" = \"MIN_DELTA\") where v1 > 0");
+            Assertions.assertFalse(filteredScanNode.getConjuncts().isEmpty());
+            Set<SlotId> filteredPhysicalSlotIds = filteredScanNode.getTupleDesc().getSlots().stream()
+                    .map(SlotDescriptor::getId)
+                    .collect(Collectors.toSet());
+            for (Expr conjunct : filteredScanNode.getConjuncts()) {
+                Set<SlotId> conjunctSlotIds = Sets.newHashSet();
+                Expr.extractSlots(conjunct, conjunctSlotIds);
+                Assertions.assertTrue(filteredPhysicalSlotIds.containsAll(conjunctSlotIds));
+            }
+
+            OlapScanNode projectedScanNode = getFirstOlapScanNode(
+                    "select k1, v1, __DORIS_BINLOG_OP__ from test_db.binlog_scan_schema_t"
+                            + "@incr(\"incrementType\" = \"DETAIL\") order by __DORIS_BINLOG_LSN__");
+            Set<SlotId> projectedPhysicalSlotIds = projectedScanNode.getTupleDesc().getSlots().stream()
+                    .map(SlotDescriptor::getId)
+                    .collect(Collectors.toSet());
+            for (Expr projection : projectedScanNode.getProjectList()) {
+                Set<SlotId> projectionSlotIds = Sets.newHashSet();
+                Expr.extractSlots(projection, projectionSlotIds);
+                Assertions.assertTrue(projectedPhysicalSlotIds.containsAll(projectionSlotIds));
+            }
+
+            OlapScanNode commonSubexpressionScanNode = getFirstOlapScanNode(
+                    "select v1 + k1 as x, (v1 + k1) + 1 as y from test_db.binlog_scan_schema_t"
+                            + "@incr(\"incrementType\" = \"MIN_DELTA\")");
+            List<String> commonSubexpressionScanColumns =
+                    commonSubexpressionScanNode.getTupleDesc().getSlots().stream()
+                            .map(slot -> slot.getColumn().getName())
+                            .collect(Collectors.toList());
+            Assertions.assertFalse(commonSubexpressionScanNode.hasPhysicalScanProjection());
+            Assertions.assertTrue(commonSubexpressionScanColumns.containsAll(ImmutableList.of(
+                    "k1", "k2", "v1", Column.generateBeforeColName("v1"))));
+            Assertions.assertFalse(commonSubexpressionScanColumns.contains("v2"));
+            Assertions.assertFalse(commonSubexpressionScanColumns.contains(
+                    Column.generateBeforeColName("v2")));
+        } finally {
+            connectContext.getSessionVariable().showHiddenColumns = originalShowHiddenColumns;
+        }
     }
 
     @Test

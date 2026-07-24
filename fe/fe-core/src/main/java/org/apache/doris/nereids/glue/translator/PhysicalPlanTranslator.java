@@ -21,6 +21,7 @@ import org.apache.doris.analysis.AggregateInfo;
 import org.apache.doris.analysis.AnalyticWindow;
 import org.apache.doris.analysis.AssertNumRowsElement;
 import org.apache.doris.analysis.Expr;
+import org.apache.doris.analysis.ExprSubstitutionMap;
 import org.apache.doris.analysis.FunctionCallExpr;
 import org.apache.doris.analysis.GroupingInfo;
 import org.apache.doris.analysis.JoinOperator;
@@ -982,15 +983,18 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             //   because it is whole table cardinality and will break block rules.
             // olapScanNode.setCardinality((long) olapScan.getStats().getRowCount());
             if (context.getSessionVariable() != null && context.getSessionVariable().forbidUnknownColStats) {
-                for (int i = 0; i < slots.size(); i++) {
-                    SlotReference slot = (SlotReference) slots.get(i);
+                for (Slot logicalSlot : olapScan.getOutput()) {
+                    SlotReference slot = (SlotReference) logicalSlot;
                     boolean inVisibleCol = slot.getOriginalColumn().isPresent()
                             && StatisticConstants.shouldIgnoreCol(olapTable, slot.getOriginalColumn().get());
                     if (olapScan.getStats().findColumnStatistics(slot).isUnKnown()
                             && !isComplexDataType(slot.getDataType())
                             && !StatisticConstants.isSystemTable(olapTable)
                             && !inVisibleCol) {
-                        context.addUnknownStatsColumn(olapScanNode, slotDescriptors.get(i).getId());
+                        SlotRef physicalSlot = Preconditions.checkNotNull(
+                                context.findSlotRef(slot.getExprId()),
+                                "logical scan slot is missing from physical scan tuple");
+                        context.addUnknownStatsColumn(olapScanNode, physicalSlot.getSlotId());
                     }
                 }
             }
@@ -1027,6 +1031,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         context.addScanNode(olapScanNode, olapScan);
 
         translateRuntimeFilter(olapScan, olapScanNode, context);
+        addPhysicalOlapScanProjection(olapScan, slots, olapScanNode, context);
 
         olapScanNode.setPushDownAggNoGrouping(context.getRelationPushAggOp(olapScan.getRelationId()));
         // Create PlanFragment
@@ -1585,10 +1590,13 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             addPlanRoot(inputFragment, selectNode, filter);
         } else {
             if (!(filter.child(0) instanceof AbstractPhysicalJoin)) {
+                boolean canPushThroughPhysicalScanProjection = planNode instanceof OlapScanNode
+                        && ((OlapScanNode) planNode).hasPhysicalScanProjection();
                 // already have filter on this node, we should not override it, so need a new node
                 if (!planNode.getConjuncts().isEmpty()
                         // already have project on this node, filter need execute after project, so need a new node
-                        || CollectionUtils.isNotEmpty(planNode.getProjectList())
+                        || (CollectionUtils.isNotEmpty(planNode.getProjectList())
+                                && !canPushThroughPhysicalScanProjection)
                         // already have limit on this node, filter need execute after limit, so need a new node
                         || planNode.hasLimit()) {
                     planNode = new SelectNode(context.nextPlanNodeId(), planNode);
@@ -2227,8 +2235,14 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
 
         PlanFragment inputFragment = project.child(0).accept(this, context);
         PlanNode inputPlanNode = inputFragment.getPlanRoot();
+        boolean composePhysicalScanProjection = inputPlanNode instanceof OlapScanNode
+                && ((OlapScanNode) inputPlanNode).hasPhysicalScanProjection();
+        ExprSubstitutionMap physicalScanProjectionSmap = composePhysicalScanProjection
+                ? createPhysicalScanProjectionSmap((OlapScanNode) inputPlanNode)
+                : null;
         // this means already have project on this node, filter need execute after project, so need a new node
-        if (CollectionUtils.isNotEmpty(inputPlanNode.getProjectList())) {
+        if (CollectionUtils.isNotEmpty(inputPlanNode.getProjectList())
+                && !composePhysicalScanProjection) {
             SelectNode selectNode = new SelectNode(context.nextPlanNodeId(), inputPlanNode);
             selectNode.setNereidsId(project.getId());
             context.getNereidsIdToPlanNodeIdMap().put(project.getId(), selectNode.getId());
@@ -2252,6 +2266,9 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                     projectionExprs.add(ExpressionTranslator.translate(layerExpr, context));
                     slots.add(layerExpr.toSlot());
                 }
+                if (i == 0 && composePhysicalScanProjection) {
+                    projectionExprs = Expr.cloneList(projectionExprs, physicalScanProjectionSmap);
+                }
 
                 if (i < layerCount - 1) {
                     inputPlanNode.addIntermediateProjectList(projectionExprs);
@@ -2270,6 +2287,14 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                 slots.add(layerExpr.toSlot());
             }
             allProjectionExprs.addAll(projectionExprs);
+            if (composePhysicalScanProjection) {
+                projectionExprs = Expr.cloneList(projectionExprs, physicalScanProjectionSmap);
+                allProjectionExprs.clear();
+                allProjectionExprs.addAll(projectionExprs);
+            }
+        }
+        if (composePhysicalScanProjection) {
+            ((OlapScanNode) inputPlanNode).setHasPhysicalScanProjection(false);
         }
         // process multicast sink
         if (inputFragment instanceof MultiCastPlanFragment) {
@@ -2376,7 +2401,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                 ((OlapScanNode) inputPlanNode).updateRequiredSlots(context, requiredByProjectSlotIdSet);
             }
             updateScanSlotsMaterialization((ScanNode) inputPlanNode, requiredSlotIdSet,
-                    requiredByProjectSlotIdSet, context);
+                    requiredByProjectSlotIdSet, context, true);
         } else {
             TupleDescriptor tupleDescriptor = generateTupleDesc(slots, null, context);
             inputPlanNode.setProjectList(projectionExprs);
@@ -3057,7 +3082,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
 
     private void updateScanSlotsMaterialization(ScanNode scanNode,
             Set<SlotId> requiredSlotIdSet, Set<SlotId> requiredByProjectSlotIdSet,
-            PlanTranslatorContext context) {
+            PlanTranslatorContext context, boolean finalizeUnknownStats) {
         Set<SlotId> requiredWithVirtualColumns = Sets.newHashSet(requiredSlotIdSet);
         for (SlotDescriptor virtualSlot : scanNode.getTupleDesc().getSlots()) {
             Expr virtualColumn = virtualSlot.getVirtualColumn();
@@ -3083,7 +3108,8 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         if (scanNode.getTupleDesc().getSlots().isEmpty()) {
             scanNode.getTupleDesc().getSlots().add(smallest);
         }
-        if (context.getSessionVariable() != null
+        if (finalizeUnknownStats
+                && context.getSessionVariable() != null
                 && context.getSessionVariable().forbidUnknownColStats
                 && !StatisticConstants.isSystemTable(scanNode.getTupleDesc().getTable())) {
             for (SlotId slotId : requiredByProjectSlotIdSet) {
@@ -3171,6 +3197,11 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         }
         preserveStorageSlot(scanNode, slotByName.get(Column.BINLOG_LSN_COL), requiredSlotIds);
 
+        if (!wrapper.getOriginTable().getBinlogConfig().getNeedHistoricalValue()) {
+            // Row-binlog schemas without historical values have no before-image columns, so there
+            // are no before-image storage dependencies to preserve.
+            return;
+        }
         for (SlotDescriptor slot : scanSlots) {
             Column column = slot.getColumn();
             if (column == null || column.isKey() || !requestedSlots.contains(slot.getId())
@@ -3294,12 +3325,57 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
     private void addConjunctsToPlanNode(PhysicalFilter<? extends Plan> filter,
             PlanNode planNode,
             PlanTranslatorContext context) {
+        ExprSubstitutionMap physicalScanProjectionSmap = planNode instanceof OlapScanNode
+                && ((OlapScanNode) planNode).hasPhysicalScanProjection()
+                ? createPhysicalScanProjectionSmap((OlapScanNode) planNode)
+                : null;
         for (Expression conjunct : filter.getConjuncts()) {
             for (Expression singleConjunct : ExpressionUtils.extractConjunctionToSet(conjunct)) {
-                planNode.addConjunct(ExpressionTranslator.translate(singleConjunct, context));
+                Expr translated = ExpressionTranslator.translate(singleConjunct, context);
+                planNode.addConjunct(physicalScanProjectionSmap == null
+                        ? translated : translated.clone(physicalScanProjectionSmap));
             }
         }
         updateLegacyPlanIdToPhysicalPlan(planNode, filter);
+    }
+
+    private ExprSubstitutionMap createPhysicalScanProjectionSmap(OlapScanNode scanNode) {
+        List<SlotDescriptor> outputSlots = scanNode.getOutputTupleDesc().getSlots();
+        List<Expr> projectionExprs = scanNode.getProjectList();
+        Preconditions.checkState(outputSlots.size() == projectionExprs.size(),
+                "physical scan projection slot size %s does not match expr size %s",
+                outputSlots.size(), projectionExprs.size());
+
+        ExprSubstitutionMap substitutionMap = new ExprSubstitutionMap();
+        for (int i = 0; i < outputSlots.size(); ++i) {
+            substitutionMap.put(new SlotRef(outputSlots.get(i)), projectionExprs.get(i));
+        }
+        return substitutionMap;
+    }
+
+    private void addPhysicalOlapScanProjection(PhysicalOlapScan olapScan, List<Slot> physicalSlots,
+            OlapScanNode scanNode, PlanTranslatorContext context) {
+        List<Slot> logicalSlots = olapScan.getOutput();
+        if (physicalSlots.size() == logicalSlots.size()) {
+            return;
+        }
+
+        List<Expr> projectionExprs = new ArrayList<>(logicalSlots.size());
+        Set<SlotId> requiredSlotIds = Sets.newHashSet();
+        for (Slot logicalSlot : logicalSlots) {
+            SlotRef physicalSlot = Preconditions.checkNotNull(
+                    context.findSlotRef(logicalSlot.getExprId()),
+                    "logical scan slot is missing from physical scan tuple");
+            projectionExprs.add(physicalSlot);
+            requiredSlotIds.add(physicalSlot.getSlotId());
+        }
+
+        TupleDescriptor outputTuple = generateTupleDesc(logicalSlots, scanNode.getTupleDesc().getTable(), context);
+        scanNode.setProjectList(projectionExprs);
+        scanNode.setOutputTupleDesc(outputTuple);
+        scanNode.setHasPhysicalScanProjection(true);
+        scanNode.updateRequiredSlots(context, requiredSlotIds);
+        updateScanSlotsMaterialization(scanNode, requiredSlotIds, requiredSlotIds, context, false);
     }
 
     private TupleDescriptor generateTupleDesc(List<Slot> slotList, TableIf table, PlanTranslatorContext context) {

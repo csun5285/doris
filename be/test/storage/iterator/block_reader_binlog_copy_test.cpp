@@ -42,6 +42,7 @@
 #include "storage/binlog.h"
 #include "storage/dense_read_schema.h"
 #include "storage/iterator/binlog_block_reader_utils.h"
+#include "storage/iterator/vertical_merge_iterator.h"
 #include "storage/tablet/tablet_schema.h"
 
 namespace doris {
@@ -72,6 +73,69 @@ TabletSchemaSPtr make_binlog_schema() {
                                       FieldType::OLAP_FIELD_TYPE_BIGINT, false, false));
     return schema;
 }
+
+TabletSchemaSPtr make_unique_sequence_schema() {
+    TabletSchemaPB schema_pb;
+    schema_pb.set_keys_type(UNIQUE_KEYS);
+    schema_pb.set_num_short_key_columns(1);
+    schema_pb.set_num_rows_per_row_block(1024);
+    schema_pb.set_compress_kind(COMPRESS_NONE);
+    schema_pb.set_next_column_unique_id(6);
+    schema_pb.set_sequence_col_idx(3);
+
+    auto add_column = [&](int32_t unique_id, const std::string& name, const std::string& type,
+                          bool is_key, int32_t length) {
+        auto* column = schema_pb.add_column();
+        column->set_unique_id(unique_id);
+        column->set_name(name);
+        column->set_type(type);
+        column->set_is_key(is_key);
+        column->set_is_nullable(false);
+        column->set_length(length);
+        column->set_index_length(length);
+        column->set_is_bf_column(false);
+        column->set_aggregation("NONE");
+    };
+    add_column(1, "k", "INT", true, sizeof(int32_t));
+    add_column(2, "v1", "INT", false, sizeof(int32_t));
+    add_column(3, "v2", "INT", false, sizeof(int32_t));
+    add_column(4, SEQUENCE_COL, "INT", false, sizeof(int32_t));
+    add_column(5, DELETE_SIGN, "TINYINT", false, sizeof(int8_t));
+
+    auto schema = std::make_shared<TabletSchema>();
+    schema->init_from_pb(schema_pb);
+    return schema;
+}
+
+class SingleSequenceRowIterator final : public RowwiseIterator {
+public:
+    SingleSequenceRowIterator(DenseReadSchemaSPtr schema, int32_t key, int32_t sequence)
+            : _schema(std::move(schema)), _key(key), _sequence(sequence) {}
+
+    Status init(const StorageReadOptions&) override { return Status::OK(); }
+
+    Status next_batch(Block* block) override {
+        if (_returned) {
+            return Status::EndOfFile("single sequence row returned");
+        }
+        auto columns_guard = block->mutate_columns_scoped();
+        auto& columns = columns_guard.mutable_columns();
+        columns[0]->insert_data(reinterpret_cast<const char*>(&_key), sizeof(_key));
+        columns[1]->insert_data(reinterpret_cast<const char*>(&_sequence), sizeof(_sequence));
+        int8_t delete_sign = 0;
+        columns[2]->insert_data(reinterpret_cast<const char*>(&delete_sign), sizeof(delete_sign));
+        _returned = true;
+        return Status::OK();
+    }
+
+    const DenseReadSchema& schema() const override { return *_schema; }
+
+private:
+    DenseReadSchemaSPtr _schema;
+    int32_t _key;
+    int32_t _sequence;
+    bool _returned = false;
+};
 
 void append_source_row(Block& block, int32_t key, int32_t value, int32_t before_value,
                        bool before_is_null) {
@@ -223,6 +287,37 @@ TEST(VerticalBlockReaderDenseLayoutTest, RejectsSameWidthBlockWithDifferentLayou
 
     EXPECT_FALSE(status.ok());
     EXPECT_NE(status.to_string().find("does not match dense read schema"), std::string::npos);
+}
+
+TEST(VerticalBlockReaderDenseLayoutTest, UsesDensePositionForNonAdjacentSequenceColumn) {
+    auto tablet_schema = make_unique_sequence_schema();
+    auto read_schema = DenseReadSchema::create(*tablet_schema, {0, 3, 4});
+    ASSERT_TRUE(read_schema.has_value()) << read_schema.error().to_string();
+    ASSERT_EQ(read_schema.value()->sequence_col_idx(), 1);
+    ASSERT_EQ(tablet_schema->sequence_col_idx(), 3);
+
+    std::vector<RowwiseIteratorUPtr> inputs;
+    inputs.push_back(std::make_unique<SingleSequenceRowIterator>(read_schema.value(), 7, 10));
+    inputs.push_back(std::make_unique<SingleSequenceRowIterator>(read_schema.value(), 7, 20));
+
+    RowSourcesBuffer row_sources(1, "/tmp", ReaderType::READER_BASE_COMPACTION);
+    VerticalBlockReader reader(&row_sources);
+    reader._tablet_schema = tablet_schema;
+    reader._read_schema = read_schema.value();
+
+    TabletReader::ReaderParams params;
+    params.reader_type = ReaderType::READER_BASE_COMPACTION;
+    params.is_key_column_group = true;
+    params.segment_iters_ptr = &inputs;
+    params.batch_size = 16;
+    ASSERT_TRUE(reader._init_collect_iter(params, nullptr).ok());
+
+    Block output = read_schema.value()->create_block();
+    const auto status = reader._vcollect_iter->next_batch(&output);
+    EXPECT_TRUE(status.is<ErrorCode::END_OF_FILE>()) << status;
+    ASSERT_EQ(output.rows(), 1);
+    EXPECT_EQ(output.get_by_position(0).column->get_int(0), 7);
+    EXPECT_EQ(output.get_by_position(1).column->get_int(0), 20);
 }
 
 } // namespace doris

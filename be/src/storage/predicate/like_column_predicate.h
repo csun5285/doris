@@ -55,6 +55,7 @@ public:
         pattern = other.pattern;
         _state = other._state;
         _opposite = other._opposite;
+        _page_ng_bf = other._page_ng_bf;
     }
     LikeColumnPredicate(const LikeColumnPredicate& other) = delete;
     std::shared_ptr<ColumnPredicate> clone(uint32_t col_id) const override {

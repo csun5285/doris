@@ -278,8 +278,9 @@ Status RowSourcesBuffer::_deserialize() {
 Status VerticalMergeIteratorContext::block_reset(const std::shared_ptr<Block>& block) {
     if (!block->columns()) {
         *block = _iter->schema().create_block();
-        for (auto& column : block->get_columns()) {
-            column->assert_mutable()->reserve(_block_row_max);
+        auto columns_guard = block->mutate_columns_scoped();
+        for (auto& column : columns_guard.mutable_columns()) {
+            column->reserve(_block_row_max);
         }
     } else {
         RETURN_IF_ERROR(_iter->schema().validate_block(*block));

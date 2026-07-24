@@ -17,6 +17,7 @@
 
 #include "storage/task/index_builder.h"
 
+#include <algorithm>
 #include <mutex>
 
 #include "common/logging.h"
@@ -420,6 +421,13 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
             std::vector<ColumnId> return_columns;
             std::vector<std::pair<int64_t, int64_t>> inverted_index_writer_signs;
             _olap_data_convertor->reserve(_alter_inverted_indexes.size());
+            auto add_return_column_if_absent = [&](ColumnId column_id) {
+                if (std::ranges::find(return_columns, column_id) == return_columns.end()) {
+                    return_columns.push_back(column_id);
+                    _olap_data_convertor->add_column_data_convertor(
+                            output_rowset_schema->column(column_id));
+                }
+            };
 
             std::unique_ptr<IndexFileWriter> index_file_writer = nullptr;
             if (output_rowset_schema->get_inverted_index_storage_format() >=
@@ -486,8 +494,7 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
                     continue;
                 }
                 DCHECK(output_rowset_schema->has_inverted_index_with_index_id(index_id));
-                _olap_data_convertor->add_column_data_convertor(column);
-                return_columns.emplace_back(column_idx);
+                add_return_column_if_absent(static_cast<ColumnId>(column_idx));
 
                 if (inverted_index.index_type == TIndexType::INVERTED) {
                     // inverted index
@@ -597,7 +604,7 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
                 }
 
                 // write inverted index data, or ann index data
-                status = _write_inverted_index_data(output_rowset_schema, iter->data_id(),
+                status = _write_inverted_index_data(output_rowset_schema, *schema, iter->data_id(),
                                                     block.get());
                 DBUG_EXECUTE_IF(
                         "IndexBuilder::handle_single_rowset_write_inverted_index_data_error", {
@@ -662,8 +669,9 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
     return Status::OK();
 }
 
-Status IndexBuilder::_write_inverted_index_data(TabletSchemaSPtr tablet_schema, int64_t segment_idx,
-                                                Block* block) {
+Status IndexBuilder::_write_inverted_index_data(TabletSchemaSPtr tablet_schema,
+                                                const DenseReadSchema& read_schema,
+                                                int64_t segment_idx, Block* block) {
     VLOG_DEBUG << "begin to write inverted/ann index";
     // converter block data
     _olap_data_convertor->set_source_content(block, 0, block->rows());
@@ -688,7 +696,13 @@ Status IndexBuilder::_write_inverted_index_data(TabletSchemaSPtr tablet_schema, 
         }
         const auto& column = tablet_schema->column(column_idx);
         auto writer_sign = std::make_pair(segment_idx, index_id);
-        auto converted_result = _olap_data_convertor->convert_column_data(i);
+        if (!_index_column_writers.contains(writer_sign)) {
+            continue;
+        }
+        auto read_position = read_schema.position_of_tablet_cid(static_cast<ColumnId>(column_idx));
+        DCHECK(read_position.has_value());
+        auto converted_result =
+                _olap_data_convertor->convert_column_data(read_position.value().value());
         DBUG_EXECUTE_IF("IndexBuilder::_write_inverted_index_data_convert_column_data_error", {
             converted_result.first = Status::Error<ErrorCode::INTERNAL_ERROR>(
                     "debug point: _write_inverted_index_data_convert_column_data_error");

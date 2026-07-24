@@ -193,6 +193,9 @@ public class OlapScanNode extends ScanNode {
     // Storage dependencies are real columns needed below Scanner even when the SQL output does not
     // reference them. Unlike extra keys, these slots must never be replaced with placeholders.
     private Set<Integer> storageSemanticDependencySlotIds = new HashSet<>();
+    // The translator installs this projection when the physical scan tuple contains storage-only
+    // slots. A parent filter may safely push through it, and a parent project may compose with it.
+    private boolean hasPhysicalScanProjection;
     private Integer scanSchemaLayoutVersion;
 
     // When scan match sort_info, we can push limit into OlapScanNode.
@@ -287,6 +290,14 @@ public class OlapScanNode extends ScanNode {
         if (slot.getColumn() != null) {
             outputColumnUniqueIds.add(slot.getColumn().getUniqueId());
         }
+    }
+
+    public boolean hasPhysicalScanProjection() {
+        return hasPhysicalScanProjection;
+    }
+
+    public void setHasPhysicalScanProjection(boolean hasPhysicalScanProjection) {
+        this.hasPhysicalScanProjection = hasPhysicalScanProjection;
     }
 
     public void setScanSchemaLayoutVersion(int scanSchemaLayoutVersion) {
