@@ -26,18 +26,17 @@
 
 #include "common/status.h"
 #include "core/block/block.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterators.h"
 #include "storage/olap_common.h"
 #include "storage/rowset/beta_rowset.h"
 #include "storage/rowset/rowset.h"
 #include "storage/rowset/rowset_reader.h"
-#include "storage/schema.h"
 #include "storage/segment/segment_loader.h"
 #include "util/once.h"
 
 namespace doris {
 class RuntimeProfile;
-class Schema;
 struct RowLocation;
 struct RowsetReaderContext;
 
@@ -145,17 +144,11 @@ private:
     std::pair<int64_t, int64_t> _segment_offsets;
     std::vector<RowRanges> _segment_row_ranges;
 
-    // _input_schema: includes return_columns + delete_predicate_columns.
-    // Used by SegmentIterator internally (iter->schema() returns this). SegmentIterator
-    // handles the extra delete predicate columns through _current_return_columns and
-    // _evaluate_short_circuit_predicate(), independent of the block structure.
-    // e.g. return_columns={c1, c2}, delete_pred on c3 => input_schema={c1, c2, c3}
-    SchemaSPtr _input_schema;
-    // _output_schema: includes only return_columns (a subset of input_schema).
-    // Passed to VMergeIterator/VUnionIterator. block_reset() builds the internal block
-    // with this schema, and copy_rows() copies exactly these columns to the destination.
-    // e.g. return_columns={c1, c2} => output_schema={c1, c2}
-    SchemaSPtr _output_schema;
+    // Segment schema is the exact scan schema plus BE-only auxiliary fields such
+    // as dropped columns referenced by delete predicates.
+    DenseReadSchemaSPtr _segment_schema;
+    // Exact Block layout visible above the rowset boundary.
+    DenseReadSchemaSPtr _read_schema;
     RowsetReaderContext* _read_context = nullptr;
     BetaRowsetSharedPtr _rowset;
 

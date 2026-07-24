@@ -55,6 +55,7 @@
 #include "runtime/query_context.h"
 #include "runtime/runtime_predicate.h"
 #include "runtime/runtime_state.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/index_file_reader.h"
 #include "storage/index/indexed_column_reader.h"
 #include "storage/index/primary_key_index.h"
@@ -67,7 +68,6 @@
 #include "storage/predicate/block_column_predicate.h"
 #include "storage/predicate/column_predicate.h"
 #include "storage/rowset/rowset_reader_context.h"
-#include "storage/schema.h"
 #include "storage/segment/column_meta_accessor.h"
 #include "storage/segment/column_reader.h"
 #include "storage/segment/column_reader_cache.h"
@@ -91,7 +91,7 @@ class InvertedIndexIterator;
 
 namespace {
 
-Status build_segment_zonemap_context(Segment* segment, const Schema& schema,
+Status build_segment_zonemap_context(Segment* segment, const DenseReadSchema& schema,
                                      const StorageReadOptions& read_options,
                                      const VExprContextSPtrs& conjuncts, ZoneMapEvalContext* ctx) {
     DORIS_CHECK(segment != nullptr);
@@ -111,10 +111,9 @@ Status build_segment_zonemap_context(Segment* segment, const Schema& schema,
         root->collect_slot_column_ids(slot_indexes);
     }
     for (const int slot_index : slot_indexes) {
-        if (slot_index < 0 || cast_set<size_t>(slot_index) >= schema.num_column_ids()) {
-            continue;
-        }
-        const auto column_id = schema.column_id(cast_set<size_t>(slot_index));
+        DORIS_CHECK_GE(slot_index, 0);
+        DORIS_CHECK_LT(cast_set<size_t>(slot_index), schema.num_column_ids());
+        const auto column_id = cast_set<ColumnId>(slot_index);
         const auto* tablet_column = schema.column(column_id);
         DORIS_CHECK(tablet_column != nullptr);
         if (!segment->can_apply_predicate_safely(
@@ -366,7 +365,7 @@ Status Segment::_open_index_file_reader() {
     return Status::OK();
 }
 
-bool Segment::is_tso_placeholder_col(int cid, const Schema& schema,
+bool Segment::is_tso_placeholder_col(int cid, const DenseReadSchema& schema,
                                      const StorageReadOptions& read_options) const {
     if (read_options.version.first != read_options.version.second) {
         return false;
@@ -379,7 +378,10 @@ bool Segment::is_tso_placeholder_col(int cid, const Schema& schema,
     return cid == schema.tso_col_idx();
 }
 
-Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_options,
+// Existing iterator initialization intentionally remains centralized; this refactor only changes
+// its schema contract, and splitting the orchestration is outside this change.
+// NOLINTNEXTLINE(readability-function-cognitive-complexity, readability-function-size)
+Status Segment::new_iterator(DenseReadSchemaSPtr schema, const StorageReadOptions& read_options,
                              std::unique_ptr<RowwiseIterator>* iter) {
     if (read_options.runtime_state != nullptr) {
         _be_exec_version = read_options.runtime_state->be_exec_version();
@@ -390,11 +392,8 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
     // trying to prune the current segment by segment-level zone map
     for (const auto& entry : read_options.col_id_to_predicates) {
         int32_t column_id = entry.first;
-        // schema change
-        if (_tablet_schema->num_columns() <= column_id) {
-            continue;
-        }
-        const TabletColumn& col = read_options.tablet_schema->column(column_id);
+        DORIS_CHECK_LT(column_id, schema->num_columns());
+        const TabletColumn& col = *schema->column(column_id);
         std::shared_ptr<ColumnReader> reader;
         // __DORIS_COMMIT_TSO_COL__ on a single-version segment stores a 0 placeholder on disk
         // (replaced with the rowset's real commit_tso at read time). Its on-disk zonemap [0,0]
@@ -433,7 +432,7 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
             zone_map.has_not_null = true;
             if (!entry.second->evaluate_and(zone_map)) {
                 // any condition not satisfied, return.
-                *iter = std::make_unique<EmptySegmentIterator>(*schema);
+                *iter = std::make_unique<EmptySegmentIterator>(schema);
                 read_options.stats->filtered_segment_number++;
                 return Status::OK();
             }
@@ -446,7 +445,7 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
             RETURN_IF_ERROR(reader->match_condition(entry.second.get(), &matched));
             if (!matched) {
                 // any condition not satisfied, return.
-                *iter = std::make_unique<EmptySegmentIterator>(*schema);
+                *iter = std::make_unique<EmptySegmentIterator>(schema);
                 read_options.stats->filtered_segment_number++;
                 read_options.stats->rows_stats_filtered += num_rows();
                 return Status::OK();
@@ -465,7 +464,7 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
                 VExprContext::evaluate_zonemap_filter(read_options.common_expr_ctxs_push_down, ctx);
         ctx.stats.accumulate_to(read_options.stats);
         if (result == ZoneMapFilterResult::kNoMatch) {
-            *iter = std::make_unique<EmptySegmentIterator>(*schema);
+            *iter = std::make_unique<EmptySegmentIterator>(schema);
             read_options.stats->filtered_segment_number++;
             read_options.stats->expr_zonemap_filtered_segments++;
             return Status::OK();
@@ -480,7 +479,7 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
     if (read_options.delete_condition_predicates->num_of_column_predicate() == 0 &&
         read_options.push_down_agg_type_opt != TPushAggOp::NONE &&
         read_options.push_down_agg_type_opt != TPushAggOp::COUNT_ON_INDEX) {
-        iter->reset(new_vstatistics_iterator(this->shared_from_this(), *schema));
+        iter->reset(new_vstatistics_iterator(this->shared_from_this(), schema));
     } else {
         *iter = std::make_unique<SegmentIterator>(this->shared_from_this(), schema);
     }
@@ -492,10 +491,14 @@ Status Segment::new_iterator(SchemaSPtr schema, const StorageReadOptions& read_o
         auto pruned = false;
         for (auto& it : _column_reader_cache->get_available_readers(false)) {
             const auto uid = it.first;
-            const auto column_id = read_options.tablet_schema->field_index(uid);
+            const auto tablet_cid = read_options.tablet_schema->field_index(uid);
+            const auto read_position = schema->position_of_tablet_cid(tablet_cid);
+            if (!read_position.has_value()) {
+                continue;
+            }
             bool tmp_pruned = false;
-            RETURN_IF_ERROR(it.second->prune_predicates_by_zone_map(pruned_predicates, column_id,
-                                                                    &tmp_pruned));
+            RETURN_IF_ERROR(it.second->prune_predicates_by_zone_map(
+                    pruned_predicates, read_position->value(), &tmp_pruned));
             pruned |= tmp_pruned;
         }
 

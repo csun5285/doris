@@ -112,8 +112,9 @@ private:
             const std::vector<FunctionFilter>& function_filters);
 
     [[nodiscard]] Status _init_tso_predicates();
-    [[nodiscard]] Status _init_return_columns();
+    [[nodiscard]] Status _init_scan_tablet_columns();
     [[nodiscard]] Status _init_variant_columns();
+    [[nodiscard]] Result<int32_t> _resolve_scan_tablet_cid(const SlotDescriptor& slot) const;
 #ifndef NDEBUG
     Status _check_ann_cache_hit_debug_points(const OlapReaderStatistics& stats);
 #endif
@@ -124,9 +125,17 @@ private:
     std::unique_ptr<TabletReader> _tablet_reader;
     std::optional<int64_t> _start_tso;
     std::optional<int64_t> _end_tso;
+    // Rolling-upgrade adapter for legacy FE plans whose scan tuple does not contain
+    // every storage semantic dependency. TabletReader always reads the aligned block;
+    // Scanner projects it back to the legacy physical tuple before normal scan processing.
+    Block _storage_read_block;
+    std::vector<uint32_t> _legacy_scan_projection;
+    bool _use_legacy_scan_schema_adapter = false;
 
 public:
-    std::vector<ColumnId> _return_columns;
+    // Tablet ordinals of the FE physical scan tuple, in exact tuple order.
+    // They exist only at the Scanner boundary; storage readers consume read_schema.
+    std::vector<ColumnId> _scan_tablet_cids;
 
     std::unordered_set<uint32_t> _tablet_columns_convert_to_null_set;
     io::FileCacheStatistics _initial_file_cache_stats;

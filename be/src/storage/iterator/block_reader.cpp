@@ -36,11 +36,13 @@
 #include "core/column/column_nullable.h"
 #include "core/column/column_string.h"
 #include "core/column/column_vector.h"
+#include "core/data_type/data_type_nullable.h"
 #include "core/data_type/data_type_number.h"
 #include "exprs/aggregate/aggregate_function_reader.h"
 #include "exprs/function_filter.h"
 #include "runtime/runtime_state.h"
 #include "storage/binlog.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterator/binlog_block_reader_utils.h"
 #include "storage/iterator/vcollect_iterator.h"
 #include "storage/olap_common.h"
@@ -68,6 +70,7 @@ BlockReader::~BlockReader() {
 }
 
 Status BlockReader::next_block_with_aggregation(Block* block, bool* eof) {
+    RETURN_IF_ERROR(_read_schema->validate_block(*block));
     auto res = (this->*_next_block_func)(block, eof);
     if (!config::is_cloud_mode()) {
         if (!res.ok()) [[unlikely]] {
@@ -77,39 +80,96 @@ Status BlockReader::next_block_with_aggregation(Block* block, bool* eof) {
     return res;
 }
 
-// Lazily resolves the positions of the binlog meta columns (tso / lsn / op) inside the
-// merged source block, and builds _before_column_idx mapping each non-meta column to its
-// __BEFORE__ mirror. The resolved positions are reused across blocks; if the column
-// layout changes (detected via _binlog_op_pos sanity check), they are re-resolved.
-Status BlockReader::_ensure_binlog_column_pos(const Block& src_block) {
-    if (_binlog_column_pos_inited) {
-        if (_binlog_op_pos >= 0 && _binlog_op_pos < src_block.columns() &&
-            src_block.get_by_position(_binlog_op_pos).name == BINLOG_OP_COL) {
-            return Status::OK();
+Status BlockReader::_init_read_positions(const ReaderParams& read_params) {
+    DORIS_CHECK(_read_schema != nullptr);
+    _before_source_positions.resize(_read_schema->size());
+    _before_copy_modes.assign(_read_schema->size(), BinlogColumnCopyMode::DIRECT);
+    for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+        const auto& field = _read_schema->field(ReadPosition(position));
+        const auto& name = field.block_name;
+        _before_source_positions[position] = position;
+        if (name == BINLOG_OP_COL) {
+            _binlog_op_position = position;
+        } else if (name == BINLOG_LSN_COL) {
+            _binlog_lsn_position = position;
+        } else if (name == BINLOG_TSO_COL) {
+            _binlog_tso_position = position;
+        } else if (name == DELETE_SIGN) {
+            _delete_sign_position = position;
         }
-        _binlog_tso_pos = -1;
-        _binlog_lsn_pos = -1;
-        _binlog_op_pos = -1;
-        _binlog_column_pos_inited = false;
+
+        if (_tablet_schema->keys_type() == KeysType::AGG_KEYS && !field.storage_column->is_key()) {
+            _aggregate_positions.push_back(position);
+        } else {
+            _passthrough_positions.push_back(position);
+        }
+
+        const auto before_name = binlog::build_before_column_name(name);
+        const int32_t before_cid = _tablet_schema->field_index(before_name);
+        if (before_cid >= 0) {
+            auto before_position =
+                    _read_schema->position_of_tablet_cid(static_cast<uint32_t>(before_cid));
+            if (!before_position.has_value() &&
+                (read_params.binlog_scan_type == TBinlogScanType::MIN_DELTA ||
+                 read_params.binlog_scan_type == TBinlogScanType::DETAIL)) {
+                return Status::InvalidArgument(
+                        "binlog scan schema misses before-image column {} for {}", before_name,
+                        name);
+            }
+            if (before_position.has_value()) {
+                _before_source_positions[position] = before_position->value();
+                const auto& source_field = _read_schema->field(*before_position);
+                _before_copy_modes[position] = DORIS_TRY(
+                        _plan_binlog_column_copy(field.block_type, source_field.block_type));
+            }
+        }
     }
 
-    const uint32_t col_num = src_block.columns();
-    _before_column_idx.resize(col_num);
-    for (uint32_t i = 0; i < col_num; ++i) {
-        const auto& name = src_block.get_by_position(i).name;
-        if (name == BINLOG_TSO_COL) {
-            _binlog_tso_pos = static_cast<int>(i);
-        } else if (name == BINLOG_LSN_COL) {
-            _binlog_lsn_pos = static_cast<int>(i);
-        } else if (name == BINLOG_OP_COL) {
-            _binlog_op_pos = static_cast<int>(i);
-        } else {
-            std::string before_name = binlog::build_before_column_name(name);
-            int tmp_idx = src_block.get_position_by_name(before_name);
-            _before_column_idx[i] = tmp_idx < 0 ? i : tmp_idx;
-        }
+    if ((read_params.binlog_scan_type == TBinlogScanType::MIN_DELTA ||
+         read_params.binlog_scan_type == TBinlogScanType::DETAIL) &&
+        !_binlog_op_position.has_value()) {
+        return Status::InvalidArgument("binlog scan schema misses operation column {}",
+                                       BINLOG_OP_COL);
     }
-    _binlog_column_pos_inited = true;
+
+    if (_delete_sign_available && _tablet_schema->keys_type() == KeysType::UNIQUE_KEYS &&
+        !_delete_sign_position.has_value()) {
+        return Status::InvalidArgument(
+                "read schema misses delete-sign column required by reader type {}",
+                static_cast<int>(read_params.reader_type));
+    }
+
+    return _init_sequence_value_positions();
+}
+
+Status BlockReader::_init_sequence_value_positions() {
+    if (!_tablet_schema->has_seq_map()) {
+        return Status::OK();
+    }
+    if (_tablet_schema->has_sequence_col()) {
+        return Status::InternalError(
+                "sequence columns conflict, both seq_col and seq_map are true");
+    }
+    _has_seq_map = true;
+    for (const auto& [sequence_cid, value_cids] : _tablet_schema->seq_col_idx_to_value_cols_idx()) {
+        std::vector<uint32_t> value_positions;
+        for (auto value_cid : value_cids) {
+            auto value_position = _read_schema->position_of_tablet_cid(value_cid);
+            if (value_position.has_value()) {
+                value_positions.push_back(value_position->value());
+            }
+        }
+        if (value_positions.empty()) {
+            continue;
+        }
+        auto sequence_position = _read_schema->position_of_tablet_cid(sequence_cid);
+        if (!sequence_position.has_value()) {
+            return Status::InvalidArgument(
+                    "read schema misses sequence column cid={} required by selected values",
+                    sequence_cid);
+        }
+        _sequence_value_positions.emplace(sequence_position->value(), std::move(value_positions));
+    }
     return Status::OK();
 }
 
@@ -149,20 +209,87 @@ Status BlockReader::_write_binlog_op(IColumn& col, int64_t op) const {
     return Status::OK();
 }
 
-bool BlockReader::_is_binlog_meta_column(int idx) const {
-    return idx == _binlog_tso_pos || idx == _binlog_lsn_pos || idx == _binlog_op_pos;
+bool BlockReader::_is_binlog_meta_position(uint32_t position) const {
+    return (_binlog_op_position.has_value() && position == *_binlog_op_position) ||
+           (_binlog_lsn_position.has_value() && position == *_binlog_lsn_position) ||
+           (_binlog_tso_position.has_value() && position == *_binlog_tso_position);
 }
 
-// Resolves which source-block column to read from for a given binlog row position.
-// When use_before is true and idx is a regular data column, return the index of its
-// __BEFORE__ mirror (built in _before_column_idx); otherwise return idx itself.
-// Binlog meta columns (tso / lsn / op) have no BEFORE mirror, so they always pass through.
-int BlockReader::_resolve_source_column_index(int idx, bool use_before) const {
-    if (!use_before || _is_binlog_meta_column(idx)) {
-        return idx;
+// Resolves which source-block position to read for a given binlog output field.
+// When use_before is true and the field is regular data, use its __BEFORE__ companion.
+// Binlog meta columns (op / lsn / tso) have no BEFORE mirror, so they always pass through.
+uint32_t BlockReader::_resolve_source_position(uint32_t position, bool use_before) const {
+    if (!use_before || _is_binlog_meta_position(position)) {
+        return position;
     }
 
-    return _before_column_idx[idx];
+    return _before_source_positions[position];
+}
+
+Result<BlockReader::BinlogColumnCopyMode> BlockReader::_plan_binlog_column_copy(
+        const DataTypePtr& target_type, const DataTypePtr& source_type) {
+    DORIS_CHECK(target_type != nullptr);
+    DORIS_CHECK(source_type != nullptr);
+    if (target_type->equals(*source_type)) {
+        return BinlogColumnCopyMode::DIRECT;
+    }
+
+    if (!target_type->is_nullable() && source_type->is_nullable() &&
+        target_type->equals(*remove_nullable(source_type))) {
+        return BinlogColumnCopyMode::UNWRAP_NULLABLE_SOURCE;
+    }
+
+    if (target_type->is_nullable() && !source_type->is_nullable() &&
+        remove_nullable(target_type)->equals(*source_type)) {
+        return BinlogColumnCopyMode::WRAP_NON_NULL_SOURCE;
+    }
+
+    return ResultError(Status::InvalidArgument(
+            "cannot copy row-binlog field from type {} to incompatible type {}",
+            source_type->get_name(), target_type->get_name()));
+}
+
+Status BlockReader::_append_binlog_column(IColumn& target_column, const IColumn& source_column,
+                                          size_t source_row, uint32_t target_position,
+                                          uint32_t source_position,
+                                          BinlogColumnCopyMode copy_mode) const {
+    RETURN_IF_ERROR(_validate_binlog_column(source_column, source_row, target_position,
+                                            source_position, copy_mode));
+    switch (copy_mode) {
+    case BinlogColumnCopyMode::DIRECT:
+        target_column.insert_from(source_column, source_row);
+        return Status::OK();
+    case BinlogColumnCopyMode::UNWRAP_NULLABLE_SOURCE: {
+        const auto& nullable_source = assert_cast<const ColumnNullable&>(source_column);
+        target_column.insert_from(nullable_source.get_nested_column(), source_row);
+        return Status::OK();
+    }
+    case BinlogColumnCopyMode::WRAP_NON_NULL_SOURCE: {
+        auto& nullable_target = assert_cast<ColumnNullable&>(target_column);
+        nullable_target.get_nested_column().insert_from(source_column, source_row);
+        nullable_target.get_null_map_data().push_back(0);
+        return Status::OK();
+    }
+    }
+    __builtin_unreachable();
+}
+
+Status BlockReader::_validate_binlog_column(const IColumn& source_column, size_t source_row,
+                                            uint32_t target_position, uint32_t source_position,
+                                            BinlogColumnCopyMode copy_mode) const {
+    if (copy_mode != BinlogColumnCopyMode::UNWRAP_NULLABLE_SOURCE) {
+        return Status::OK();
+    }
+
+    const auto& nullable_source = assert_cast<const ColumnNullable&>(source_column);
+    if (!nullable_source.is_null_at(source_row)) {
+        return Status::OK();
+    }
+    return Status::InternalError(
+            "row-binlog source field {} at position {} is NULL for non-nullable output field {} at "
+            "position {}",
+            _read_schema->field(ReadPosition(source_position)).block_name, source_position,
+            _read_schema->field(ReadPosition(target_position)).block_name, target_position);
 }
 
 void BlockReader::_init_pending_row_columns(const Block& block) {
@@ -192,18 +319,50 @@ bool BlockReader::_emit_pending_row(MutableColumns& target_columns, size_t& outp
 // materialize the BEFORE / AFTER halves of an UPDATE pair (and INSERT / DELETE singletons).
 Status BlockReader::_append_change_row(MutableColumns& target_columns, const Block& src_block,
                                        size_t row_pos, int64_t output_op, bool use_before) {
-    for (auto idx : _normal_columns_idx) {
-        int target_col_idx = _return_columns_loc[idx];
-        if (target_col_idx < 0) {
+    if (use_before) {
+        for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+            const auto source_position = _resolve_source_position(position, true);
+            RETURN_IF_ERROR(_validate_binlog_column(
+                    *src_block.get_by_position(source_position).column, row_pos, position,
+                    source_position, _before_copy_modes[position]));
+        }
+    }
+
+    for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+        if (_binlog_op_position.has_value() && position == *_binlog_op_position) {
+            RETURN_IF_ERROR(_write_binlog_op(*target_columns[position], output_op));
             continue;
         }
-        if (idx == _binlog_op_pos) {
-            RETURN_IF_ERROR(_write_binlog_op(*target_columns[target_col_idx], output_op));
-            continue;
+        const auto source_position = _resolve_source_position(position, use_before);
+        const auto copy_mode =
+                use_before ? _before_copy_modes[position] : BinlogColumnCopyMode::DIRECT;
+        RETURN_IF_ERROR(_append_binlog_column(*target_columns[position],
+                                              *src_block.get_by_position(source_position).column,
+                                              row_pos, position, source_position, copy_mode));
+    }
+    return Status::OK();
+}
+
+Status BlockReader::_append_min_delta_update_before(MutableColumns& target_columns,
+                                                    size_t group_size) {
+    for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+        const auto source_position = _resolve_source_position(position, true);
+        RETURN_IF_ERROR(_validate_binlog_column(*_stored_data_columns[source_position], 0, position,
+                                                source_position, _before_copy_modes[position]));
+    }
+
+    for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+        if (position == *_binlog_op_position) {
+            RETURN_IF_ERROR(_write_binlog_op(*target_columns[position],
+                                             binlog::STREAM_CHANGE_UPDATE_BEFORE));
+        } else if (_binlog_lsn_position.has_value() && position == *_binlog_lsn_position) {
+            target_columns[position]->insert_from(*_stored_data_columns[position], group_size - 1);
+        } else {
+            const auto source_position = _resolve_source_position(position, true);
+            RETURN_IF_ERROR(_append_binlog_column(
+                    *target_columns[position], *_stored_data_columns[source_position], 0, position,
+                    source_position, _before_copy_modes[position]));
         }
-        int source_idx = _resolve_source_column_index(idx, use_before);
-        target_columns[target_col_idx]->insert_from(*src_block.get_by_position(source_idx).column,
-                                                    row_pos);
     }
     return Status::OK();
 }
@@ -225,7 +384,6 @@ Status BlockReader::_min_delta_next_block(Block* block, bool* eof) {
     auto& target_columns = target_columns_guard.mutable_columns();
     size_t output_row_count = 0;
     _init_pending_row_columns(*block);
-    RETURN_IF_ERROR(_ensure_binlog_column_pos(*_next_row.block));
     while (output_row_count < batch_max_rows()) {
         if (_emit_pending_row(target_columns, output_row_count)) {
             continue;
@@ -252,75 +410,58 @@ Status BlockReader::_min_delta_next_block(Block* block, bool* eof) {
             continue;
         }
         size_t group_size = _stored_data_columns[0]->size();
-        auto first_op = _read_binlog_op(*_stored_data_columns[_binlog_op_pos], 0);
-        auto last_op = _read_binlog_op(*_stored_data_columns[_binlog_op_pos], group_size - 1);
+        auto first_op = _read_binlog_op(*_stored_data_columns[*_binlog_op_position], 0);
+        auto last_op = _read_binlog_op(*_stored_data_columns[*_binlog_op_position], group_size - 1);
         auto result = binlog::AggregateFunctionMinDelta::calculate_result(first_op, last_op);
         switch (result) {
         case binlog::AggregateFunctionMinDelta::ResultType::SKIP:
             break;
         case binlog::AggregateFunctionMinDelta::ResultType::INSERT:
-            for (auto idx : _normal_columns_idx) {
-                int target_col_idx = _return_columns_loc[idx];
-                if (idx == _binlog_op_pos) {
-                    RETURN_IF_ERROR(_write_binlog_op(*target_columns[target_col_idx],
+            for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+                if (position == *_binlog_op_position) {
+                    RETURN_IF_ERROR(_write_binlog_op(*target_columns[position],
                                                      binlog::STREAM_CHANGE_INSERT));
                 } else {
-                    target_columns[target_col_idx]->insert_from(*_stored_data_columns[idx],
-                                                                group_size - 1);
+                    target_columns[position]->insert_from(*_stored_data_columns[position],
+                                                          group_size - 1);
                 }
             }
             output_row_count++;
             break;
         case binlog::AggregateFunctionMinDelta::ResultType::DELETE:
-            for (auto idx : _normal_columns_idx) {
-                int target_col_idx = _return_columns_loc[idx];
-                if (idx == _binlog_op_pos) {
-                    RETURN_IF_ERROR(_write_binlog_op(*target_columns[target_col_idx],
+            for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+                if (position == *_binlog_op_position) {
+                    RETURN_IF_ERROR(_write_binlog_op(*target_columns[position],
                                                      binlog::STREAM_CHANGE_DELETE));
                 } else {
-                    target_columns[target_col_idx]->insert_from(*_stored_data_columns[idx],
-                                                                group_size - 1);
+                    target_columns[position]->insert_from(*_stored_data_columns[position],
+                                                          group_size - 1);
                 }
             }
             output_row_count++;
             break;
         case binlog::AggregateFunctionMinDelta::ResultType::UPDATE_BEFORE_AFTER:
-            for (auto idx : _normal_columns_idx) {
-                int target_col_idx = _return_columns_loc[idx];
-                if (idx == _binlog_op_pos) {
-                    RETURN_IF_ERROR(_write_binlog_op(*target_columns[target_col_idx],
-                                                     binlog::STREAM_CHANGE_UPDATE_BEFORE));
-                } else if (idx == _binlog_lsn_pos) {
-                    target_columns[target_col_idx]->insert_from(*_stored_data_columns[idx],
-                                                                group_size - 1);
-                } else {
-                    int source_idx = _resolve_source_column_index(idx, true);
-                    target_columns[target_col_idx]->insert_from(*_stored_data_columns[source_idx],
-                                                                0);
-                }
-            }
+            RETURN_IF_ERROR(_append_min_delta_update_before(target_columns, group_size));
             output_row_count++;
             if (output_row_count >= batch_max_rows()) {
-                for (auto idx : _normal_columns_idx) {
-                    int target_col_idx = _return_columns_loc[idx];
-                    if (idx == _binlog_op_pos) {
-                        RETURN_IF_ERROR(_write_binlog_op(*_pending_row_columns[target_col_idx],
+                for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+                    if (position == *_binlog_op_position) {
+                        RETURN_IF_ERROR(_write_binlog_op(*_pending_row_columns[position],
                                                          binlog::STREAM_CHANGE_UPDATE_AFTER));
                     } else {
-                        _pending_row_columns[target_col_idx]->insert_from(
-                                *_stored_data_columns[idx], group_size - 1);
+                        _pending_row_columns[position]->insert_from(*_stored_data_columns[position],
+                                                                    group_size - 1);
                     }
                 }
                 _has_pending_row = true;
             } else {
-                for (auto idx : _normal_columns_idx) {
-                    int target_col_idx = _return_columns_loc[idx];
-                    if (idx == _binlog_op_pos) {
-                        RETURN_IF_ERROR(_write_binlog_op(*target_columns[target_col_idx],
+                for (uint32_t position = 0; position < _read_schema->size(); ++position) {
+                    if (position == *_binlog_op_position) {
+                        RETURN_IF_ERROR(_write_binlog_op(*target_columns[position],
                                                          binlog::STREAM_CHANGE_UPDATE_AFTER));
                     } else {
-                        target_columns[target_col_idx]->insert_from(*_stored_data_columns[idx],
-                                                                    group_size - 1);
+                        target_columns[position]->insert_from(*_stored_data_columns[position],
+                                                              group_size - 1);
                     }
                 }
                 output_row_count++;
@@ -348,7 +489,6 @@ Status BlockReader::_detail_change_next_block(Block* block, bool* eof) {
     auto& target_columns = target_columns_guard.mutable_columns();
     size_t output_row_count = 0;
     _init_pending_row_columns(*block);
-    RETURN_IF_ERROR(_ensure_binlog_column_pos(*_next_row.block));
     while (output_row_count < batch_max_rows()) {
         if (_emit_pending_row(target_columns, output_row_count)) {
             continue;
@@ -361,7 +501,8 @@ Status BlockReader::_detail_change_next_block(Block* block, bool* eof) {
         }
         const Block& source_block = *_next_row.block;
         const size_t row = _next_row.row_pos;
-        int64_t op = _read_binlog_op(*source_block.get_by_position(_binlog_op_pos).column, row);
+        int64_t op =
+                _read_binlog_op(*source_block.get_by_position(*_binlog_op_position).column, row);
         if (op == ROW_BINLOG_UPDATE) {
             RETURN_IF_ERROR(_append_change_row(target_columns, source_block, row,
                                                binlog::STREAM_CHANGE_UPDATE_BEFORE, true));
@@ -497,12 +638,10 @@ Status BlockReader::_init_agg_state(const ReaderParams& read_params) {
     _stored_has_null_tag.resize(_stored_data_columns.size());
     _stored_has_variable_length_tag.resize(_stored_data_columns.size());
 
-    auto& tablet_schema = *_tablet_schema;
-    for (auto idx : _agg_columns_idx) {
-        auto column = tablet_schema.column(
-                read_params.origin_return_columns->at(_return_columns_loc[idx]));
-        AggregateFunctionPtr function =
-                column.get_aggregate_function(AGG_READER_SUFFIX, read_params.get_be_exec_version());
+    for (auto position : _aggregate_positions) {
+        const auto& field = _read_schema->field(ReadPosition(position));
+        AggregateFunctionPtr function = field.storage_column->get_aggregate_function(
+                AGG_READER_SUFFIX, read_params.get_be_exec_version());
 
         // to avoid coredump when something goes wrong(i.e. column missmatch)
         if (!function) {
@@ -512,9 +651,11 @@ Status BlockReader::_init_agg_state(const ReaderParams& read_params) {
                     read_params.tablet->tablet_id(), read_params.tablet->schema_hash(),
                     int(read_params.reader_type), read_params.version.to_string());
         }
-        const auto* column_ptr = _stored_data_columns[idx].get();
-        const IColumn* columns[] = {column_ptr};
-        function->check_input_columns_type(columns);
+        const auto* column_ptr = _stored_data_columns[position].get();
+        const auto& argument_types = function->get_argument_types();
+        DORIS_CHECK_EQ(argument_types.size(), 1);
+        std::vector<const IColumn*> columns(argument_types.size(), column_ptr);
+        function->check_input_columns_type(columns.data());
         function->check_result_column_type(*column_ptr);
         _agg_functions.push_back(function);
         // create aggregate data
@@ -526,7 +667,8 @@ Status BlockReader::_init_agg_state(const ReaderParams& read_params) {
         _agg_places.push_back(place);
 
         // calculate `_has_variable_length_tag` tag. like string, array, map
-        _stored_has_variable_length_tag[idx] = _stored_data_columns[idx]->is_variable_length();
+        _stored_has_variable_length_tag[position] =
+                _stored_data_columns[position]->is_variable_length();
     }
 
     return Status::OK();
@@ -535,64 +677,7 @@ Status BlockReader::_init_agg_state(const ReaderParams& read_params) {
 Status BlockReader::init(const ReaderParams& read_params) {
     SCOPED_RAW_TIMER(&_stats.tablet_reader_init_timer_ns);
     RETURN_IF_ERROR(TabletReader::init(read_params));
-
-    auto return_column_size = read_params.origin_return_columns->size();
-    _return_columns_loc.resize(read_params.return_columns.size(), -1);
-    std::unordered_map<int32_t /*cid*/, int32_t /*pos*/> pos_map;
-    for (int i = 0; i < return_column_size; ++i) {
-        auto cid = read_params.origin_return_columns->at(i);
-        // For each original cid, find the index in return_columns
-        for (int j = 0; j < read_params.return_columns.size(); ++j) {
-            if (read_params.return_columns[j] == cid) {
-                if (j < _tablet->num_key_columns() || _tablet->keys_type() != AGG_KEYS) {
-                    pos_map[cid] = (int32_t)_normal_columns_idx.size();
-                    _normal_columns_idx.emplace_back(j);
-                } else {
-                    _agg_columns_idx.emplace_back(j);
-                }
-                _return_columns_loc[j] = i;
-                break;
-            }
-        }
-    }
-
-    if (_tablet_schema->has_seq_map()) {
-        if (_tablet_schema->has_sequence_col()) {
-            auto msg = "sequence columns conflict, both seq_col and seq_map are true!";
-            LOG(WARNING) << msg;
-            return Status::InternalError(msg);
-        }
-        _has_seq_map = true;
-        for (auto seq_val_iter = _tablet_schema->seq_col_idx_to_value_cols_idx().cbegin();
-             seq_val_iter != _tablet_schema->seq_col_idx_to_value_cols_idx().cend();
-             ++seq_val_iter) {
-            int seq_loc = -1;
-            for (int i = 0; i < read_params.return_columns.size(); ++i) {
-                if (read_params.return_columns[i] == seq_val_iter->first) {
-                    seq_loc = i;
-                    break;
-                }
-            }
-            if (seq_loc == -1) {
-                // don't need to deal with this seq col
-                continue;
-            }
-
-            std::vector<uint32_t> pos_vec;
-            for (auto agg_cid : seq_val_iter->second) {
-                const auto& val_pos_iter = pos_map.find(agg_cid);
-                if (val_pos_iter == pos_map.end()) {
-                    continue;
-                }
-                pos_vec.emplace_back(val_pos_iter->second);
-            }
-            if (_return_columns_loc[seq_loc] == -1) {
-                _seq_map_not_in_origin_block.emplace(seq_loc, pos_vec);
-            } else {
-                _seq_map_in_origin_block.emplace(seq_loc, pos_vec);
-            }
-        }
-    }
+    RETURN_IF_ERROR(_init_read_positions(read_params));
 
     auto status = _init_collect_iter(read_params);
     if (!status.ok()) [[unlikely]] {
@@ -619,15 +704,6 @@ Status BlockReader::init(const ReaderParams& read_params) {
         _next_block_func = &BlockReader::_direct_next_block;
         return Status::OK();
     }
-    if (_has_seq_map && !_eof) {
-        for (auto it = _seq_map_not_in_origin_block.cbegin();
-             it != _seq_map_not_in_origin_block.cend(); ++it) {
-            auto seq_idx = it->first;
-            _seq_columns.insert(
-                    {seq_idx, _next_row.block->get_by_position(seq_idx).column->clone_empty()});
-        }
-    }
-
     switch (_tablet_schema->keys_type()) {
     case KeysType::DUP_KEYS:
         _next_block_func = &BlockReader::_direct_next_block;
@@ -695,12 +771,6 @@ Status BlockReader::_replace_key_next_block(Block* block, bool* eof) {
     auto merged_row = 0;
     while (target_block_row < batch_max_rows() && !_eof) {
         RETURN_IF_ERROR(_insert_data_normal(target_columns));
-        // use the first line to init _seq_columns
-        for (auto it = _seq_map_not_in_origin_block.cbegin();
-             it != _seq_map_not_in_origin_block.cend(); ++it) {
-            auto seq_idx = it->first;
-            _update_last_mutil_seq(seq_idx);
-        }
         if (UNLIKELY(_reader_context.record_rowids)) {
             _block_row_locations[target_block_row] = _vcollect_iter.current_row_location();
         }
@@ -754,12 +824,10 @@ void BlockReader::_compare_sequence_map_and_replace(MutableColumns& columns) {
     auto src_block = _next_row.block.get();
     auto src_pos = _next_row.row_pos;
 
-    // use seq column in origin block to compare and replace
-    for (auto it = _seq_map_in_origin_block.cbegin(); it != _seq_map_in_origin_block.cend(); ++it) {
-        auto seq_idx = it->first;
-        auto dst_seq_column = columns[_return_columns_loc[seq_idx]].get();
+    for (const auto& [sequence_position, value_positions] : _sequence_value_positions) {
+        auto* dst_seq_column = columns[sequence_position].get();
         auto dst_pos = dst_seq_column->size() - 1;
-        auto src_seq_column = src_block->get_by_position(seq_idx).column;
+        const auto& src_seq_column = src_block->get_by_position(sequence_position).column;
         // the rowset version of dst is higher .
         auto res = dst_seq_column->compare_at(dst_pos, src_pos, *src_seq_column, -1);
         if (res >= 0) {
@@ -767,10 +835,9 @@ void BlockReader::_compare_sequence_map_and_replace(MutableColumns& columns) {
         }
 
         // update value and seq column
-        for (auto& p : it->second) {
-            auto val_idx = _normal_columns_idx[p];
-            auto src_column = src_block->get_by_position(val_idx).column;
-            auto dst_column = columns[_return_columns_loc[val_idx]].get();
+        for (auto value_position : value_positions) {
+            const auto& src_column = src_block->get_by_position(value_position).column;
+            auto* dst_column = columns[value_position].get();
             dst_column->pop_back(1);
             dst_column->insert_from(*src_column, src_pos);
         }
@@ -778,36 +845,6 @@ void BlockReader::_compare_sequence_map_and_replace(MutableColumns& columns) {
         dst_seq_column->pop_back(1);
         dst_seq_column->insert_from(*src_seq_column, src_pos);
     }
-
-    // use temp seq block to compare and replace because origin block not contains these seq columns
-    for (auto it = _seq_map_not_in_origin_block.cbegin(); it != _seq_map_not_in_origin_block.cend();
-         ++it) {
-        auto seq_idx = it->first;
-        auto dst_seq_column = _seq_columns[seq_idx].get();
-        auto src_seq_column = src_block->get_by_position(seq_idx).column;
-        // the rowset version of dst is higher .
-        auto res = dst_seq_column->compare_at(0, src_pos, *src_seq_column, -1);
-        if (res >= 0) {
-            continue;
-        }
-
-        // update value and seq column (if need to return)
-        for (auto& p : it->second) {
-            auto val_idx = _normal_columns_idx[p];
-            auto src_column = src_block->get_by_position(val_idx).column;
-            auto dst_column = columns[_return_columns_loc[val_idx]].get();
-            dst_column->pop_back(1);
-            dst_column->insert_from(*src_column, src_pos);
-        }
-
-        _update_last_mutil_seq(seq_idx);
-    }
-}
-
-void BlockReader::_update_last_mutil_seq(int seq_idx) {
-    auto block = _next_row.block.get();
-    _seq_columns[seq_idx]->clear();
-    _seq_columns[seq_idx]->insert_from(*block->get_by_position(seq_idx).column, _next_row.row_pos);
 }
 
 Status BlockReader::_agg_key_next_block(Block* block, bool* eof) {
@@ -917,22 +954,16 @@ Status BlockReader::_unique_key_next_block(Block* block, bool* eof) {
     } while (target_block_row < batch_max_rows());
 
     if (_delete_sign_available) {
-        int delete_sign_idx = _reader_context.tablet_schema->field_index(DELETE_SIGN);
-        DCHECK(delete_sign_idx > 0);
-        if (delete_sign_idx <= 0 || delete_sign_idx >= target_columns.size()) {
-            LOG(WARNING) << "tablet_id: " << tablet()->tablet_id() << " delete sign idx "
-                         << delete_sign_idx
-                         << " not invalid, skip filter delete in base compaction";
-            target_columns_guard.restore();
-            return Status::OK();
-        }
+        DORIS_CHECK(_delete_sign_position.has_value());
+        const auto delete_sign_position = *_delete_sign_position;
+        DORIS_CHECK(delete_sign_position < target_columns.size());
         auto delete_filter_column = IColumn::mutate(std::move(_delete_filter_column));
         reinterpret_cast<ColumnUInt8*>(delete_filter_column.get())->resize(target_block_row);
 
         auto* __restrict filter_data =
                 reinterpret_cast<ColumnUInt8*>(delete_filter_column.get())->get_data().data();
         auto* __restrict delete_data =
-                reinterpret_cast<ColumnInt8*>(target_columns[delete_sign_idx].get())
+                reinterpret_cast<ColumnInt8*>(target_columns[delete_sign_position].get())
                         ->get_data()
                         .data();
         int delete_count = 0;
@@ -966,9 +997,9 @@ Status BlockReader::_insert_data_normal(MutableColumns& columns) {
     auto block = _next_row.block.get();
 
     RETURN_IF_CATCH_EXCEPTION({
-        for (auto idx : _normal_columns_idx) {
-            columns[_return_columns_loc[idx]]->insert_from(*block->get_by_position(idx).column,
-                                                           _next_row.row_pos);
+        for (auto position : _passthrough_positions) {
+            columns[position]->insert_from(*block->get_by_position(position).column,
+                                           _next_row.row_pos);
         }
     });
     return Status::OK();
@@ -992,8 +1023,8 @@ void BlockReader::_update_agg_data(MutableColumns& columns) {
     size_t copy_size = _copy_agg_data();
 
     // calculate has_null_tag
-    for (auto idx : _agg_columns_idx) {
-        _stored_has_null_tag[idx] = _stored_data_columns[idx]->has_null(0, copy_size);
+    for (auto position : _aggregate_positions) {
+        _stored_has_null_tag[position] = _stored_data_columns[position]->has_null(0, copy_size);
     }
 
     // calculate aggregate and insert
@@ -1020,19 +1051,19 @@ size_t BlockReader::_copy_agg_data() {
         _temp_ref_map[ref.block.get()].emplace_back(ref.row_pos, i);
     }
 
-    for (auto idx : _agg_columns_idx) {
-        auto& dst_column = _stored_data_columns[idx];
-        if (_stored_has_variable_length_tag[idx]) {
+    for (auto position : _aggregate_positions) {
+        auto& dst_column = _stored_data_columns[position];
+        if (_stored_has_variable_length_tag[position]) {
             //variable length type should replace ordered
             dst_column->clear();
             for (size_t i = 0; i < copy_size; i++) {
                 auto& ref = _stored_row_ref[i];
-                dst_column->insert_from(*ref.block->get_by_position(idx).column, ref.row_pos);
+                dst_column->insert_from(*ref.block->get_by_position(position).column, ref.row_pos);
             }
         } else {
             for (auto& it : _temp_ref_map) {
                 if (!it.second.empty()) {
-                    auto& src_column = *it.first->get_by_position(idx).column;
+                    const auto& src_column = *it.first->get_by_position(position).column;
                     for (auto& pos : it.second) {
                         dst_column->replace_column_data(src_column, pos.first, pos.second);
                     }
@@ -1050,20 +1081,20 @@ size_t BlockReader::_copy_agg_data() {
 }
 
 void BlockReader::_update_agg_value(MutableColumns& columns, int begin, int end, bool is_close) {
-    for (int i = 0; i < _agg_columns_idx.size(); i++) {
-        auto idx = _agg_columns_idx[i];
+    for (int i = 0; i < _aggregate_positions.size(); i++) {
+        auto position = _aggregate_positions[i];
 
         AggregateFunctionPtr function = _agg_functions[i];
         AggregateDataPtr place = _agg_places[i];
-        auto* column_ptr = _stored_data_columns[idx].get();
+        auto* column_ptr = _stored_data_columns[position].get();
 
         if (begin <= end) {
             function->add_batch_range(begin, end, place, const_cast<const IColumn**>(&column_ptr),
-                                      _arena, _stored_has_null_tag[idx]);
+                                      _arena, _stored_has_null_tag[position]);
         }
 
         if (is_close) {
-            function->insert_result_into(place, *columns[_return_columns_loc[idx]]);
+            function->insert_result_into(place, *columns[position]);
             // reset aggregate data
             function->reset(place);
         }

@@ -31,9 +31,9 @@
 #include "core/block/block.h"
 #include "core/column/column_vector.h"
 #include "io/io_common.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterators.h"
 #include "storage/olap_common.h"
-#include "storage/schema.h"
 #include "storage/utils.h"
 
 #pragma once
@@ -148,17 +148,26 @@ private:
 class VerticalMergeIteratorContext {
 public:
     VerticalMergeIteratorContext(RowwiseIteratorUPtr&& iter, RowsetId rowset_id,
-                                 size_t ori_return_cols, uint32_t order, uint32_t seq_col_idx,
+                                 size_t ori_return_cols, uint32_t order, int32_t seq_col_idx,
                                  bool use_insert_order_when_same = false,
                                  std::vector<uint32_t> key_group_cluster_key_idxes = {})
             : _iter(std::move(iter)),
               _rowset_id(rowset_id),
               _ori_return_cols(ori_return_cols),
               _order(order),
-              _seq_col_idx(seq_col_idx),
-              _num_key_columns(_iter->schema().num_key_columns()),
               _use_insert_order_when_same(use_insert_order_when_same),
-              _key_group_cluster_key_idxes(std::move(key_group_cluster_key_idxes)) {}
+              _key_group_cluster_key_idxes(std::move(key_group_cluster_key_idxes)) {
+        _key_positions.reserve(_iter->schema().key_positions().size());
+        for (ReadPosition position : _iter->schema().key_positions()) {
+            _key_positions.push_back(position.value());
+        }
+        if (seq_col_idx >= 0) {
+            const auto sequence_position =
+                    _iter->schema().position_of_tablet_cid(static_cast<ColumnId>(seq_col_idx));
+            DORIS_CHECK(sequence_position.has_value());
+            _seq_col_idx = static_cast<int32_t>(sequence_position->value());
+        }
+    }
 
     VerticalMergeIteratorContext(const VerticalMergeIteratorContext&) = delete;
     VerticalMergeIteratorContext(VerticalMergeIteratorContext&&) = delete;
@@ -249,7 +258,7 @@ private:
     mutable bool _is_same = false;
     int32_t _index_in_block = -1;
     size_t _block_row_max = 0;
-    int64_t _num_key_columns;
+    std::vector<uint32_t> _key_positions;
     const bool _use_insert_order_when_same = false;
     const std::vector<uint32_t> _key_group_cluster_key_idxes;
     size_t _cur_batch_num = 0;
@@ -289,7 +298,7 @@ public:
 
     Status init(const StorageReadOptions& opts, CompactionSampleInfo* sample_info) override;
     Status next_batch(Block* block) override;
-    const Schema& schema() const override { return *_schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
     uint64_t merged_rows() const override { return _merged_rows; }
     Status current_block_row_locations(std::vector<RowLocation>* block_row_locations) override {
         DCHECK(_record_rowids);
@@ -306,7 +315,7 @@ private:
     std::vector<RowsetId> _rowset_ids;
     size_t _ori_return_cols;
 
-    const Schema* _schema = nullptr;
+    DenseReadSchemaSPtr _schema;
 
     struct VerticalMergeContextComparator {
         bool operator()(const VerticalMergeIteratorContext* lhs,
@@ -355,7 +364,7 @@ public:
 
     Status init(const StorageReadOptions& opts, CompactionSampleInfo* sample_info) override;
     Status next_batch(Block* block) override;
-    const Schema& schema() const override { return *_schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
     uint64_t merged_rows() const override { return _merged_rows; }
     Status current_block_row_locations(std::vector<RowLocation>* block_row_locations) override {
         DCHECK(_record_rowids);
@@ -372,7 +381,7 @@ private:
     std::vector<RowsetId> _rowset_ids;
     size_t _ori_return_cols;
 
-    const Schema* _schema = nullptr;
+    DenseReadSchemaSPtr _schema;
 
     std::unique_ptr<VerticalMergeIteratorContext> _cur_iter_ctx;
     int _block_row_max = 0;
@@ -414,7 +423,7 @@ public:
 
     Status next_batch(Block* block) override;
 
-    const Schema& schema() const override { return *_schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
 
     Status next_row(IteratorRowRef* ref) override;
 
@@ -438,7 +447,7 @@ private:
 
     std::vector<std::unique_ptr<VerticalMergeIteratorContext>> _origin_iter_ctx;
 
-    const Schema* _schema = nullptr;
+    DenseReadSchemaSPtr _schema;
 
     int _block_row_max = 0;
     size_t _filtered_rows = 0;
@@ -451,13 +460,13 @@ private:
 std::shared_ptr<RowwiseIterator> new_vertical_heap_merge_iterator(
         std::vector<RowwiseIteratorUPtr>&& inputs, const std::vector<bool>& iterator_init_flag,
         const std::vector<RowsetId>& rowset_ids, size_t _ori_return_cols, KeysType key_type,
-        uint32_t seq_col_idx, RowSourcesBuffer* row_sources_buf,
+        int32_t seq_col_idx, RowSourcesBuffer* row_sources_buf,
         std::vector<uint32_t> key_group_cluster_key_idxes);
 
 std::shared_ptr<RowwiseIterator> new_vertical_fifo_merge_iterator(
         std::vector<RowwiseIteratorUPtr>&& inputs, const std::vector<bool>& iterator_init_flag,
         const std::vector<RowsetId>& rowset_ids, size_t _ori_return_cols, KeysType key_type,
-        uint32_t seq_col_idx, RowSourcesBuffer* row_sources_buf);
+        int32_t seq_col_idx, RowSourcesBuffer* row_sources_buf);
 
 std::shared_ptr<RowwiseIterator> new_vertical_mask_merge_iterator(
         std::vector<RowwiseIteratorUPtr>&& inputs, size_t ori_return_cols,

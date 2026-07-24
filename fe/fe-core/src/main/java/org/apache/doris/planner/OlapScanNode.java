@@ -130,6 +130,7 @@ public class OlapScanNode extends ScanNode {
     // average compression ratio in doris storage engine
     private static final int COMPRESSION_RATIO = 5;
 
+    public static final int ALIGNED_SCAN_SCHEMA_LAYOUT_VERSION = 1;
     public static final String OLAP_START_TIMESTAMP = "startTimestamp";
     public static final String OLAP_END_TIMESTAMP = "endTimestamp";
     public static final String OLAP_INCREMENT_TYPE = "incrementType";
@@ -189,6 +190,10 @@ public class OlapScanNode extends ScanNode {
     private SortInfo sortInfo = null;
     private Set<Integer> outputColumnUniqueIds = new HashSet<>();
     private Set<Integer> extraKeyColumnSlotIds = new HashSet<>();
+    // Storage dependencies are real columns needed below Scanner even when the SQL output does not
+    // reference them. Unlike extra keys, these slots must never be replaced with placeholders.
+    private Set<Integer> storageSemanticDependencySlotIds = new HashSet<>();
+    private Integer scanSchemaLayoutVersion;
 
     // When scan match sort_info, we can push limit into OlapScanNode.
     // It's limit for scanner instead of scanNode so we add a new limit.
@@ -271,6 +276,25 @@ public class OlapScanNode extends ScanNode {
 
     public Set<Integer> getExtraKeyColumnSlotIds() {
         return extraKeyColumnSlotIds;
+    }
+
+    public Set<Integer> getStorageSemanticDependencySlotIds() {
+        return storageSemanticDependencySlotIds;
+    }
+
+    public void addStorageSemanticDependencySlot(SlotDescriptor slot) {
+        storageSemanticDependencySlotIds.add(slot.getId().asInt());
+        if (slot.getColumn() != null) {
+            outputColumnUniqueIds.add(slot.getColumn().getUniqueId());
+        }
+    }
+
+    public void setScanSchemaLayoutVersion(int scanSchemaLayoutVersion) {
+        this.scanSchemaLayoutVersion = scanSchemaLayoutVersion;
+    }
+
+    public Integer getScanSchemaLayoutVersion() {
+        return scanSchemaLayoutVersion;
     }
 
     public void setNereidsPrunedTabletIds(Set<Long> nereidsPrunedTabletIds) {
@@ -1337,6 +1361,9 @@ public class OlapScanNode extends ScanNode {
         if (!extraKeyColumnSlotIds.isEmpty()) {
             msg.olap_scan_node.setExtraKeyColumnSlotIds(extraKeyColumnSlotIds);
         }
+        if (scanSchemaLayoutVersion != null) {
+            msg.olap_scan_node.setScanSchemaLayoutVersion(scanSchemaLayoutVersion);
+        }
 
         msg.olap_scan_node.setDistributeColumnIds(new ArrayList<>(distributionColumnIds));
 
@@ -1710,6 +1737,10 @@ public class OlapScanNode extends ScanNode {
 
     public void setScanParams(TableScanParams scanParams) {
         this.scanParams = scanParams;
+    }
+
+    public TableScanParams getScanParams() {
+        return scanParams;
     }
 
     public long getIncrementalScanEndTime() {

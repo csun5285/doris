@@ -31,7 +31,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
+#include <tuple>
+#include <unordered_map>
 #include <vector>
 
 #include "common/config.h"
@@ -43,6 +46,8 @@
 #include "storage/olap_define.h"
 #include "storage/olap_tuple.h"
 #include "storage/options.h"
+#include "storage/predicate/block_column_predicate.h"
+#include "storage/predicate/column_predicate.h"
 #include "storage/row_cursor.h"
 #include "storage/rowset/beta_rowset.h"
 #include "storage/rowset/rowset.h"
@@ -1345,6 +1350,38 @@ TEST_F(TestDeleteHandler, InitSuccess) {
     // Get delete conditions which version <= 5
     res = _delete_handler.init(tablet->tablet_schema(), get_delete_predicates(), 5);
     EXPECT_EQ(Status::OK(), res);
+}
+
+TEST_F(TestDeleteHandler, RebindsDeletePredicatesToDensePositions) {
+    for (const auto& [column_name, value, version] :
+         std::vector<std::tuple<std::string, std::string, int64_t>> {{"k1", "1", 2},
+                                                                     {"k2", "3", 3}}) {
+        TCondition condition;
+        condition.column_name = column_name;
+        condition.condition_op = "=";
+        condition.condition_values.push_back(value);
+
+        DeletePredicatePB delete_predicate;
+        ASSERT_TRUE(DeleteHandler::generate_delete_predicate(*tablet->tablet_schema(), {condition},
+                                                             &delete_predicate)
+                            .ok());
+        add_delete_predicate(delete_predicate, version);
+    }
+
+    ASSERT_TRUE(_delete_handler.init(tablet->tablet_schema(), get_delete_predicates(), 3).ok());
+
+    auto predicates = AndBlockColumnPredicate::create_shared();
+    std::unordered_map<int32_t, std::vector<std::shared_ptr<const ColumnPredicate>>>
+            zone_map_predicates;
+    const std::unordered_map<ColumnId, ColumnId> dense_positions {{0, 7}, {1, 3}};
+    _delete_handler.get_delete_conditions_after_version(1, predicates.get(), &zone_map_predicates,
+                                                        &dense_positions);
+
+    std::set<ColumnId> predicate_positions;
+    predicates->get_all_column_ids(predicate_positions);
+    EXPECT_EQ((std::set<ColumnId> {3, 7}), predicate_positions);
+    EXPECT_TRUE(zone_map_predicates.contains(3));
+    EXPECT_TRUE(zone_map_predicates.contains(7));
 }
 
 // 测试一个过滤条件包含的子条件之间是and关系,

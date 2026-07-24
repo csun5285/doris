@@ -295,7 +295,7 @@ private:
     // timer about tablet reader
     RuntimeProfile::Counter* _tablet_reader_init_timer = nullptr;
     RuntimeProfile::Counter* _tablet_reader_capture_rs_readers_timer = nullptr;
-    RuntimeProfile::Counter* _tablet_reader_init_return_columns_timer = nullptr;
+    RuntimeProfile::Counter* _tablet_reader_init_read_schema_timer = nullptr;
     RuntimeProfile::Counter* _tablet_reader_init_keys_param_timer = nullptr;
     RuntimeProfile::Counter* _tablet_reader_init_orderby_keys_param_timer = nullptr;
     RuntimeProfile::Counter* _tablet_reader_init_conditions_param_timer = nullptr;

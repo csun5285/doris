@@ -371,7 +371,7 @@ void ScannerScheduler::_make_sure_virtual_col_is_materialized(
                 "Column in idx {} is nothing, block columns {}, normal_columns "
                 "{}, "
                 "virtual_column_ids [{}]",
-                idx, free_block->columns(), olap_scanner->_return_columns.size(),
+                idx, free_block->columns(), olap_scanner->_scan_tablet_cids.size(),
                 fmt::join(virtual_column_ids, ","));
         throw doris::Exception(ErrorCode::INTERNAL_ERROR, error_msg);
     }

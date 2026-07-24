@@ -40,8 +40,8 @@
 #include "io/io_common.h"
 #include "runtime/descriptors.h"
 #include "storage/cache/page_cache.h"
+#include "storage/dense_read_schema.h"
 #include "storage/olap_common.h"
-#include "storage/schema.h"
 #include "storage/segment/page_handle.h"
 #include "storage/tablet/tablet_schema.h"
 #include "util/once.h"
@@ -50,7 +50,6 @@ namespace doris {
 class IDataType;
 
 class ShortKeyIndexDecoder;
-class Schema;
 class StorageReadOptions;
 class PrimaryKeyIndexReader;
 class RowwiseIterator;
@@ -109,7 +108,7 @@ public:
     int64_t get_metadata_size() const override;
     void update_metadata_size();
 
-    Status new_iterator(SchemaSPtr schema, const StorageReadOptions& read_options,
+    Status new_iterator(DenseReadSchemaSPtr schema, const StorageReadOptions& read_options,
                         std::unique_ptr<RowwiseIterator>* iter);
 
     static Status new_default_iterator(const TabletColumn& tablet_column,
@@ -188,7 +187,7 @@ public:
 
     // If column in segment is the same type in schema, then it is safe to apply predicate.
     bool can_apply_predicate_safely(
-            int cid, const Schema& schema,
+            int cid, const DenseReadSchema& schema,
             const std::map<std::string, DataTypePtr>& target_cast_type_for_variants,
             const StorageReadOptions& read_options) {
         const TabletColumn* col = schema.column(cid);
@@ -211,7 +210,7 @@ public:
     // (SegmentIterator::_update_tso_col_if_needed). Its zonemap reflects the placeholder, so
     // it must NOT drive zonemap pruning. Mirrors the guards of _update_tso_col_if_needed.
     // Returns false for range (compaction) segments whose on-disk value is real.
-    bool is_tso_placeholder_col(int cid, const Schema& schema,
+    bool is_tso_placeholder_col(int cid, const DenseReadSchema& schema,
                                 const StorageReadOptions& read_options) const;
 
     const TabletSchemaSPtr& tablet_schema() const { return _tablet_schema; }

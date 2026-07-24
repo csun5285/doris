@@ -48,6 +48,7 @@
 #include "json2pb/json_to_pb.h"
 #include "runtime/exec_env.h"
 #include "storage/delete/delete_handler.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterator/vertical_merge_iterator.h"
 #include "storage/merger.h"
 #include "storage/olap_common.h"
@@ -112,6 +113,13 @@ protected:
         auto st = rowset_writer->add_block(block);
         *columns = std::move(*block).mutate_columns();
         return st;
+    }
+
+    DenseReadSchemaSPtr create_read_schema(const TabletSchema& tablet_schema,
+                                           const std::vector<uint32_t>& tablet_cids) {
+        auto result = DenseReadSchema::create(tablet_schema, tablet_cids);
+        DORIS_CHECK(result.has_value()) << result.error();
+        return std::move(result).value();
     }
 
     TabletSchemaSPtr create_schema(KeysType keys_type = DUP_KEYS, bool without_key = false) {
@@ -591,7 +599,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0, 1};
-    reader_context.return_columns = &return_columns;
+    reader_context.read_schema = create_read_schema(*tablet_schema, return_columns);
     RowsetReaderSharedPtr output_rs_reader;
     LOG(INFO) << "create rowset reader in test";
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
@@ -600,7 +608,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMerge) {
     Block output_block;
     std::vector<std::tuple<int64_t, int64_t>> output_data;
     do {
-        block_create(tablet_schema, &output_block);
+        output_block = reader_context.read_schema->create_block();
         s = output_rs_reader->next_batch(&output_block);
         auto columns = output_block.get_columns_with_type_and_name();
         EXPECT_EQ(columns.size(), 2);
@@ -696,7 +704,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0, 1};
-    reader_context.return_columns = &return_columns;
+    reader_context.read_schema = create_read_schema(*tablet_schema, return_columns);
     RowsetReaderSharedPtr output_rs_reader;
     LOG(INFO) << "create rowset reader in test";
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
@@ -705,7 +713,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMerge) {
     Block output_block;
     std::vector<std::tuple<int64_t, int64_t>> output_data;
     do {
-        block_create(tablet_schema, &output_block);
+        output_block = reader_context.read_schema->create_block();
         s = output_rs_reader->next_batch(&output_block);
         auto columns = output_block.get_columns_with_type_and_name();
         EXPECT_EQ(columns.size(), 2);
@@ -802,7 +810,7 @@ TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0, 1};
-    reader_context.return_columns = &return_columns;
+    reader_context.read_schema = create_read_schema(*tablet_schema, return_columns);
     RowsetReaderSharedPtr output_rs_reader;
     LOG(INFO) << "create rowset reader in test";
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
@@ -811,7 +819,7 @@ TEST_F(VerticalCompactionTest, TestUniqueKeyVerticalMerge) {
     Block output_block;
     std::vector<std::tuple<int64_t, int64_t>> output_data;
     do {
-        block_create(tablet_schema, &output_block);
+        output_block = reader_context.read_schema->create_block();
         s = output_rs_reader->next_batch(&output_block);
         auto columns = output_block.get_columns_with_type_and_name();
         EXPECT_EQ(columns.size(), 2);
@@ -911,7 +919,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0, 1};
-    reader_context.return_columns = &return_columns;
+    reader_context.read_schema = create_read_schema(*tablet_schema, return_columns);
     RowsetReaderSharedPtr output_rs_reader;
     LOG(INFO) << "create rowset reader in test";
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
@@ -920,7 +928,7 @@ TEST_F(VerticalCompactionTest, TestDupKeyVerticalMergeWithDelete) {
     Block output_block;
     std::vector<std::tuple<int64_t, int64_t>> output_data;
     do {
-        block_create(tablet_schema, &output_block);
+        output_block = reader_context.read_schema->create_block();
         st = output_rs_reader->next_batch(&output_block);
         auto columns = output_block.get_columns_with_type_and_name();
         EXPECT_EQ(columns.size(), 2);
@@ -1012,7 +1020,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0, 1};
-    reader_context.return_columns = &return_columns;
+    reader_context.read_schema = create_read_schema(*tablet_schema, return_columns);
     RowsetReaderSharedPtr output_rs_reader;
     LOG(INFO) << "create rowset reader in test";
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
@@ -1021,7 +1029,7 @@ TEST_F(VerticalCompactionTest, TestDupWithoutKeyVerticalMergeWithDelete) {
     Block output_block;
     std::vector<std::tuple<int64_t, int64_t>> output_data;
     do {
-        block_create(tablet_schema, &output_block);
+        output_block = reader_context.read_schema->create_block();
         st = output_rs_reader->next_batch(&output_block);
         auto columns = output_block.get_columns_with_type_and_name();
         EXPECT_EQ(columns.size(), 2);
@@ -1102,7 +1110,7 @@ TEST_F(VerticalCompactionTest, TestAggKeyVerticalMerge) {
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0, 1};
-    reader_context.return_columns = &return_columns;
+    reader_context.read_schema = create_read_schema(*tablet_schema, return_columns);
     RowsetReaderSharedPtr output_rs_reader;
     LOG(INFO) << "create rowset reader in test";
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
@@ -1111,7 +1119,7 @@ TEST_F(VerticalCompactionTest, TestAggKeyVerticalMerge) {
     Block output_block;
     std::vector<std::tuple<int64_t, int64_t>> output_data;
     do {
-        block_create(tablet_schema, &output_block);
+        output_block = reader_context.read_schema->create_block();
         s = output_rs_reader->next_batch(&output_block);
         auto columns = output_block.get_columns_with_type_and_name();
         EXPECT_EQ(columns.size(), 2);

@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 
 #include "common/factory_creator.h"
 #include "common/status.h"
@@ -119,7 +120,8 @@ public:
     void get_delete_conditions_after_version(
             int64_t version, AndBlockColumnPredicate* and_block_column_predicate_ptr,
             std::unordered_map<int32_t, std::vector<std::shared_ptr<const ColumnPredicate>>>*
-                    del_predicates_for_zone_map) const;
+                    del_predicates_for_zone_map,
+            const std::unordered_map<ColumnId, ColumnId>* column_id_mapping = nullptr) const;
 
 private:
     template <typename SubPredType>

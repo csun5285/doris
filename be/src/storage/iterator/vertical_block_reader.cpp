@@ -31,6 +31,7 @@
 #include "core/data_type/data_type_number.h"
 #include "exprs/aggregate/aggregate_function_reader.h"
 #include "storage/compaction/compaction.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterator/vertical_merge_iterator.h"
 #include "storage/iterators.h"
 #include "storage/olap_common.h"
@@ -56,6 +57,7 @@ VerticalBlockReader::~VerticalBlockReader() {
 }
 
 Status VerticalBlockReader::next_block_with_aggregation(Block* block, bool* eof) {
+    RETURN_IF_ERROR(_read_schema->validate_block(*block));
     auto res = (this->*_next_block_func)(block, eof);
     if (!config::is_cloud_mode()) {
         if (!res.ok()) [[unlikely]] {
@@ -138,26 +140,27 @@ Status VerticalBlockReader::_init_collect_iter(const ReaderParams& read_params,
     }
 
     // build heap if key column iterator or build vertical merge iterator if value column
-    auto ori_return_col_size = _return_columns.size();
+    const auto read_column_count = _read_schema->size();
     if (read_params.is_key_column_group) {
-        uint32_t seq_col_idx = -1;
+        int32_t seq_col_idx = -1;
         if (_tablet_schema->has_sequence_col() && _tablet_schema->cluster_key_uids().empty()) {
-            seq_col_idx = _tablet_schema->sequence_col_idx();
+            DORIS_CHECK(_read_schema->has_sequence_col());
+            seq_col_idx = _read_schema->sequence_col_idx();
         }
         if (_tablet_schema->num_key_columns() == 0) {
             _vcollect_iter = new_vertical_fifo_merge_iterator(
                     std::move(*segment_iters_ptr), iterator_init_flag, rowset_ids,
-                    ori_return_col_size, _tablet_schema->keys_type(), seq_col_idx,
+                    read_column_count, _tablet_schema->keys_type(), seq_col_idx,
                     _row_sources_buffer);
         } else {
             _vcollect_iter = new_vertical_heap_merge_iterator(
                     std::move(*segment_iters_ptr), iterator_init_flag, rowset_ids,
-                    ori_return_col_size, _tablet_schema->keys_type(), seq_col_idx,
+                    read_column_count, _tablet_schema->keys_type(), seq_col_idx,
                     _row_sources_buffer, read_params.key_group_cluster_key_idxes);
         }
     } else {
         _vcollect_iter = new_vertical_mask_merge_iterator(std::move(*segment_iters_ptr),
-                                                          ori_return_col_size, _row_sources_buffer);
+                                                          read_column_count, _row_sources_buffer);
     }
     // init collect iterator
     StorageReadOptions opts;
@@ -185,23 +188,23 @@ void VerticalBlockReader::_init_agg_state(const ReaderParams& read_params) {
     if (_eof) {
         return;
     }
-    DCHECK(_return_columns.size() == _next_row.block->columns());
+    DCHECK_EQ(_read_schema->size(), _next_row.block->columns());
     auto stored_block = _next_row.block->create_same_struct_block(_reader_context.batch_size);
     _stored_data_columns = std::move(*stored_block).mutate_columns();
 
     _stored_has_null_tag.resize(_stored_data_columns.size());
     _stored_has_variable_length_tag.resize(_stored_data_columns.size());
 
-    auto& tablet_schema = *_tablet_schema;
-    for (size_t idx = 0; idx < _return_columns.size(); ++idx) {
-        AggregateFunctionPtr function =
-                tablet_schema.column(_return_columns.at(idx))
-                        .get_aggregate_function(AGG_READER_SUFFIX,
-                                                read_params.get_be_exec_version());
+    for (size_t idx = 0; idx < _read_schema->size(); ++idx) {
+        const auto& field = _read_schema->field(ReadPosition(static_cast<uint32_t>(idx)));
+        AggregateFunctionPtr function = field.storage_column->get_aggregate_function(
+                AGG_READER_SUFFIX, read_params.get_be_exec_version());
         DCHECK(function != nullptr);
         const auto* column_ptr = _stored_data_columns[idx].get();
-        const IColumn* columns[] = {column_ptr};
-        function->check_input_columns_type(columns);
+        const auto& argument_types = function->get_argument_types();
+        DORIS_CHECK_EQ(argument_types.size(), 1);
+        std::vector<const IColumn*> columns(argument_types.size(), column_ptr);
+        function->check_input_columns_type(columns.data());
         function->check_result_column_type(*column_ptr);
         _agg_functions.push_back(function);
         // create aggregate data
@@ -306,7 +309,7 @@ void VerticalBlockReader::_update_agg_data(MutableColumns& columns) {
     size_t copy_size = _copy_agg_data();
 
     // calculate has_null_tag
-    for (size_t idx = 0; idx < _return_columns.size(); ++idx) {
+    for (size_t idx = 0; idx < _read_schema->size(); ++idx) {
         _stored_has_null_tag[idx] = _stored_data_columns[idx]->has_null(0, copy_size);
     }
 
@@ -328,7 +331,7 @@ void VerticalBlockReader::_update_agg_data(MutableColumns& columns) {
 
 void VerticalBlockReader::_update_agg_value(MutableColumns& columns, int begin, int end,
                                             bool is_close) {
-    for (size_t idx = 0; idx < _return_columns.size(); ++idx) {
+    for (size_t idx = 0; idx < _read_schema->size(); ++idx) {
         AggregateFunctionPtr function = _agg_functions[idx];
         AggregateDataPtr place = _agg_places[idx];
         auto* column_ptr = _stored_data_columns[idx].get();
@@ -356,7 +359,7 @@ size_t VerticalBlockReader::_copy_agg_data() {
         auto& ref = _stored_row_ref[i];
         _temp_ref_map[ref.block.get()].emplace_back(ref.row_pos, i);
     }
-    for (size_t idx = 0; idx < _return_columns.size(); ++idx) {
+    for (size_t idx = 0; idx < _read_schema->size(); ++idx) {
         auto& dst_column = _stored_data_columns[idx];
         if (_stored_has_variable_length_tag[idx]) {
             //variable length type should replace ordered

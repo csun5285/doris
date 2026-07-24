@@ -33,6 +33,7 @@
 #include "common/status.h"
 #include "service/backend_options.h"
 #include "storage/delete/delete_handler.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/inverted/inverted_index_desc.h"
 #include "storage/olap_define.h"
 #include "storage/rowset/beta_rowset.h"
@@ -261,8 +262,13 @@ Status CloudSchemaChangeJob::process_alter_tablet(const TAlterTabletReqV2& reque
     reader_context.tablet_schema = _base_tablet_schema;
     reader_context.need_ordered_result = true;
     reader_context.delete_handler = &delete_handler;
-    reader_context.return_columns = &return_columns;
-    reader_context.sequence_id_idx = reader_context.tablet_schema->sequence_col_idx();
+    reader_context.read_schema =
+            DORIS_TRY(DenseReadSchema::create(*_base_tablet_schema, return_columns));
+    if (const int32_t sequence_cid = reader_context.tablet_schema->sequence_col_idx();
+        sequence_cid >= 0) {
+        reader_context.sequence_id_idx =
+                reader_context.read_schema->position_of_tablet_cid(sequence_cid)->value();
+    }
     reader_context.is_unique = _base_tablet->keys_type() == UNIQUE_KEYS;
     reader_context.batch_size = ALTER_TABLE_BATCH_SIZE;
     reader_context.delete_bitmap = _base_tablet->tablet_meta()->delete_bitmap_ptr();
@@ -270,7 +276,9 @@ Status CloudSchemaChangeJob::process_alter_tablet(const TAlterTabletReqV2& reque
     std::vector<uint32_t> cluster_key_idxes;
     if (!_base_tablet_schema->cluster_key_uids().empty()) {
         for (const auto& uid : _base_tablet_schema->cluster_key_uids()) {
-            cluster_key_idxes.emplace_back(_base_tablet_schema->field_index(uid));
+            const int32_t tablet_cid = _base_tablet_schema->field_index(uid);
+            cluster_key_idxes.emplace_back(
+                    reader_context.read_schema->position_of_tablet_cid(tablet_cid)->value());
         }
         reader_context.read_orderby_key_columns = &cluster_key_idxes;
         reader_context.is_unique = false;

@@ -156,10 +156,10 @@ public:
         // For unique key table with merge-on-write
         DeleteBitmapPtr delete_bitmap = nullptr;
 
-        // return_columns is init from query schema
-        std::vector<ColumnId> return_columns;
-        // TSO predicate column that is absent from return_columns but must be read by storage.
-        std::optional<ColumnId> tso_predicate_column_id;
+        // Exact Block layout used from TabletReader through RowsetReader and BlockReader.
+        // Every caller constructs this at its storage boundary; TabletReader never derives
+        // another column list or changes its order.
+        std::shared_ptr<const DenseReadSchema> read_schema;
         // output_columns only contain columns in OrderByExprs and outputExprs
         std::set<int32_t> output_columns;
         // Extra storage key columns that are present only for scan-schema alignment.
@@ -171,9 +171,6 @@ public:
         RuntimeProfile* profile = nullptr;
         RuntimeState* runtime_state = nullptr;
 
-        // use only in vec exec engine
-        std::vector<ColumnId>* origin_return_columns = nullptr;
-        std::unordered_set<uint32_t>* tablet_columns_convert_to_null_set = nullptr;
         TPushAggOp::type push_down_agg_type_opt = TPushAggOp::NONE;
         VExprContextSPtrs common_expr_ctxs_push_down;
 
@@ -308,7 +305,7 @@ protected:
 
     Status _init_delete_condition(const ReaderParams& read_params);
 
-    Status _init_return_columns(const ReaderParams& read_params);
+    Status _init_read_schema(const ReaderParams& read_params);
 
     const BaseTabletSPtr& tablet() { return _tablet; }
     // If original column is a variant type column, and it's predicate is normalized
@@ -322,16 +319,11 @@ protected:
     const TabletSchema& tablet_schema() { return *_tablet_schema; }
 
     Arena _predicate_arena;
-    std::vector<ColumnId> _return_columns;
     std::shared_ptr<const DenseReadSchema> _read_schema;
 
     // used for special optimization for query : ORDER BY key [ASC|DESC] LIMIT n
     // columns for orderby keys
     std::vector<uint32_t> _orderby_key_columns;
-    // only use in outer join which change the column nullable which must keep same in
-    // vec query engine
-    std::unordered_set<uint32_t>* _tablet_columns_convert_to_null_set = nullptr;
-
     BaseTabletSPtr _tablet;
     RowsetReaderContext _reader_context;
     TabletSchemaSPtr _tablet_schema;
@@ -349,11 +341,7 @@ protected:
     bool _next_delete_flag = false;
     bool _delete_sign_available = false;
     bool _filter_delete = false;
-    int32_t _sequence_col_idx = -1;
     bool _direct_mode = false;
-
-    std::vector<uint32_t> _key_cids;
-    std::vector<uint32_t> _value_cids;
 
     uint64_t _merged_rows = 0;
     OlapReaderStatistics _stats;

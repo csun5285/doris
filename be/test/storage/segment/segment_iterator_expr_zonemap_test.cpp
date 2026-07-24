@@ -32,6 +32,7 @@
 #include "io/fs/local_file_system.h"
 #include "runtime/descriptors.h"
 #include "runtime/runtime_state.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/zone_map/zonemap_eval_context.h"
 #include "storage/iterators.h"
 #include "storage/olap_common.h"
@@ -123,12 +124,14 @@ std::shared_ptr<AndBlockColumnPredicate> make_commit_tso_gt_predicate(int32_t co
     return predicates;
 }
 
-SchemaSPtr make_read_schema(const TabletSchemaSPtr& tablet_schema) {
+DenseReadSchemaSPtr make_read_schema(const TabletSchemaSPtr& tablet_schema) {
     std::vector<ColumnId> read_column_ids(tablet_schema->num_columns());
     for (uint32_t cid = 0; cid < read_column_ids.size(); ++cid) {
         read_column_ids[cid] = cid;
     }
-    return std::make_shared<Schema>(tablet_schema->columns(), read_column_ids);
+    auto result = DenseReadSchema::create(*tablet_schema, read_column_ids);
+    CHECK(result.has_value()) << result.error().to_string();
+    return result.value();
 }
 
 } // namespace

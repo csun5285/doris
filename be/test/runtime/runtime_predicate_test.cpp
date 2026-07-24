@@ -19,10 +19,15 @@
 
 #include <gtest/gtest.h>
 
+#include <vector>
+
+#include "core/column/column_vector.h"
 #include "core/data_type/data_type_factory.hpp"
 #include "core/field.h"
 #include "exec/pipeline/thrift_builder.h"
 #include "runtime/descriptors.h"
+#include "storage/predicate/comparison_predicate.h"
+#include "storage/predicate/shared_predicate.h"
 
 namespace doris {
 namespace {
@@ -81,6 +86,31 @@ TEST(RuntimePredicateTest, init_target_without_column_predicate_still_enables_ru
     ASSERT_TRUE(predicate.update(top_value).ok());
     EXPECT_TRUE(predicate.has_value());
     EXPECT_EQ(top_value, predicate.get_value());
+}
+
+TEST(SharedPredicateTest, CloneRebindsColumnAndObservesSubsequentUpdates) {
+    auto original = SharedPredicate::create_shared(7, "k1");
+    auto dense_clone = original->clone(1);
+
+    ASSERT_NE(original.get(), dense_clone.get());
+    EXPECT_EQ(7, original->column_id());
+    EXPECT_EQ(1, dense_clone->column_id());
+
+    auto column = ColumnInt32::create();
+    column->insert_value(5);
+    column->insert_value(15);
+    std::vector<uint16_t> selection {0, 1};
+    EXPECT_EQ(2, dense_clone->evaluate(*column, selection.data(), selection.size()));
+
+    auto upper_bound = Field::create_field<TYPE_INT>(10);
+    original->set_nested(std::make_shared<ComparisonPredicateBase<TYPE_INT, PredicateType::LE>>(
+            original->column_id(), original->col_name(), upper_bound));
+
+    selection = {0, 1};
+    ASSERT_EQ(1, dense_clone->evaluate(*column, selection.data(), selection.size()));
+    EXPECT_EQ(0, selection[0]);
+    EXPECT_EQ(PredicateType::LE, dense_clone->type());
+    EXPECT_EQ(PrimitiveType::TYPE_INT, dense_clone->primitive_type());
 }
 
 } // namespace doris

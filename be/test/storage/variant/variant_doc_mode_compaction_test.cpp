@@ -45,6 +45,7 @@
 #include "runtime/exec_env.h"
 #include "storage/compaction/cumulative_compaction.h"
 #include "storage/data_dir.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/index_writer.h"
 #include "storage/olap_common.h"
 #include "storage/olap_define.h"
@@ -427,11 +428,13 @@ TEST_F(VariantDocModeCompactionTest, variant_doc_mode_compaction_merge_10_segmen
             input_reader_context.tablet_schema = tablet_schema;
             input_reader_context.need_ordered_result = false;
             std::vector<uint32_t> input_return_columns = {1};
-            input_reader_context.return_columns = &input_return_columns;
+            auto input_read_schema = DenseReadSchema::create(*tablet_schema, input_return_columns);
+            ASSERT_TRUE(input_read_schema.has_value()) << input_read_schema.error();
+            input_reader_context.read_schema = std::move(input_read_schema).value();
             RowsetReaderSharedPtr input_rs_reader;
             create_and_init_rowset_reader(rowset.get(), input_reader_context, &input_rs_reader);
 
-            Block input_block = tablet_schema->create_block_by_cids(input_return_columns);
+            Block input_block = input_reader_context.read_schema->create_block();
             auto st = input_rs_reader->next_batch(&input_block);
             ASSERT_TRUE(st.ok()) << st.to_json();
             ASSERT_EQ(1, input_block.columns());
@@ -474,14 +477,16 @@ TEST_F(VariantDocModeCompactionTest, variant_doc_mode_compaction_merge_10_segmen
     reader_context.tablet_schema = tablet_schema;
     reader_context.need_ordered_result = false;
     std::vector<uint32_t> return_columns = {0};
-    reader_context.return_columns = &return_columns;
+    auto read_schema = DenseReadSchema::create(*tablet_schema, return_columns);
+    ASSERT_TRUE(read_schema.has_value()) << read_schema.error();
+    reader_context.read_schema = std::move(read_schema).value();
     RowsetReaderSharedPtr output_rs_reader;
     create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
 
     int64_t total_rows = 0;
     Status s = Status::OK();
     while (s.ok()) {
-        Block output_block = tablet_schema->create_block_by_cids(return_columns);
+        Block output_block = reader_context.read_schema->create_block();
         s = output_rs_reader->next_batch(&output_block);
         if (s.ok()) {
             total_rows += output_block.rows();

@@ -31,7 +31,7 @@ namespace doris::segment_v2 {
 class LazyInitSegmentIterator : public RowwiseIterator {
 public:
     LazyInitSegmentIterator(BetaRowsetSharedPtr rowset, int64_t segment_id, bool should_use_cache,
-                            SchemaSPtr schema, const StorageReadOptions& opts);
+                            DenseReadSchemaSPtr schema, StorageReadOptions opts);
 
     ~LazyInitSegmentIterator() override = default;
 
@@ -46,7 +46,17 @@ public:
         return _inner_iterator->next_batch(block);
     }
 
-    const Schema& schema() const override { return *_schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
+
+    uint64_t data_id() const override { return static_cast<uint64_t>(_segment_id); }
+
+    uint64_t merged_rows() const override {
+        return _inner_iterator == nullptr ? 0 : _inner_iterator->merged_rows();
+    }
+
+    bool empty() const override {
+        return _inner_iterator == nullptr ? false : _inner_iterator->empty();
+    }
 
     Status current_block_row_locations(std::vector<RowLocation>* locations) override {
         return _inner_iterator->current_block_row_locations(locations);
@@ -63,7 +73,7 @@ private:
     BetaRowsetSharedPtr _rowset;
     int64_t _segment_id {-1};
     bool _should_use_cache {false};
-    SchemaSPtr _schema = nullptr;
+    DenseReadSchemaSPtr _schema = nullptr;
     StorageReadOptions _read_options;
     RowwiseIteratorUPtr _inner_iterator;
 };

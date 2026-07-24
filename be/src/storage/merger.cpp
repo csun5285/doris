@@ -39,6 +39,7 @@
 #include "common/logging.h"
 #include "common/status.h"
 #include "core/block/block.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterator/block_reader.h"
 #include "storage/iterator/vertical_block_reader.h"
 #include "storage/iterator/vertical_merge_iterator.h"
@@ -107,12 +108,13 @@ Status Merger::vmerge_rowsets(BaseTabletSPtr tablet, ReaderType reader_type,
         stats_output->rowid_conversion->set_dst_rowset_id(dst_rowset_writer->rowset_id());
     }
 
-    reader_params.return_columns.resize(cur_tablet_schema.num_columns());
-    std::iota(reader_params.return_columns.begin(), reader_params.return_columns.end(), 0);
-    reader_params.origin_return_columns = &reader_params.return_columns;
+    std::vector<ColumnId> read_tablet_cids(cur_tablet_schema.num_columns());
+    std::iota(read_tablet_cids.begin(), read_tablet_cids.end(), 0);
+    reader_params.read_schema =
+            DORIS_TRY(DenseReadSchema::create(*merge_tablet_schema, read_tablet_cids));
     RETURN_IF_ERROR(reader.init(reader_params));
 
-    Block block = cur_tablet_schema.create_block(reader_params.return_columns);
+    Block block = reader_params.read_schema->create_block();
     size_t output_rows = 0;
     bool eof = false;
     while (!eof && !ExecEnv::GetInstance()->storage_engine().stopped()) {
@@ -296,12 +298,12 @@ Status Merger::vertical_compact_one_group(
         stats_output->rowid_conversion->set_dst_rowset_id(dst_rowset_writer->rowset_id());
     }
 
-    reader_params.return_columns = column_group;
-    reader_params.origin_return_columns = &reader_params.return_columns;
+    reader_params.read_schema =
+            DORIS_TRY(DenseReadSchema::create(*merge_tablet_schema, column_group));
     reader_params.batch_size = batch_size;
     RETURN_IF_ERROR(reader.init(reader_params, sample_info));
 
-    Block block = tablet_schema.create_block(reader_params.return_columns);
+    Block block = reader_params.read_schema->create_block();
     size_t output_rows = 0;
     bool eof = false;
     while (!eof && !ExecEnv::GetInstance()->storage_engine().stopped()) {

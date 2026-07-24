@@ -44,6 +44,7 @@
 #include "json2pb/json_to_pb.h"
 #include "runtime/exec_env.h"
 #include "storage/delete/delete_handler.h"
+#include "storage/dense_read_schema.h"
 #include "storage/merger.h"
 #include "storage/options.h"
 #include "storage/rowset/beta_rowset.h"
@@ -364,14 +365,16 @@ protected:
         reader_context.tablet_schema = tablet_schema;
         reader_context.need_ordered_result = false;
         std::vector<uint32_t> return_columns = {0, 1};
-        reader_context.return_columns = &return_columns;
+        auto read_schema = DenseReadSchema::create(*tablet_schema, return_columns);
+        ASSERT_TRUE(read_schema.has_value()) << read_schema.error();
+        reader_context.read_schema = std::move(read_schema).value();
         RowsetReaderSharedPtr output_rs_reader;
         create_and_init_rowset_reader(out_rowset.get(), reader_context, &output_rs_reader);
 
         // read output rowset data
         std::vector<std::tuple<int64_t, int64_t>> output_data;
         do {
-            Block output_block = tablet_schema->create_block();
+            Block output_block = reader_context.read_schema->create_block();
             s = output_rs_reader->next_batch(&output_block);
             auto columns = output_block.get_columns_with_type_and_name();
             EXPECT_EQ(columns.size(), 2);

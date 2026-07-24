@@ -46,11 +46,11 @@
 #include "runtime/descriptors.h"
 #include "runtime/exec_env.h"
 #include "storage/data_dir.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterators.h"
 #include "storage/olap_define.h"
 #include "storage/options.h"
 #include "storage/rowset/beta_rowset.h"
-#include "storage/schema.h"
 #include "storage/segment/segment.h"
 #include "storage/segment/segment_loader.h"
 #include "storage/storage_engine.h"
@@ -69,7 +69,7 @@ class OlapMeta;
 static const uint32_t MAX_PATH_LEN = 1024;
 static StorageEngine* engine_ref = nullptr;
 
-static std::shared_ptr<Schema> create_full_schema(const TabletSchemaSPtr& tablet_schema) {
+static DenseReadSchemaSPtr create_full_schema(const TabletSchemaSPtr& tablet_schema) {
     size_t num_columns = tablet_schema->num_columns();
     if (num_columns > 0 && tablet_schema->columns().back()->name() == BeConsts::ROW_STORE_COL) {
         --num_columns;
@@ -79,7 +79,9 @@ static std::shared_ptr<Schema> create_full_schema(const TabletSchemaSPtr& tablet
     for (uint32_t cid = 0; cid < num_columns; ++cid) {
         column_ids[cid] = cid;
     }
-    return std::make_shared<Schema>(tablet_schema->columns(), column_ids);
+    auto result = DenseReadSchema::create(*tablet_schema, column_ids);
+    CHECK(result.has_value()) << result.error().to_string();
+    return result.value();
 }
 
 static void set_up() {
@@ -364,10 +366,10 @@ TEST_F(SegmentCacheTest, vec_sequence_col) {
     opts.tablet_schema = rowset->tablet_schema();
 
     std::unique_ptr<RowwiseIterator> iter;
-    std::shared_ptr<Schema> schema = create_full_schema(rowset->tablet_schema());
+    auto schema = create_full_schema(rowset->tablet_schema());
     auto s = segments[0]->new_iterator(schema, opts, &iter);
     ASSERT_TRUE(s.ok());
-    auto read_block = rowset->tablet_schema()->create_block();
+    auto read_block = schema->create_block();
     res = iter->next_batch(&read_block);
     ASSERT_TRUE(res.ok()) << res;
     ASSERT_EQ(1, read_block.rows());

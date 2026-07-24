@@ -64,6 +64,15 @@ using namespace ErrorCode;
 
 VCollectIterator::~VCollectIterator() = default;
 
+VCollectIterator::LevelIterator::LevelIterator(TabletReader* reader)
+        : _compare_columns(reader->_reader_context.read_orderby_key_columns) {
+    DORIS_CHECK(reader->_read_schema != nullptr);
+    _key_positions.reserve(reader->_read_schema->key_positions().size());
+    for (const auto position : reader->_read_schema->key_positions()) {
+        _key_positions.push_back(position.value());
+    }
+}
+
 void VCollectIterator::init(TabletReader* reader, bool ori_data_overlapping, bool force_merge,
                             bool is_reverse) {
     _reader = reader;
@@ -213,9 +222,9 @@ bool VCollectIterator::LevelIteratorComparator::operator()(LevelIterator* lhs, L
     const IteratorRowRef& lhs_ref = *lhs->current_row_ref();
     const IteratorRowRef& rhs_ref = *rhs->current_row_ref();
 
-    int cmp_res = UNLIKELY(lhs->compare_columns())
-                          ? lhs_ref.compare(rhs_ref, lhs->compare_columns())
-                          : lhs_ref.compare(rhs_ref, lhs->tablet_schema().num_key_columns());
+    const auto* compare_positions =
+            UNLIKELY(lhs->compare_columns()) ? lhs->compare_columns() : lhs->key_positions();
+    int cmp_res = lhs_ref.compare(rhs_ref, compare_positions);
     if (cmp_res != 0) {
         return UNLIKELY(_is_reverse) ? cmp_res < 0 : cmp_res > 0;
     }
@@ -293,9 +302,9 @@ Status VCollectIterator::_topn_next(Block* block) {
     auto clone_block = block->clone_empty();
     // Initialize virtual slot columns by schema (avoid runtime type checks).
     for (const auto& [cid, expr_ctx] : _reader->_reader_context.virtual_column_exprs) {
-        auto it = std::find(_reader->_return_columns.begin(), _reader->_return_columns.end(), cid);
-        DORIS_CHECK(it != _reader->_return_columns.end());
-        auto idx = cast_set<size_t>(std::distance(_reader->_return_columns.begin(), it));
+        auto position = _reader->_read_schema->position_of_tablet_cid(cid);
+        DORIS_CHECK(position.has_value());
+        auto idx = cast_set<size_t>(position->value());
         DORIS_CHECK(idx < clone_block.columns());
         clone_block.get_by_position(idx).column = expr_ctx->root()->data_type()->create_column();
     }
@@ -691,21 +700,20 @@ Status VCollectIterator::Level1Iterator::init(bool get_data_by_ref) {
     // Only when there are multiple children that need to be merged
     if (_merge && _children.size() > 1) {
         auto sequence_loc = -1;
-        for (int loc = 0; loc < _reader->_return_columns.size(); loc++) {
-            if (_reader->_return_columns[loc] == _reader->_sequence_col_idx) {
-                sequence_loc = loc;
-                break;
+        if (_reader->_tablet_schema->has_sequence_col()) {
+            auto sequence_position = _reader->_read_schema->position_of_tablet_cid(
+                    _reader->_tablet_schema->sequence_col_idx());
+            if (sequence_position.has_value()) {
+                sequence_loc = static_cast<int>(sequence_position->value());
             }
         }
 
         int32_t tso_col_id = _reader->_tablet_schema->binlog_tso_col_idx();
         if (tso_col_id >= 0) {
             DCHECK(sequence_loc == -1);
-            for (int loc = 0; loc < _reader->_return_columns.size(); ++loc) {
-                if (_reader->_return_columns[loc] == static_cast<uint32_t>(tso_col_id)) {
-                    sequence_loc = loc;
-                    break;
-                }
+            auto tso_position = _reader->_read_schema->position_of_tablet_cid(tso_col_id);
+            if (tso_position.has_value()) {
+                sequence_loc = static_cast<int>(tso_position->value());
             }
         }
 

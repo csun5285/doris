@@ -24,6 +24,7 @@
 #include "exprs/vexpr.h"
 #include "exprs/vexpr_context.h"
 #include "runtime/runtime_state.h"
+#include "storage/dense_read_schema.h"
 #include "storage/olap_common.h"
 #include "storage/segment/column_reader.h"
 #include "storage/tablet/tablet_schema.h"
@@ -125,7 +126,9 @@ protected:
         for (uint32_t cid = 0; cid < read_column_ids.size(); ++cid) {
             read_column_ids[cid] = cid;
         }
-        _read_schema = std::make_shared<Schema>(_tablet_schema->columns(), read_column_ids);
+        auto read_schema_result = DenseReadSchema::create(*_tablet_schema, read_column_ids);
+        ASSERT_TRUE(read_schema_result.has_value()) << read_schema_result.error().to_string();
+        _read_schema = read_schema_result.value();
         _iter = std::make_unique<SegmentIterator>(_segment, _read_schema);
 
         // Set up RuntimeState with fallback enabled so _downgrade_without_index works
@@ -139,7 +142,7 @@ protected:
 
     std::shared_ptr<Segment> _segment;
     std::shared_ptr<TabletSchema> _tablet_schema;
-    SchemaSPtr _read_schema;
+    DenseReadSchemaSPtr _read_schema;
     std::unique_ptr<SegmentIterator> _iter;
     RuntimeState _runtime_state;
     OlapReaderStatistics _stats;

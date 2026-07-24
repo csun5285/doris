@@ -16,6 +16,7 @@
 // under the License.
 
 #include "gtest/gtest.h"
+#include "storage/dense_read_schema.h"
 #include "storage/segment/segment_iterator.h"
 #include "storage/tablet/tablet_schema.h"
 
@@ -48,7 +49,9 @@ TEST(SegmentIteratorNoNeedReadDataTest, extracted_variant_count_on_index) {
     for (uint32_t cid = 0; cid < read_column_ids.size(); ++cid) {
         read_column_ids[cid] = cid;
     }
-    auto read_schema = std::make_shared<Schema>(tablet_schema->columns(), read_column_ids);
+    auto read_schema_result = DenseReadSchema::create(*tablet_schema, read_column_ids);
+    ASSERT_TRUE(read_schema_result.has_value()) << read_schema_result.error().to_string();
+    auto read_schema = read_schema_result.value();
     SegmentIterator iter(nullptr, read_schema);
     iter._opts.tablet_schema = tablet_schema;
     iter._opts.push_down_agg_type_opt = TPushAggOp::COUNT_ON_INDEX;

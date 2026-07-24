@@ -68,6 +68,7 @@ void TabletReader::ReaderParams::check_validation() const {
     if (UNLIKELY(version.first == -1 && is_segcompaction == false)) {
         throw Exception(Status::FatalError("version is not set. tablet={}", tablet->tablet_id()));
     }
+    DORIS_CHECK(read_schema != nullptr);
 }
 
 Status TabletReader::init(const ReaderParams& read_params) {
@@ -181,8 +182,7 @@ Status TabletReader::_capture_rs_readers(const ReaderParams& read_params) {
             read_params.reader_type == ReaderType::READER_BINLOG_COMPACTION;
     _reader_context.force_key_ordered_read = read_params.force_key_ordered_read;
     _reader_context.read_orderby_key_limit = read_params.read_orderby_key_limit;
-    _reader_context.return_columns = &_return_columns;
-    _reader_context.tso_predicate_column_id = read_params.tso_predicate_column_id;
+    _reader_context.read_schema = _read_schema;
     _reader_context.read_orderby_key_columns =
             !_orderby_key_columns.empty() ? &_orderby_key_columns : nullptr;
     _reader_context.predicates = &_col_predicates;
@@ -194,7 +194,14 @@ Status TabletReader::_capture_rs_readers(const ReaderParams& read_params) {
     _reader_context.delete_handler = &_delete_handler;
     _reader_context.stats = &_stats;
     _reader_context.use_page_cache = read_params.use_page_cache;
-    _reader_context.sequence_id_idx = _sequence_col_idx;
+    _reader_context.sequence_id_idx = -1;
+    if (_tablet_schema->has_sequence_col()) {
+        auto sequence_position =
+                _read_schema->position_of_tablet_cid(_tablet_schema->sequence_col_idx());
+        if (sequence_position.has_value()) {
+            _reader_context.sequence_id_idx = static_cast<int>(sequence_position->value());
+        }
+    }
     _reader_context.is_unique = tablet()->keys_type() == UNIQUE_KEYS;
     _reader_context.merged_rows = &_merged_rows;
     _reader_context.delete_bitmap = read_params.delete_bitmap;
@@ -266,14 +273,11 @@ Status TabletReader::_init_params(const ReaderParams& read_params) {
         return res;
     }
 
-    res = _init_return_columns(read_params);
+    res = _init_read_schema(read_params);
     if (!res.ok()) {
-        LOG(WARNING) << "fail to init return columns. res = " << res;
+        LOG(WARNING) << "fail to init read schema. res = " << res;
         return res;
     }
-    _read_schema = DORIS_TRY(DenseReadSchema::create(*_tablet_schema, _return_columns,
-                                                     _tablet_columns_convert_to_null_set));
-
     res = _init_keys_param(read_params);
     if (!res.ok()) {
         LOG(WARNING) << "fail to init keys param. res=" << res;
@@ -284,77 +288,13 @@ Status TabletReader::_init_params(const ReaderParams& read_params) {
         LOG(WARNING) << "fail to init orderby keys param. res=" << res;
         return res;
     }
-    if (_tablet_schema->has_sequence_col()) {
-        auto sequence_col_idx = _tablet_schema->sequence_col_idx();
-        DCHECK_NE(sequence_col_idx, -1);
-        for (auto col : _return_columns) {
-            // query has sequence col
-            if (col == sequence_col_idx) {
-                _sequence_col_idx = sequence_col_idx;
-                break;
-            }
-        }
-    }
-
     return res;
 }
 
-Status TabletReader::_init_return_columns(const ReaderParams& read_params) {
-    SCOPED_RAW_TIMER(&_stats.tablet_reader_init_return_columns_timer_ns);
-    if (read_params.reader_type == ReaderType::READER_QUERY ||
-        read_params.reader_type == ReaderType::READER_BINLOG) {
-        _return_columns = read_params.return_columns;
-        _tablet_columns_convert_to_null_set = read_params.tablet_columns_convert_to_null_set;
-        for (auto id : read_params.return_columns) {
-            if (_tablet_schema->column(id).is_key()) {
-                _key_cids.push_back(id);
-            } else {
-                _value_cids.push_back(id);
-            }
-        }
-    } else if (read_params.return_columns.empty()) {
-        for (uint32_t i = 0; i < _tablet_schema->num_columns(); ++i) {
-            _return_columns.push_back(i);
-            if (_tablet_schema->column(i).is_key()) {
-                _key_cids.push_back(i);
-            } else {
-                _value_cids.push_back(i);
-            }
-        }
-        VLOG_NOTICE << "return column is empty, using full column as default.";
-    } else if ((read_params.reader_type == ReaderType::READER_CUMULATIVE_COMPACTION ||
-                read_params.reader_type == ReaderType::READER_SEGMENT_COMPACTION ||
-                read_params.reader_type == ReaderType::READER_BASE_COMPACTION ||
-                read_params.reader_type == ReaderType::READER_FULL_COMPACTION ||
-                read_params.reader_type == ReaderType::READER_BINLOG_COMPACTION ||
-                read_params.reader_type == ReaderType::READER_COLD_DATA_COMPACTION ||
-                read_params.reader_type == ReaderType::READER_ALTER_TABLE) &&
-               !read_params.return_columns.empty()) {
-        _return_columns = read_params.return_columns;
-        for (auto id : read_params.return_columns) {
-            if (_tablet_schema->column(id).is_key()) {
-                _key_cids.push_back(id);
-            } else {
-                _value_cids.push_back(id);
-            }
-        }
-    } else if (read_params.reader_type == ReaderType::READER_CHECKSUM) {
-        _return_columns = read_params.return_columns;
-        for (auto id : read_params.return_columns) {
-            if (_tablet_schema->column(id).is_key()) {
-                _key_cids.push_back(id);
-            } else {
-                _value_cids.push_back(id);
-            }
-        }
-    } else {
-        return Status::Error<INVALID_ARGUMENT>(
-                "fail to init return columns. reader_type={}, return_columns_size={}",
-                int(read_params.reader_type), read_params.return_columns.size());
-    }
-
-    std::sort(_key_cids.begin(), _key_cids.end(), std::greater<>());
-
+Status TabletReader::_init_read_schema(const ReaderParams& read_params) {
+    SCOPED_RAW_TIMER(&_stats.tablet_reader_init_read_schema_timer_ns);
+    DORIS_CHECK(read_params.read_schema != nullptr);
+    _read_schema = read_params.read_schema;
     return Status::OK();
 }
 
@@ -437,22 +377,16 @@ Status TabletReader::_init_orderby_keys_param(const ReaderParams& read_params) {
                             std::to_string(cid) +
                             " in tablet schema, tablet_id=" + std::to_string(_tablet->tablet_id()));
                 }
-                for (uint32_t idx = 0; idx < _return_columns.size(); idx++) {
-                    if (_return_columns[idx] == index) {
-                        _orderby_key_columns.push_back(idx);
-                        break;
-                    }
+                auto position = _read_schema->position_of_tablet_cid(static_cast<ColumnId>(index));
+                if (position.has_value()) {
+                    _orderby_key_columns.push_back(position->value());
                 }
             }
         } else {
-            // find index in vector _return_columns
-            //   for the read_orderby_key_num_prefix_columns orderby keys
             for (uint32_t i = 0; i < read_params.read_orderby_key_num_prefix_columns; i++) {
-                for (uint32_t idx = 0; idx < _return_columns.size(); idx++) {
-                    if (_return_columns[idx] == i) {
-                        _orderby_key_columns.push_back(idx);
-                        break;
-                    }
+                auto position = _read_schema->position_of_tablet_cid(i);
+                if (position.has_value()) {
+                    _orderby_key_columns.push_back(position->value());
                 }
             }
         }
@@ -593,11 +527,11 @@ Status TabletReader::init_reader_params_and_create_block(
     }
     reader_params->tablet_schema = merge_tablet_schema;
 
-    reader_params->return_columns.resize(read_tablet_schema->num_columns());
-    std::iota(reader_params->return_columns.begin(), reader_params->return_columns.end(), 0);
-    reader_params->origin_return_columns = &reader_params->return_columns;
-
-    *block = read_tablet_schema->create_block();
+    std::vector<ColumnId> read_tablet_cids(read_tablet_schema->num_columns());
+    std::iota(read_tablet_cids.begin(), read_tablet_cids.end(), 0);
+    reader_params->read_schema =
+            DORIS_TRY(DenseReadSchema::create(*merge_tablet_schema, read_tablet_cids));
+    *block = reader_params->read_schema->create_block();
 
     return Status::OK();
 }

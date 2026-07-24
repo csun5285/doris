@@ -29,6 +29,7 @@
 #include "runtime/exec_env.h"
 #include "runtime/memory/mem_tracker.h"
 #include "storage/data_dir.h"
+#include "storage/dense_read_schema.h"
 #include "storage/row_cursor.h"
 #include "storage/rowset/beta_rowset_reader.h"
 #include "storage/rowset/beta_rowset_writer.h"
@@ -245,7 +246,9 @@ protected:
         reader_context.reader_type = ReaderType::READER_QUERY;
         reader_context.need_ordered_result = true;
         std::vector<uint32_t> return_columns = {0, 1, 2};
-        reader_context.return_columns = &return_columns;
+        auto read_schema = DenseReadSchema::create(*tablet_schema, return_columns);
+        DORIS_CHECK(read_schema.has_value()) << read_schema.error();
+        reader_context.read_schema = std::move(read_schema).value();
         reader_context.stats = &_stats;
         reader_context.delete_bitmap = delete_bitmap;
 
@@ -260,7 +263,7 @@ protected:
             bool eof = false;
             while (!eof) {
                 std::shared_ptr<Block> output_block =
-                        std::make_shared<Block>(tablet_schema->create_block(return_columns));
+                        std::make_shared<Block>(reader_context.read_schema->create_block());
                 std::vector<bool> row_is_same;
                 BlockWithSameBit block_with_same_bit {.block = output_block.get(),
                                                       .same_bit = row_is_same};

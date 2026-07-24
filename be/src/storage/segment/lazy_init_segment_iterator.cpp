@@ -22,13 +22,13 @@
 namespace doris::segment_v2 {
 
 LazyInitSegmentIterator::LazyInitSegmentIterator(BetaRowsetSharedPtr rowset, int64_t segment_id,
-                                                 bool should_use_cache, SchemaSPtr schema,
-                                                 const StorageReadOptions& opts)
+                                                 bool should_use_cache, DenseReadSchemaSPtr schema,
+                                                 StorageReadOptions opts)
         : _rowset(std::move(rowset)),
           _segment_id(segment_id),
           _should_use_cache(should_use_cache),
           _schema(std::move(schema)),
-          _read_options(opts) {}
+          _read_options(std::move(opts)) {}
 
 /// See where the iterator is created in `BetaRowsetReader::get_segment_iterators`
 Status LazyInitSegmentIterator::init(const StorageReadOptions& opts) {

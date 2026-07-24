@@ -18,7 +18,7 @@
 #ifndef DORIS_BE_SRC_OLAP_ROWSET_ROWSET_READER_CONTEXT_H
 #define DORIS_BE_SRC_OLAP_ROWSET_ROWSET_READER_CONTEXT_H
 
-#include <optional>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -37,6 +37,7 @@ namespace doris {
 class RowCursor;
 class DeleteBitmap;
 class DeleteHandler;
+class DenseReadSchema;
 class TabletSchema;
 
 struct RowsetReaderContext {
@@ -57,10 +58,9 @@ struct RowsetReaderContext {
     std::vector<uint32_t>* read_orderby_key_columns = nullptr;
     // limit of rows for read_orderby_key
     size_t read_orderby_key_limit = 0;
-    // projection columns: the set of columns rowset reader should return
-    const std::vector<uint32_t>* return_columns = nullptr;
-    // TSO predicate column that is absent from return_columns but must be read by storage.
-    std::optional<ColumnId> tso_predicate_column_id;
+    // Exact dense Block layout returned by the rowset reader. Segment-only
+    // auxiliary fields are appended below this boundary and explicitly projected out.
+    std::shared_ptr<const DenseReadSchema> read_schema;
     TPushAggOp::type push_down_agg_type_opt = TPushAggOp::NONE;
     // column name -> column predicate
     // adding column_name for predicate to make use of column selectivity

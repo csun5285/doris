@@ -69,6 +69,8 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * UTs for table stream query plan, including
@@ -480,6 +482,34 @@ public class ExplainTableStreamPlanTest extends TestWithFeService {
         ctx.getSessionVariable().showHiddenColumns = true;
 
         assertStreamScanCanBePlanned(ctx, "explain select s.* from test_stream.s_dup@snapshot() as s");
+    }
+
+    @Test
+    public void testSnapshotScanPreservesCommitTsoAsStorageDependency() throws Exception {
+        ConnectContext ctx = createDefaultCtx();
+        ctx.setDatabase("test_stream");
+
+        PlanFragment fragment = getFragment(ctx, "explain select k2 from test_stream.s_dup@snapshot()");
+        List<OlapScanNode> scanNodes = new ArrayList<>();
+        collectOlapScanNodes(fragment.getPlanRoot(), scanNodes);
+        OlapScanNode snapshotScan = scanNodes.stream()
+                .filter(scan -> scan.getOlapTable() instanceof OlapTableWrapper
+                        && !(scan.getOlapTable() instanceof RowBinlogTableWrapper))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("snapshot base scan not found"));
+
+        Set<String> scanColumns = snapshotScan.getTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertTrue(scanColumns.contains(Column.COMMIT_TSO_COL));
+        Set<String> storageDependencies = snapshotScan.getTupleDesc().getSlots().stream()
+                .filter(slot -> snapshotScan.getStorageSemanticDependencySlotIds()
+                        .contains(slot.getId().asInt()))
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertTrue(storageDependencies.contains(Column.COMMIT_TSO_COL));
+        Assertions.assertFalse(snapshotScan.getOutputTupleDesc().getSlots().stream()
+                .anyMatch(slot -> slot.getColumn().getName().equals(Column.COMMIT_TSO_COL)));
     }
 
     @Test

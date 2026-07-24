@@ -25,6 +25,7 @@
 #include "core/block/block.h"
 #include "core/column/column_vector.h"
 #include "core/data_type/data_type_number.h"
+#include "storage/dense_read_schema.h"
 #include "storage/olap_common.h"
 #include "storage/segment/column_reader.h"
 #include "storage/tablet/tablet_schema.h"
@@ -98,12 +99,14 @@ TabletSchemaSPtr make_tablet_schema() {
     return tablet_schema;
 }
 
-SchemaSPtr make_read_schema(const TabletSchemaSPtr& tablet_schema) {
+DenseReadSchemaSPtr make_read_schema(const TabletSchemaSPtr& tablet_schema) {
     std::vector<ColumnId> read_column_ids(tablet_schema->num_columns());
     for (uint32_t cid = 0; cid < read_column_ids.size(); ++cid) {
         read_column_ids[cid] = cid;
     }
-    return std::make_shared<Schema>(tablet_schema->columns(), read_column_ids);
+    auto result = DenseReadSchema::create(*tablet_schema, read_column_ids);
+    CHECK(result.has_value()) << result.error().to_string();
+    return result.value();
 }
 
 Block make_int_block() {
@@ -135,7 +138,7 @@ protected:
     }
 
     TabletSchemaSPtr _tablet_schema;
-    SchemaSPtr _read_schema;
+    DenseReadSchemaSPtr _read_schema;
     OlapReaderStatistics _stats;
 };
 

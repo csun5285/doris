@@ -27,6 +27,7 @@
 #include "exprs/vexpr.h"
 #include "io/io_common.h"
 #include "runtime/runtime_state.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/ann/ann_topn_runtime.h"
 #include "storage/olap_common.h"
 #include "storage/predicate/block_column_predicate.h"
@@ -37,7 +38,6 @@
 
 namespace doris {
 
-class Schema;
 class ColumnPredicate;
 
 struct IteratorRowRef;
@@ -243,8 +243,8 @@ public:
                                      demangle(typeid(*this).name()));
     }
 
-    // return schema for this Iterator
-    virtual const Schema& schema() const = 0;
+    // Return the exact dense Block layout produced by this iterator.
+    virtual const DenseReadSchema& schema() const = 0;
 
     // Return the data id such as segment id, used for keep the insert order when do
     // merge sort in priority queue

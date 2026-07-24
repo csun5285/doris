@@ -21,6 +21,7 @@
 #include <gen_cpp/olap_file.pb.h>
 #include <thrift/protocol/TDebugProtocol.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -628,24 +629,32 @@ DeleteHandler::~DeleteHandler() {
 void DeleteHandler::get_delete_conditions_after_version(
         int64_t version, AndBlockColumnPredicate* and_block_column_predicate_ptr,
         std::unordered_map<int32_t, std::vector<std::shared_ptr<const ColumnPredicate>>>*
-                del_predicates_for_zone_map) const {
+                del_predicates_for_zone_map,
+        const std::unordered_map<ColumnId, ColumnId>* column_id_mapping) const {
     for (const auto& del_cond : _del_conds) {
         if (del_cond.filter_version > version) {
             // now, only query support delete column predicate operator
             if (!del_cond.column_predicate_vec.empty()) {
-                if (del_cond.column_predicate_vec.size() == 1) {
-                    auto single_column_block_predicate = SingleColumnBlockPredicate::create_unique(
-                            del_cond.column_predicate_vec[0]);
+                std::vector<std::shared_ptr<const ColumnPredicate>> bound_predicates;
+                bound_predicates.reserve(del_cond.column_predicate_vec.size());
+                for (const auto& predicate : del_cond.column_predicate_vec) {
+                    bound_predicates.emplace_back(column_id_mapping == nullptr
+                                                          ? predicate
+                                                          : predicate->clone(column_id_mapping->at(
+                                                                    predicate->column_id())));
+                }
+                if (bound_predicates.size() == 1) {
+                    auto single_column_block_predicate =
+                            SingleColumnBlockPredicate::create_unique(bound_predicates[0]);
                     and_block_column_predicate_ptr->add_column_predicate(
                             std::move(single_column_block_predicate));
-                    if (del_predicates_for_zone_map->count(
-                                del_cond.column_predicate_vec[0]->column_id()) < 1) {
+                    if (!del_predicates_for_zone_map->contains(bound_predicates[0]->column_id())) {
                         del_predicates_for_zone_map->insert(
-                                {del_cond.column_predicate_vec[0]->column_id(),
+                                {bound_predicates[0]->column_id(),
                                  std::vector<std::shared_ptr<const ColumnPredicate>> {}});
                     }
-                    (*del_predicates_for_zone_map)[del_cond.column_predicate_vec[0]->column_id()]
-                            .push_back(del_cond.column_predicate_vec[0]);
+                    (*del_predicates_for_zone_map)[bound_predicates[0]->column_id()].push_back(
+                            bound_predicates[0]);
                 } else {
                     auto or_column_predicate = OrBlockColumnPredicate::create_unique();
 
@@ -654,13 +663,13 @@ void DeleteHandler::get_delete_conditions_after_version(
                     // so here do not put predicate to del_predicates_for_zone_map,
                     // refer #17145 for more details.
                     // // TODO: need refactor design and code to use more version delete and more column delete to filter zone page.
-                    std::for_each(del_cond.column_predicate_vec.cbegin(),
-                                  del_cond.column_predicate_vec.cend(),
-                                  [&or_column_predicate](
-                                          const std::shared_ptr<const ColumnPredicate> predicate) {
-                                      or_column_predicate->add_column_predicate(
-                                              SingleColumnBlockPredicate::create_unique(predicate));
-                                  });
+                    std::ranges::for_each(
+                            bound_predicates,
+                            [&or_column_predicate](
+                                    const std::shared_ptr<const ColumnPredicate>& predicate) {
+                                or_column_predicate->add_column_predicate(
+                                        SingleColumnBlockPredicate::create_unique(predicate));
+                            });
                     and_block_column_predicate_ptr->add_column_predicate(
                             std::move(or_column_predicate));
                 }

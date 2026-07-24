@@ -22,7 +22,8 @@ class Block;
 
 namespace segment_v2 {
 
-EmptySegmentIterator::EmptySegmentIterator(const doris::Schema& schema) : _schema(schema) {}
+EmptySegmentIterator::EmptySegmentIterator(DenseReadSchemaSPtr schema)
+        : _schema(std::move(schema)) {}
 
 Status EmptySegmentIterator::next_batch(Block* block) {
     return Status::EndOfFile("no more data in segment");

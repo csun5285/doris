@@ -20,6 +20,7 @@ package org.apache.doris.nereids.processor.post.materialize;
 import org.apache.doris.catalog.HiveTable;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.catalog.RowBinlogTableWrapper;
 import org.apache.doris.datasource.hive.HMSExternalTable;
 import org.apache.doris.datasource.hive.HMSExternalTable.DLAType;
 import org.apache.doris.datasource.iceberg.IcebergExternalTable;
@@ -152,6 +153,14 @@ public class MaterializeProbeVisitor extends DefaultPlanVisitor<Optional<Materia
 
     @Override
     public Optional<MaterializeSource> visitPhysicalOlapScan(PhysicalOlapScan scan, ProbeContext context) {
+        // Incremental row-binlog reads produce logical change rows rather than a one-to-one view of
+        // stored rows. MIN_DELTA can merge multiple rows and DETAIL can expand one update into
+        // BEFORE/AFTER rows, so fetching lazy columns later by physical row id is not valid.
+        if (scan.getTable() instanceof RowBinlogTableWrapper
+                && scan.getScanParams().isPresent()
+                && scan.getScanParams().get().incrementalRead()) {
+            return Optional.empty();
+        }
         if (scan.getSelectedIndexId() != scan.getTable().getBaseIndexId()) {
             return Optional.empty();
         }

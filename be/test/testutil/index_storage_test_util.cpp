@@ -45,6 +45,7 @@
 #include "storage/compaction/cumulative_compaction.h"
 #include "storage/compaction/full_compaction.h"
 #include "storage/data_dir.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/index_writer.h"
 #include "storage/index/inverted/inverted_index_cache.h"
 #include "storage/options.h"
@@ -1278,7 +1279,11 @@ Result<IndexReadResult> IndexStorageTestFixture::read_rowsets(
         context.reader_type = options.reader_type;
         context.tablet_schema = _tablet_schema;
         context.need_ordered_result = options.need_ordered_result;
-        context.return_columns = &return_columns;
+        auto read_schema = DenseReadSchema::create(*_tablet_schema, return_columns);
+        if (!read_schema.has_value()) {
+            return ResultError(std::move(read_schema).error());
+        }
+        context.read_schema = std::move(read_schema).value();
         context.predicates = &options.predicates;
         context.stats = &result.stats;
         context.target_cast_type_for_variants = options.target_cast_type_for_variants;
@@ -1290,7 +1295,7 @@ Result<IndexReadResult> IndexStorageTestFixture::read_rowsets(
         RETURN_RESULT_IF_ERROR(reader->init(&context));
 
         while (true) {
-            Block block = _tablet_schema->create_block_by_cids(return_columns);
+            Block block = context.read_schema->create_block();
             auto status = reader->next_batch(&block);
             if (status.is<ErrorCode::END_OF_FILE>()) {
                 break;

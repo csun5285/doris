@@ -58,6 +58,7 @@
 #include "runtime/runtime_state.h"
 #include "storage/data_dir.h"
 #include "storage/delete/delete_handler.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/inverted/inverted_index_desc.h"
 #include "storage/index/inverted/inverted_index_writer.h"
 #include "storage/iterator/olap_data_convertor.h"
@@ -945,26 +946,8 @@ Status SchemaChangeJob::_do_process_alter_tablet(const TAlterTabletReqV2& reques
     // But the tablet schema in base tablet maybe not the latest from FE, so that if fe pass through
     // a tablet schema, then use request schema.
     //
-    // return_columns does NOT include dropped columns. It is computed here BEFORE
-    // merge_dropped_columns() appends dropped columns to _base_tablet_schema below.
-    // This means return_columns only covers the original (non-dropped) columns.
-    //
-    // This is important because:
-    // - BetaRowsetReader builds _output_schema from return_columns, which determines the
-    //   number of columns in ref_block (via create_block() which also skips dropped cols).
-    // - VMergeIterator's copy_rows iterates over _output_schema columns, so ref_block
-    //   must match _output_schema exactly.
-    // - Dropped columns are only needed for delete predicate evaluation, and SegmentIterator
-    //   handles them internally (creates temporary columns for predicate columns not present
-    //   in the block via `i >= block->columns()` guard in _init_current_block).
-    //
-    // Example: table has columns [k1, v1, v2], then DROP COLUMN v1, then
-    //   DELETE FROM t WHERE v1 = 'x' was issued before the drop.
-    //   - _base_tablet_schema after merge_dropped_columns: [k1, v2, v1(DROPPED)]
-    //   - return_columns (computed before merge): [0, 1] → [k1, v2]
-    //   - _output_schema / ref_block columns: [k1, v2] (2 columns)
-    //   - SegmentIterator reads v1 internally for delete predicate, but does not
-    //     output it to ref_block. copy_rows only iterates 2 columns — no OOB access.
+    // Build the read layout from current columns only. Historical dropped columns
+    // are appended later as Segment-only delete-predicate auxiliaries.
     size_t num_cols =
             request.columns.empty() ? _base_tablet_schema->num_columns() : request.columns.size();
     return_columns.resize(num_cols);
@@ -1082,15 +1065,23 @@ Status SchemaChangeJob::_do_process_alter_tablet(const TAlterTabletReqV2& reques
             reader_context.tablet_schema = _base_tablet_schema;
             reader_context.need_ordered_result = true;
             reader_context.delete_handler = &delete_handler;
-            reader_context.return_columns = &return_columns;
-            reader_context.sequence_id_idx = reader_context.tablet_schema->sequence_col_idx();
+            reader_context.read_schema =
+                    DORIS_TRY(DenseReadSchema::create(*_base_tablet_schema, return_columns));
+            if (const int32_t sequence_cid = reader_context.tablet_schema->sequence_col_idx();
+                sequence_cid >= 0) {
+                reader_context.sequence_id_idx =
+                        reader_context.read_schema->position_of_tablet_cid(sequence_cid)->value();
+            }
             reader_context.is_unique = _base_tablet->keys_type() == UNIQUE_KEYS;
             reader_context.batch_size = ALTER_TABLE_BATCH_SIZE;
             reader_context.delete_bitmap = _base_tablet->tablet_meta()->delete_bitmap_ptr();
             reader_context.version = Version(0, end_version);
             if (!_base_tablet_schema->cluster_key_uids().empty()) {
                 for (const auto& uid : _base_tablet_schema->cluster_key_uids()) {
-                    cluster_key_idxes.emplace_back(_base_tablet_schema->field_index(uid));
+                    const int32_t tablet_cid = _base_tablet_schema->field_index(uid);
+                    cluster_key_idxes.emplace_back(
+                            reader_context.read_schema->position_of_tablet_cid(tablet_cid)
+                                    ->value());
                 }
                 reader_context.read_orderby_key_columns = &cluster_key_idxes;
                 reader_context.is_unique = false;

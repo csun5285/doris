@@ -26,6 +26,7 @@ import org.apache.doris.analysis.TupleId;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.common.Config;
 import org.apache.doris.common.UserException;
 import org.apache.doris.nereids.NereidsPlanner;
 import org.apache.doris.nereids.properties.DataTrait;
@@ -48,6 +49,7 @@ import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.util.PlanChecker;
 import org.apache.doris.nereids.util.PlanConstructor;
 import org.apache.doris.planner.AggregationNode;
+import org.apache.doris.planner.MaterializationNode;
 import org.apache.doris.planner.OlapScanNode;
 import org.apache.doris.planner.PartitionSortNode;
 import org.apache.doris.planner.PlanFragment;
@@ -78,11 +80,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public class PhysicalPlanTranslatorTest extends TestWithFeService {
 
+    private boolean originalEnableFeatureBinlog;
+
     @Override
     protected void runBeforeAll() throws Exception {
+        originalEnableFeatureBinlog = Config.enable_feature_binlog;
         createDatabase("test_db");
         createTable("create table test_db.t(a int, b int) distributed by hash(a) buckets 3 "
                 + "properties('replication_num' = '1');");
@@ -96,7 +102,36 @@ public class PhysicalPlanTranslatorTest extends TestWithFeService {
                 + ")\n"
                 + "distributed by hash(k1) buckets 3\n"
                 + "properties('replication_num' = '1');");
+        Config.enable_feature_binlog = true;
+        createTable("create table test_db.binlog_scan_schema_t(\n"
+                + "k1 int, k2 int, v1 int, v2 int)\n"
+                + "unique key(k1, k2)\n"
+                + "distributed by hash(k1) buckets 1\n"
+                + "properties('replication_num' = '1',"
+                + "'enable_unique_key_merge_on_write' = 'true',"
+                + "'binlog.enable' = 'true','binlog.format' = 'ROW',"
+                + "'binlog.need_historical_value' = 'true');");
+        createTable("create table test_db.sequence_scan_schema_t(\n"
+                + "k1 int, k2 int, v1 int, v2 int)\n"
+                + "unique key(k1, k2)\n"
+                + "distributed by hash(k1) buckets 1\n"
+                + "properties('replication_num' = '1',"
+                + "'enable_unique_key_merge_on_write' = 'false',"
+                + "'function_column.sequence_type' = 'int');");
+        createTable("create table test_db.sequence_map_scan_schema_t(\n"
+                + "k1 bigint, k2 int, v1 int, v2 int, s1 bigint, s2 bigint)\n"
+                + "unique key(k1, k2)\n"
+                + "distributed by hash(k1) buckets 1\n"
+                + "properties('replication_num' = '1',"
+                + "'enable_unique_key_merge_on_write' = 'false',"
+                + "'sequence_mapping.s1' = 'v1',"
+                + "'sequence_mapping.s2' = 'v2');");
         connectContext.getSessionVariable().setDisableNereidsRules("prune_empty_partition");
+    }
+
+    @Override
+    protected void runAfterAll() {
+        Config.enable_feature_binlog = originalEnableFeatureBinlog;
     }
 
     @Test
@@ -169,6 +204,143 @@ public class PhysicalPlanTranslatorTest extends TestWithFeService {
         Assertions.assertTrue(thriftScanNode.olap_scan_node.isSetExtraKeyColumnSlotIds());
         Assertions.assertEquals(ImmutableSet.of(extraKeySlotId),
                 thriftScanNode.olap_scan_node.getExtraKeyColumnSlotIds());
+    }
+
+    @Test
+    public void testBinlogPhysicalScanSchemaDependencies() throws Exception {
+        OlapScanNode scanNode = getFirstOlapScanNode(
+                "select v1 from test_db.binlog_scan_schema_t"
+                        + "@incr(\"incrementType\" = \"MIN_DELTA\")");
+        List<String> scanColumns = scanNode.getTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toList());
+
+        Assertions.assertTrue(scanColumns.containsAll(ImmutableList.of(
+                "k1", "k2", "v1", Column.generateBeforeColName("v1"),
+                Column.BINLOG_LSN_COL, Column.BINLOG_OPERATION_COL, Column.BINLOG_TSO_COL)));
+        Assertions.assertFalse(scanColumns.contains("v2"));
+        Assertions.assertFalse(scanColumns.contains(Column.generateBeforeColName("v2")));
+        Assertions.assertTrue(scanColumns.indexOf("v1")
+                < scanColumns.indexOf(Column.generateBeforeColName("v1")));
+        Assertions.assertTrue(scanColumns.indexOf(Column.generateBeforeColName("v1"))
+                < scanColumns.indexOf(Column.BINLOG_LSN_COL));
+
+        Set<String> storageDependencyColumns = scanNode.getTupleDesc().getSlots().stream()
+                .filter(slot -> scanNode.getStorageSemanticDependencySlotIds().contains(slot.getId().asInt()))
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertTrue(storageDependencyColumns.containsAll(ImmutableSet.of(
+                "k1", "k2", Column.generateBeforeColName("v1"),
+                Column.BINLOG_LSN_COL, Column.BINLOG_OPERATION_COL, Column.BINLOG_TSO_COL)));
+        Assertions.assertTrue(scanNode.getExtraKeyColumnSlotIds().isEmpty());
+        Assertions.assertEquals(ImmutableList.of("v1"), scanNode.getOutputTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toList()));
+
+        TPlanNode thriftScanNode = scanNode.treeToThrift().getNodes().get(0);
+        Assertions.assertTrue(thriftScanNode.olap_scan_node.isSetScanSchemaLayoutVersion());
+        Assertions.assertEquals(OlapScanNode.ALIGNED_SCAN_SCHEMA_LAYOUT_VERSION,
+                thriftScanNode.olap_scan_node.getScanSchemaLayoutVersion());
+        Set<Integer> dependencyUniqueIds = scanNode.getTupleDesc().getSlots().stream()
+                .filter(slot -> scanNode.getStorageSemanticDependencySlotIds().contains(slot.getId().asInt()))
+                .map(slot -> slot.getColumn().getUniqueId())
+                .collect(Collectors.toSet());
+        Assertions.assertTrue(thriftScanNode.olap_scan_node.getOutputColumnUniqueIds()
+                .containsAll(dependencyUniqueIds));
+    }
+
+    @Test
+    public void testBinlogIncrementalScanDisablesTopnLazyMaterialization() throws Exception {
+        Planner planner = getSQLPlanner(
+                "select v1 from test_db.binlog_scan_schema_t"
+                        + "@incr(\"incrementType\" = \"MIN_DELTA\") order by k1 limit 1");
+        Assertions.assertNotNull(planner);
+
+        Set<MaterializationNode> materializationNodes = Sets.newHashSet();
+        Set<OlapScanNode> scanNodes = Sets.newHashSet();
+        for (PlanFragment fragment : planner.getFragments()) {
+            PlanNode root = fragment.getPlanRoot();
+            if (root != null) {
+                root.collect(MaterializationNode.class, materializationNodes);
+                root.collect(OlapScanNode.class, scanNodes);
+            }
+        }
+
+        Assertions.assertTrue(materializationNodes.isEmpty());
+        Assertions.assertEquals(1, scanNodes.size());
+        Set<String> scanColumns = scanNodes.iterator().next().getTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertTrue(scanColumns.containsAll(ImmutableSet.of(
+                "k1", "k2", "v1", Column.generateBeforeColName("v1"),
+                Column.BINLOG_LSN_COL, Column.BINLOG_OPERATION_COL, Column.BINLOG_TSO_COL)));
+        Assertions.assertFalse(scanColumns.stream().anyMatch(
+                columnName -> columnName.startsWith(Column.GLOBAL_ROWID_COL)));
+    }
+
+    @Test
+    public void testMergeSequencePhysicalScanSchemaDependencies() throws Exception {
+        OlapScanNode sequenceScan = getFirstOlapScanNode(
+                "select v1 from test_db.sequence_scan_schema_t");
+        Set<String> sequenceDependencies = sequenceScan.getTupleDesc().getSlots().stream()
+                .filter(slot -> sequenceScan.getStorageSemanticDependencySlotIds().contains(slot.getId().asInt()))
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertEquals(ImmutableSet.of(Column.SEQUENCE_COL), sequenceDependencies);
+        Assertions.assertTrue(sequenceScan.getTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .anyMatch(Column.SEQUENCE_COL::equals));
+
+        OlapScanNode sequenceMapScan = getFirstOlapScanNode(
+                "select v1 from test_db.sequence_map_scan_schema_t");
+        Set<String> sequenceMapDependencies = sequenceMapScan.getTupleDesc().getSlots().stream()
+                .filter(slot -> sequenceMapScan.getStorageSemanticDependencySlotIds()
+                        .contains(slot.getId().asInt()))
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toSet());
+        Assertions.assertEquals(ImmutableSet.of("s1"), sequenceMapDependencies);
+        List<String> sequenceMapScanColumns = sequenceMapScan.getTupleDesc().getSlots().stream()
+                .map(slot -> slot.getColumn().getName())
+                .collect(Collectors.toList());
+        Assertions.assertTrue(sequenceMapScanColumns.containsAll(ImmutableList.of("k1", "k2", "v1", "s1")));
+        Assertions.assertFalse(sequenceMapScanColumns.contains("v2"));
+        Assertions.assertFalse(sequenceMapScanColumns.contains("s2"));
+    }
+
+    @Test
+    public void testLazyMaterializedScanPreservesStorageDependencies() throws Exception {
+        int originalThreshold = connectContext.getSessionVariable().topNLazyMaterializationThreshold;
+        connectContext.getSessionVariable().topNLazyMaterializationThreshold = 1024;
+        try {
+            Planner planner = getSQLPlanner(
+                    "select * from test_db.sequence_scan_schema_t order by v1 limit 1");
+            Set<MaterializationNode> materializationNodes = Sets.newHashSet();
+            Set<OlapScanNode> scanNodes = Sets.newHashSet();
+            for (PlanFragment fragment : planner.getFragments()) {
+                PlanNode root = fragment.getPlanRoot();
+                if (root != null) {
+                    root.collect(MaterializationNode.class, materializationNodes);
+                    root.collect(OlapScanNode.class, scanNodes);
+                }
+            }
+
+            Assertions.assertEquals(1, materializationNodes.size());
+            Assertions.assertEquals(1, scanNodes.size());
+            OlapScanNode scanNode = scanNodes.iterator().next();
+            Set<String> scanColumns = scanNode.getTupleDesc().getSlots().stream()
+                    .map(slot -> slot.getColumn().getName())
+                    .collect(Collectors.toSet());
+            Assertions.assertTrue(scanColumns.containsAll(
+                    ImmutableSet.of("k1", "k2", "v1", Column.SEQUENCE_COL)));
+            Set<String> storageDependencies = scanNode.getTupleDesc().getSlots().stream()
+                    .filter(slot -> scanNode.getStorageSemanticDependencySlotIds()
+                            .contains(slot.getId().asInt()))
+                    .map(slot -> slot.getColumn().getName())
+                    .collect(Collectors.toSet());
+            Assertions.assertTrue(storageDependencies.contains(Column.SEQUENCE_COL));
+        } finally {
+            connectContext.getSessionVariable().topNLazyMaterializationThreshold = originalThreshold;
+        }
     }
 
     @Test

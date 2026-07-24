@@ -28,7 +28,9 @@
 #include "core/column/column_nothing.h"
 #include "core/data_type/data_type_number.h"
 #include "core/data_type/data_type_struct.h"
+#include "storage/binlog.h"
 #include "storage/tablet/tablet_schema.h"
+#include "util/json/path_in_data.h"
 
 namespace doris {
 namespace {
@@ -47,16 +49,15 @@ TabletColumn create_int_column(int32_t unique_id, std::string name, bool is_key,
     return column;
 }
 
-TabletSchema create_tablet_schema() {
-    TabletSchema tablet_schema;
+void init_tablet_schema(TabletSchema& tablet_schema) {
     tablet_schema.append_column(create_int_column(10, "k0", true));
     tablet_schema.append_column(create_int_column(11, "k1", true));
     tablet_schema.append_column(create_int_column(12, "v0", false));
-    return tablet_schema;
 }
 
 TEST(DenseReadSchemaTest, PreservesDenseOrderAndBlockTypes) {
-    TabletSchema tablet_schema = create_tablet_schema();
+    TabletSchema tablet_schema;
+    init_tablet_schema(tablet_schema);
     std::unordered_set<TabletColumnId> nullable_columns {0};
 
     auto result = DenseReadSchema::create(tablet_schema, {2, 0}, &nullable_columns);
@@ -95,8 +96,19 @@ TEST(DenseReadSchemaTest, PreservesDenseOrderAndBlockTypes) {
     EXPECT_TRUE(read_schema->validate_block(block).ok());
 }
 
+TEST(DenseReadSchemaTest, KeepsPhysicalKeyOrderForArbitraryDenseLayout) {
+    TabletSchema tablet_schema;
+    init_tablet_schema(tablet_schema);
+    auto result = DenseReadSchema::create(tablet_schema, {1, 2, 0});
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    EXPECT_EQ((std::vector<ReadPosition> {ReadPosition(2), ReadPosition(0)}),
+              result.value()->key_positions());
+}
+
 TEST(DenseReadSchemaTest, RejectsInvalidTabletColumnLayouts) {
-    TabletSchema tablet_schema = create_tablet_schema();
+    TabletSchema tablet_schema;
+    init_tablet_schema(tablet_schema);
 
     auto duplicate = DenseReadSchema::create(tablet_schema, {0, 0});
     ASSERT_FALSE(duplicate.has_value());
@@ -108,7 +120,8 @@ TEST(DenseReadSchemaTest, RejectsInvalidTabletColumnLayouts) {
 }
 
 TEST(DenseReadSchemaTest, ValidatesExactBlockLayout) {
-    TabletSchema tablet_schema = create_tablet_schema();
+    TabletSchema tablet_schema;
+    init_tablet_schema(tablet_schema);
     auto result = DenseReadSchema::create(tablet_schema, {0, 2});
     ASSERT_TRUE(result.has_value()) << result.error().to_string();
     DenseReadSchemaSPtr read_schema = result.value();
@@ -143,7 +156,7 @@ TEST(DenseReadSchemaTest, PreservesVirtualColumnPrototype) {
     EXPECT_TRUE(read_schema->validate_block(block).ok());
 
     Block materialized = tablet_schema.create_block_by_cids({0});
-    EXPECT_FALSE(read_schema->validate_block(materialized).ok());
+    EXPECT_TRUE(read_schema->validate_block(materialized).ok());
 }
 
 TEST(DenseReadSchemaTest, ValidatesPrunedStructFieldIdentity) {
@@ -171,6 +184,111 @@ TEST(DenseReadSchemaTest, ValidatesPrunedStructFieldIdentity) {
     Block reordered;
     reordered.insert({reordered_type->create_column(), reordered_type, "payload"});
     EXPECT_FALSE(read_schema->validate_block(reordered).ok());
+}
+
+TEST(DenseReadSchemaTest, AppendsAuxiliaryColumnsWithoutChangingPrefix) {
+    TabletSchema tablet_schema;
+    init_tablet_schema(tablet_schema);
+    std::unordered_set<TabletColumnId> nullable_columns {0};
+    auto scan_result = DenseReadSchema::create(tablet_schema, {2, 0}, &nullable_columns);
+    ASSERT_TRUE(scan_result.has_value()) << scan_result.error().to_string();
+    auto scan_schema = scan_result.value();
+
+    auto segment_result =
+            scan_schema->append_tablet_columns(tablet_schema, {1, 2}, &nullable_columns);
+    ASSERT_TRUE(segment_result.has_value()) << segment_result.error().to_string();
+    auto segment_schema = segment_result.value();
+
+    ASSERT_EQ(3, segment_schema->size());
+    EXPECT_EQ((std::vector<TabletColumnId> {2, 0, 1}), segment_schema->tablet_column_ids());
+    EXPECT_EQ("INT", segment_schema->field(ReadPosition(0)).block_type->get_name());
+    EXPECT_EQ("Nullable(INT)", segment_schema->field(ReadPosition(1)).block_type->get_name());
+    EXPECT_EQ(2, segment_schema->position_of_tablet_cid(1)->value());
+
+    auto projection_result = segment_schema->projection_positions(*scan_schema);
+    ASSERT_TRUE(projection_result.has_value()) << projection_result.error().to_string();
+    EXPECT_EQ((std::vector<ReadPosition> {ReadPosition(0), ReadPosition(1)}),
+              projection_result.value());
+
+    auto prefix_result = segment_schema->prefix(scan_schema->size());
+    ASSERT_TRUE(prefix_result.has_value()) << prefix_result.error().to_string();
+    EXPECT_TRUE(prefix_result.value()->validate_block(scan_schema->create_block()).ok());
+}
+
+TEST(DenseReadSchemaTest, ExistingNullablePrefixWinsOverAuxiliaryStorageLayout) {
+    TabletSchema tablet_schema;
+    init_tablet_schema(tablet_schema);
+    std::unordered_set<TabletColumnId> nullable_columns {0};
+    auto scan_result = DenseReadSchema::create(tablet_schema, {0}, &nullable_columns);
+    ASSERT_TRUE(scan_result.has_value()) << scan_result.error().to_string();
+
+    // Delete predicates may request k0 again as a BE-only auxiliary field. The scan prefix is
+    // already nullable-aligned with the FE slot, while the physical TabletColumn is non-nullable.
+    // Re-appending the same tablet CID must keep the prefix layout authoritative.
+    auto segment_result = scan_result.value()->append_tablet_columns(tablet_schema, {0, 2});
+    ASSERT_TRUE(segment_result.has_value()) << segment_result.error().to_string();
+
+    const auto& segment_schema = segment_result.value();
+    EXPECT_EQ((std::vector<TabletColumnId> {0, 2}), segment_schema->tablet_column_ids());
+    EXPECT_EQ("Nullable(INT)", segment_schema->field(ReadPosition(0)).block_type->get_name());
+    EXPECT_EQ("INT", segment_schema->field(ReadPosition(1)).block_type->get_name());
+    auto prefix_result = segment_schema->prefix(1);
+    ASSERT_TRUE(prefix_result.has_value()) << prefix_result.error().to_string();
+    EXPECT_TRUE(prefix_result.value()->validate_block(scan_result.value()->create_block()).ok());
+}
+
+TEST(DenseReadSchemaTest, ProjectsByPhysicalIdentityInsteadOfTabletOrdinal) {
+    TabletSchema source_tablet_schema;
+    init_tablet_schema(source_tablet_schema);
+    auto source_result = DenseReadSchema::create(source_tablet_schema, {0, 1, 2});
+    ASSERT_TRUE(source_result.has_value()) << source_result.error().to_string();
+
+    TabletSchema target_tablet_schema;
+    target_tablet_schema.append_column(create_int_column(12, "v0", false));
+    target_tablet_schema.append_column(create_int_column(10, "k0", true));
+    auto target_result = DenseReadSchema::create(target_tablet_schema, {0, 1});
+    ASSERT_TRUE(target_result.has_value()) << target_result.error().to_string();
+
+    auto projection_result = source_result.value()->projection_positions(*target_result.value());
+    ASSERT_TRUE(projection_result.has_value()) << projection_result.error().to_string();
+    EXPECT_EQ((std::vector<ReadPosition> {ReadPosition(2), ReadPosition(0)}),
+              projection_result.value());
+}
+
+TEST(DenseReadSchemaTest, DistinguishesVariantPathsWithSameParentUid) {
+    TabletColumn field_a = create_int_column(-1, "payload.a", false);
+    field_a.set_parent_unique_id(100);
+    field_a.set_path_info(PathInData("payload.a"));
+    TabletColumn field_b = create_int_column(-1, "payload.b", false);
+    field_b.set_parent_unique_id(100);
+    field_b.set_path_info(PathInData("payload.b"));
+
+    TabletSchema tablet_schema;
+    tablet_schema.append_column(field_a);
+    tablet_schema.append_column(field_b);
+    auto result = DenseReadSchema::create(tablet_schema, {0, 1});
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    const auto& identity_a = result.value()->field(ReadPosition(0)).identity;
+    const auto& identity_b = result.value()->field(ReadPosition(1)).identity;
+    EXPECT_EQ(DenseFieldIdentityKind::VARIANT_PATH, identity_a.kind);
+    EXPECT_EQ(100, identity_a.unique_id);
+    EXPECT_NE(identity_a, identity_b);
+    EXPECT_EQ(0, result.value()->position_of_identity(identity_a)->value());
+    EXPECT_EQ(1, result.value()->position_of_identity(identity_b)->value());
+}
+
+TEST(DenseReadSchemaTest, SpecialColumnAtPositionZeroIsPresent) {
+    TabletSchema tablet_schema;
+    tablet_schema.append_column(create_int_column(20, VERSION_COL, false));
+    auto result = DenseReadSchema::create(tablet_schema, {0});
+    ASSERT_TRUE(result.has_value()) << result.error().to_string();
+
+    EXPECT_EQ(0, result.value()->version_col_idx());
+    EXPECT_EQ(-1, result.value()->lsn_col_idx());
+    EXPECT_EQ(0, result.value()->column_id(0));
+    EXPECT_EQ(0, result.value()->column_index(0));
+    EXPECT_EQ(0, result.value()->tablet_column_id(ReadPosition(0)));
 }
 
 } // namespace

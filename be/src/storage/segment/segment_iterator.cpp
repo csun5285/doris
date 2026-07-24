@@ -355,7 +355,7 @@ private:
     uint32_t _rowid_left;
 };
 
-SegmentIterator::SegmentIterator(std::shared_ptr<Segment> segment, SchemaSPtr schema)
+SegmentIterator::SegmentIterator(std::shared_ptr<Segment> segment, DenseReadSchemaSPtr schema)
         : _segment(std::move(segment)),
           _schema(schema),
           _column_iterators(_schema->num_columns()),
@@ -380,8 +380,7 @@ std::unique_ptr<AdaptiveBlockSizePredictor> SegmentIterator::_make_block_size_pr
     }
 
     // Collect per-column raw byte metadata from the segment footer for the columns
-    // this iterator will actually output (defined by _schema, which is built from
-    // _opts.return_columns).
+    // this iterator will actually output, as defined by the dense read schema.
     std::vector<AdaptiveBlockSizePredictor::ColumnMetadata> col_metadata;
     uint32_t seg_rows = _segment->num_rows();
     uint64_t total_raw_bytes = 0;
@@ -390,12 +389,10 @@ std::unique_ptr<AdaptiveBlockSizePredictor> SegmentIterator::_make_block_size_pr
         const auto& ts = _segment->tablet_schema();
         if (ts) {
             for (ColumnId cid : _schema->column_ids()) {
-                if (static_cast<size_t>(cid) < ts->num_columns()) {
-                    int32_t uid = ts->column(cid).unique_id();
-                    uint64_t raw_bytes = _segment->column_raw_data_bytes(uid);
-                    if (uid >= 0 && raw_bytes > 0) {
-                        total_raw_bytes += raw_bytes;
-                    }
+                int32_t uid = _schema->column(cid)->unique_id();
+                uint64_t raw_bytes = _segment->column_raw_data_bytes(uid);
+                if (uid >= 0 && raw_bytes > 0) {
+                    total_raw_bytes += raw_bytes;
                 }
             }
             metadata_hint_bytes_per_row = total_raw_bytes / static_cast<double>(seg_rows);
@@ -433,7 +430,7 @@ Status SegmentIterator::_init_impl(const StorageReadOptions& opts) {
     _initial_block_row_max = _opts.block_row_max;
     _block_size_predictor = _make_block_size_predictor();
 
-    if (_schema->rowid_col_idx() > 0) {
+    if (_schema->rowid_col_idx() >= 0) {
         _record_rowids = true;
     }
 
@@ -569,7 +566,6 @@ Status SegmentIterator::_lazy_init(Block* block) {
 
     for (size_t i = 0; i < _schema->column_ids().size(); i++) {
         ColumnId cid = _schema->column_ids()[i];
-        const auto* column_desc = _schema->column(cid);
         if (_is_pred_column[cid]) {
             auto storage_column_type = _storage_name_and_type[cid].second;
             RETURN_IF_CATCH_EXCEPTION(
@@ -580,33 +576,6 @@ Status SegmentIterator::_lazy_init(Block* block) {
             _current_return_columns[cid]->set_rowset_segment_id(
                     {_segment->rowset_id(), _segment->id()});
             _current_return_columns[cid]->reserve(nrows_reserve_limit);
-        } else if (i >= block->columns()) {
-            // This column needs to be scanned, but doesn't need to be returned upward. (delete sign)
-            // if i >= block->columns means the column and not the pred_column means `column i` is
-            // a delete condition column. but the column is not effective in the segment. so we just
-            // create a column to hold the data.
-            // a. origin data -> b. delete condition -> c. new load data
-            // the segment of c do not effective delete condition, but it still need read the column
-            // to match the schema.
-            // TODO: skip read the not effective delete column to speed up segment read.
-            _current_return_columns[cid] = Schema::get_data_type_ptr(*column_desc)->create_column();
-            _current_return_columns[cid]->reserve(nrows_reserve_limit);
-        }
-    }
-
-    // Additional deleted filter condition will be materialized column be at the end of the block,
-    // after _output_column_by_sel_idx  will be erase, we not need to filter it,
-    // so erase it from _columns_to_filter in the first next_batch.
-    // Eg:
-    //      `delete from table where a = 10;`
-    //      `select b from table;`
-    // a column only effective in segment iterator, the block from query engine only contain the b column,
-    // so no need to filter a column by expr.
-    for (auto it = _columns_to_filter.begin(); it != _columns_to_filter.end();) {
-        if (*it >= block->columns()) {
-            it = _columns_to_filter.erase(it);
-        } else {
-            ++it;
         }
     }
 
@@ -716,10 +685,7 @@ Status SegmentIterator::_get_row_ranges_by_keys() {
 
     // Read & seek key columns is a waste of time when no key column in _schema
     if (std::none_of(_schema->columns().begin(), _schema->columns().end(),
-                     [&](const TabletColumnPtr& col) {
-                         return col &&
-                                _opts.tablet_schema->column_by_uid(col->unique_id()).is_key();
-                     })) {
+                     [](const TabletColumnPtr& col) { return col && col->is_key(); })) {
         return Status::OK();
     }
 
@@ -752,17 +718,20 @@ Status SegmentIterator::_get_row_ranges_by_keys() {
 // Set up environment for the following seek.
 Status SegmentIterator::_prepare_seek(const StorageReadOptions::KeyRange& key_range) {
     std::vector<const TabletColumn*> key_columns;
+    std::vector<TabletColumnId> key_tablet_cids;
     std::set<uint32_t> column_set;
     if (key_range.lower_key != nullptr) {
         for (auto cid : key_range.lower_key->schema()->column_ids()) {
             column_set.emplace(cid);
             key_columns.emplace_back(key_range.lower_key->column(cid));
+            key_tablet_cids.emplace_back(cid);
         }
     }
     if (key_range.upper_key != nullptr) {
         for (auto cid : key_range.upper_key->schema()->column_ids()) {
             if (column_set.count(cid) == 0) {
                 key_columns.emplace_back(key_range.upper_key->column(cid));
+                key_tablet_cids.emplace_back(cid);
                 column_set.emplace(cid);
             }
         }
@@ -776,6 +745,12 @@ Status SegmentIterator::_prepare_seek(const StorageReadOptions::KeyRange& key_ra
         std::vector<uint32_t> column_ids(cols.size());
         std::iota(column_ids.begin(), column_ids.end(), 0);
         _seek_schema = std::make_unique<Schema>(cols, column_ids);
+        _seek_read_positions.reserve(key_tablet_cids.size());
+        for (TabletColumnId tablet_cid : key_tablet_cids) {
+            const auto read_position = _schema->position_of_tablet_cid(tablet_cid);
+            DORIS_CHECK(read_position.has_value());
+            _seek_read_positions.push_back(read_position->value());
+        }
     }
     // todo(wb) need refactor here, when using pk to search, _seek_block is useless
     if (_seek_block.size() == 0) {
@@ -785,28 +760,6 @@ Status SegmentIterator::_prepare_seek(const StorageReadOptions::KeyRange& key_ra
             auto column_desc = _seek_schema->column(cid);
             _seek_block[i] = Schema::get_data_type_ptr(*column_desc)->create_column();
             i++;
-        }
-    }
-
-    // create used column iterator
-    for (auto cid : _seek_schema->column_ids()) {
-        if (_column_iterators[cid] == nullptr) {
-            // TODO: Do we need this?
-            if (_virtual_column_exprs.contains(cid)) {
-                _column_iterators[cid] = std::make_unique<VirtualColumnIterator>();
-                continue;
-            }
-
-            RETURN_IF_ERROR(_segment->new_column_iterator(_opts.tablet_schema->column(cid),
-                                                          &_column_iterators[cid], &_opts,
-                                                          &_variant_sparse_column_cache));
-            ColumnIteratorOptions iter_opts {
-                    .use_page_cache = _opts.use_page_cache,
-                    .file_reader = _file_reader.get(),
-                    .stats = _opts.stats,
-                    .io_ctx = _opts.io_ctx,
-            };
-            RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
         }
     }
 
@@ -918,7 +871,8 @@ Status SegmentIterator::_apply_ann_topn_predicate() {
     VLOG_DEBUG << fmt::format("Try apply ann topn: {}", _ann_topn_runtime->debug_string());
     size_t src_col_idx = _ann_topn_runtime->get_src_column_idx();
     // AnnTopNRuntime keeps VSlotRef::column_id(), which is the scan schema ordinal.
-    ColumnId src_cid = _schema->column_id(src_col_idx);
+    DORIS_CHECK_LT(src_col_idx, _schema->size());
+    ColumnId src_cid = cast_set<ColumnId>(src_col_idx);
     IndexIterator* ann_index_iterator = _index_iterators[src_cid].get();
     bool has_ann_index = _column_has_ann_index(src_cid);
     bool has_common_expr_push_down = !_common_expr_ctxs_push_down.empty();
@@ -1044,7 +998,8 @@ Status SegmentIterator::_apply_ann_topn_predicate() {
     _opts.stats->ann_index_topn_search_cnt += 1;
     _opts.stats->ann_index_cache_hits += ann_index_stats.topn_cache_hits.value();
     const size_t dst_col_idx = _ann_topn_runtime->get_dest_column_idx();
-    ColumnIterator* column_iter = _column_iterators[_schema->column_id(dst_col_idx)].get();
+    DORIS_CHECK_LT(dst_col_idx, _schema->size());
+    ColumnIterator* column_iter = _column_iterators[dst_col_idx].get();
     DCHECK(column_iter != nullptr);
     VirtualColumnIterator* virtual_column_iter = dynamic_cast<VirtualColumnIterator*>(column_iter);
     DCHECK(virtual_column_iter != nullptr);
@@ -1206,7 +1161,8 @@ Status SegmentIterator::_extract_common_expr_columns(const VExprSPtr& expr) {
     auto node_type = expr->node_type();
     if (node_type == TExprNodeType::SLOT_REF) {
         auto slot_expr = std::dynamic_pointer_cast<doris::VSlotRef>(expr);
-        auto cid = _schema->column_id(slot_expr->column_id());
+        auto cid = cast_set<ColumnId>(slot_expr->column_id());
+        DORIS_CHECK_LT(cid, _schema->size());
         _is_common_expr_column[cid] = true;
         _common_expr_columns.insert(cid);
     } else if (node_type == TExprNodeType::VIRTUAL_SLOT_REF) {
@@ -1454,7 +1410,7 @@ bool SegmentIterator::_need_read_data(ColumnId cid) {
         // occurring, return true here that column data needs to be read
         return true;
     }
-    const auto& column = _opts.tablet_schema->column(cid);
+    const auto& column = *_schema->column(cid);
     // Different subcolumns may share the same parent_unique_id, so we choose to abandon this optimization.
     if (column.is_extracted_column() &&
         _opts.push_down_agg_type_opt != TPushAggOp::COUNT_ON_INDEX) {
@@ -1589,7 +1545,7 @@ Status SegmentIterator::_init_return_column_iterators() {
         }
 
         if (_column_iterators[cid] == nullptr) {
-            RETURN_IF_ERROR(_segment->new_column_iterator(_opts.tablet_schema->column(cid),
+            RETURN_IF_ERROR(_segment->new_column_iterator(*_schema->column(cid),
                                                           &_column_iterators[cid], &_opts,
                                                           &_variant_sparse_column_cache));
             ColumnIteratorOptions iter_opts {
@@ -1644,7 +1600,7 @@ Status SegmentIterator::_init_index_iterators() {
             // In the _opts.tablet_schema, the sub-column type information for the variant is FieldType::OLAP_FIELD_TYPE_VARIANT.
             // This is because the sub-column is created in create_materialized_variant_column.
             // We use this column to locate the metadata for the inverted index, which requires a unique_id and path.
-            const auto& column = _opts.tablet_schema->column(cid);
+            const auto& column = *_schema->column(cid);
             std::vector<const TabletIndex*> inverted_indexs;
             // Keep shared_ptr alive to prevent use-after-free when accessing raw pointers
             TabletIndexes inverted_indexs_holder;
@@ -1720,7 +1676,7 @@ Status SegmentIterator::_init_index_iterators() {
     // Ann index iterators
     for (auto cid : _schema->column_ids()) {
         if (_index_iterators[cid] == nullptr) {
-            const auto& column = _opts.tablet_schema->column(cid);
+            const auto& column = *_schema->column(cid);
             const auto* index_meta = _segment->_tablet_schema->ann_index(column);
             if (index_meta) {
                 RETURN_IF_ERROR(_segment->new_index_iterator(column, index_meta, _opts,
@@ -1887,25 +1843,21 @@ Status SegmentIterator::_seek_and_peek(rowid_t rowid) {
     {
         _opts.stats->block_init_seek_num += 1;
         SCOPED_RAW_TIMER(&_opts.stats->block_init_seek_ns);
-        RETURN_IF_ERROR(_seek_columns(_seek_schema->column_ids(), rowid));
+        for (ColumnId read_position : _seek_read_positions) {
+            RETURN_IF_ERROR(_column_iterators[read_position]->seek_to_ordinal(rowid));
+        }
     }
-    size_t num_rows = 1;
 
     //note(wb) reset _seek_block for memory reuse
     // it is easier to use row based memory layout for clear memory
     for (int i = 0; i < _seek_block.size(); i++) {
         _seek_block[i]->clear();
     }
-    RETURN_IF_ERROR(_read_columns(_seek_schema->column_ids(), _seek_block, num_rows));
-    return Status::OK();
-}
-
-Status SegmentIterator::_seek_columns(const std::vector<ColumnId>& column_ids, rowid_t pos) {
-    for (auto cid : column_ids) {
-        if (!_need_read_data(cid)) {
-            continue;
-        }
-        RETURN_IF_ERROR(_column_iterators[cid]->seek_to_ordinal(pos));
+    for (size_t i = 0; i < _seek_read_positions.size(); ++i) {
+        size_t rows_read = 1;
+        RETURN_IF_ERROR(
+                _column_iterators[_seek_read_positions[i]]->next_batch(&rows_read, _seek_block[i]));
+        DORIS_CHECK_EQ(rows_read, 1);
     }
     return Status::OK();
 }
@@ -2018,7 +1970,7 @@ Status SegmentIterator::_vec_init_lazy_materialization() {
                 // if delete condition column not in the block, no filter is needed
                 // and will be removed from _columns_to_filter in the first next_batch.
                 if (_is_common_expr_column[cid] || _is_pred_column[cid]) {
-                    auto loc = _schema->column_index(cid);
+                    auto loc = cid;
                     _columns_to_filter.push_back(loc);
 
                     const auto field_type = _schema->column(cid)->type();
@@ -2043,7 +1995,7 @@ Status SegmentIterator::_vec_init_lazy_materialization() {
             }
 
             for (const auto& entry : _virtual_column_exprs) {
-                _columns_to_filter.push_back(_schema->column_index(entry.first));
+                _columns_to_filter.push_back(entry.first);
             }
         }
     }
@@ -2078,7 +2030,7 @@ Status SegmentIterator::_vec_init_lazy_materialization() {
         }
     } else if (!_is_need_vec_eval && !_is_need_short_eval && !_is_need_expr_eval) {
         for (int i = 0; i < _schema->num_column_ids(); i++) {
-            auto cid = _schema->column_id(i);
+            auto cid = cast_set<ColumnId>(i);
             _predicate_column_ids.push_back(cid);
         }
     } else {
@@ -2094,7 +2046,7 @@ Status SegmentIterator::_vec_init_lazy_materialization() {
             DCHECK(_common_expr_column_ids.empty());
             // _non_predicate_column_ids must be empty. Otherwise _lazy_materialization_read must not false.
             for (int i = 0; i < _schema->num_column_ids(); i++) {
-                auto cid = _schema->column_id(i);
+                auto cid = cast_set<ColumnId>(i);
                 if (pred_id_set.find(cid) != pred_id_set.end()) {
                     _predicate_column_ids.push_back(cid);
                 }
@@ -2212,7 +2164,7 @@ Status SegmentIterator::_init_current_block(Block* block,
     block->clear_column_data(_schema->num_column_ids());
 
     for (size_t i = 0; i < _schema->num_column_ids(); i++) {
-        auto cid = _schema->column_id(i);
+        auto cid = cast_set<ColumnId>(i);
         const auto* column_desc = _schema->column(cid);
 
         auto file_column_type = _storage_name_and_type[cid].second;
@@ -2233,8 +2185,7 @@ Status SegmentIterator::_init_current_block(Block* block,
             current_columns[cid]->reserve(nrows_read_limit);
         } else {
             // the column in block must clear() here to insert new data
-            if (_is_pred_column[cid] ||
-                i >= block->columns()) { //todo(wb) maybe we can release it after output block
+            if (_is_pred_column[cid]) {
                 if (current_columns[cid].get() == nullptr) {
                     return Status::InternalError(
                             "SegmentIterator meet invalid column, id={}, name={}", cid,
@@ -2265,42 +2216,25 @@ Status SegmentIterator::_output_non_pred_columns(Block* block) {
             fmt::join(_non_predicate_columns, ","), fmt::join(_schema->column_id_to_index(), ","));
     RETURN_IF_ERROR(_convert_to_expected_type(_non_predicate_columns));
     for (auto cid : _non_predicate_columns) {
-        auto loc = _schema->column_index(cid);
-        // Whether a delete predicate column gets output depends on how the caller builds
-        // the block passed to next_batch(). Both calling paths now build the block with
-        // only the output schema (return_columns), so delete predicate columns are skipped:
-        //
-        // 1) VMergeIterator path: block_reset() builds _block using the output schema
-        //    (return_columns only), e.g. block has 2 columns {c1, c2}.
-        //    Here loc=2 for delete predicate c3, block->columns()=2, so loc < block->columns()
-        //    is false, and c3 is skipped.
-        //
-        // 2) VUnionIterator path: the caller's block is built with only return_columns
-        //    (output schema), e.g. block has 2 columns {c1, c2}.
-        //    Here loc=2 for c3, block->columns()=2, so loc < block->columns() is false,
-        //    and c3 is skipped — same behavior as the VMergeIterator path.
-        if (loc < block->columns()) {
-            bool column_in_block_is_nothing = check_and_get_column<const ColumnNothing>(
-                    block->get_by_position(loc).column.get());
-            bool column_is_normal = !_virtual_column_exprs.contains(cid);
-            bool return_column_is_nothing =
-                    check_and_get_column<const ColumnNothing>(_current_return_columns[cid].get());
-            VLOG_DEBUG << fmt::format(
-                    "Cid {} loc {}, column_in_block_is_nothing {}, column_is_normal {}, "
-                    "return_column_is_nothing {}",
-                    cid, loc, column_in_block_is_nothing, column_is_normal,
-                    return_column_is_nothing);
+        auto loc = cid;
+        bool column_in_block_is_nothing =
+                check_and_get_column<const ColumnNothing>(block->get_by_position(loc).column.get());
+        bool column_is_normal = !_virtual_column_exprs.contains(cid);
+        bool return_column_is_nothing =
+                check_and_get_column<const ColumnNothing>(_current_return_columns[cid].get());
+        VLOG_DEBUG << fmt::format(
+                "Cid {} loc {}, column_in_block_is_nothing {}, column_is_normal {}, "
+                "return_column_is_nothing {}",
+                cid, loc, column_in_block_is_nothing, column_is_normal, return_column_is_nothing);
 
-            if (column_in_block_is_nothing || column_is_normal) {
-                block->replace_by_position(loc, std::move(_current_return_columns[cid]));
-                VLOG_DEBUG << fmt::format(
-                        "Output non-predicate column, cid: {}, loc: {}, col_name: {}, rows {}", cid,
-                        loc, _schema->column(cid)->name(),
-                        block->get_by_position(loc).column->size());
-            }
-            // Means virtual column in block has been materialized(maybe by common expr).
-            // so do nothing here.
+        if (column_in_block_is_nothing || column_is_normal) {
+            block->replace_by_position(loc, std::move(_current_return_columns[cid]));
+            VLOG_DEBUG << fmt::format(
+                    "Output non-predicate column, cid: {}, loc: {}, col_name: {}, rows {}", cid,
+                    loc, _schema->column(cid)->name(), block->get_by_position(loc).column->size());
         }
+        // Means virtual column in block has been materialized(maybe by common expr).
+        // so do nothing here.
     }
     return Status::OK();
 }
@@ -2357,7 +2291,7 @@ Status SegmentIterator::_read_columns_by_index(uint32_t nrows_read_limit, uint16
                 continue;
             }
             DBUG_EXECUTE_IF("segment_iterator._read_columns_by_index", {
-                auto col_name = _opts.tablet_schema->column(cid).name();
+                auto col_name = _schema->column(cid)->name();
                 auto debug_col_name =
                         DebugPoints::instance()->get_debug_param_or_default<std::string>(
                                 "segment_iterator._read_columns_by_index", "column_name", "");
@@ -2700,7 +2634,7 @@ Status SegmentIterator::_read_columns_by_rowids(std::vector<ColumnId>& read_colu
             if (debug_col_name.empty()) {
                 return Status::Error<ErrorCode::INTERNAL_ERROR>("does not need to read data");
             }
-            auto col_name = _opts.tablet_schema->column(cid).name();
+            auto col_name = _schema->column(cid)->name();
             if (debug_col_name.find(col_name) != std::string::npos) {
                 return Status::Error<ErrorCode::INTERNAL_ERROR>("does not need to read data, {}",
                                                                 debug_col_name);
@@ -2738,7 +2672,7 @@ Status SegmentIterator::_read_lazy_pruned_columns(Block* block) {
     }
 
     for (auto cid : _support_lazy_read_pruned_columns) {
-        auto loc = _schema->column_index(cid);
+        auto loc = cid;
         auto column = IColumn::mutate(std::move(block->get_by_position(loc).column));
         auto* column_iter = _column_iterators[cid].get();
         ScopedColumnIteratorReadPhase scoped_read_phase {column_iter,
@@ -2753,6 +2687,7 @@ Status SegmentIterator::_read_lazy_pruned_columns(Block* block) {
 }
 
 Status SegmentIterator::next_batch(Block* block) {
+    RETURN_IF_ERROR(_schema->validate_block(*block));
     // Replace virtual columns with ColumnNothing at the begining of each next_batch call.
     _init_virtual_columns(block);
     auto status = [&]() {
@@ -2785,7 +2720,7 @@ Status SegmentIterator::next_batch(Block* block) {
                 // Since we have a type check at the caller.
                 // So a replacement of nothing column with real column is needed.
                 for (const auto& [cid, expr_ctx] : _virtual_column_exprs) {
-                    auto idx = _schema->column_index(cid);
+                    auto idx = cid;
                     auto type = expr_ctx->root()->data_type();
                     block->replace_by_position(idx, type->create_column());
                 }
@@ -2970,7 +2905,7 @@ Status SegmentIterator::_next_batch_internal(Block* block) {
                         RETURN_IF_ERROR(_process_columns(_common_expr_column_ids, block));
                     }
 
-                    DCHECK(block->columns() > _schema->column_index(*_common_expr_columns.begin()));
+                    DCHECK(block->columns() > *_common_expr_columns.begin());
                     RETURN_IF_ERROR(
                             _process_common_expr(_sel_rowid_idx.data(), _selected_size, block));
                 }
@@ -3040,7 +2975,7 @@ Status SegmentIterator::_next_batch_internal(Block* block) {
 Status SegmentIterator::_process_columns(const std::vector<ColumnId>& column_ids, Block* block) {
     RETURN_IF_ERROR(_convert_to_expected_type(column_ids));
     for (auto cid : column_ids) {
-        auto loc = _schema->column_index(cid);
+        auto loc = cid;
         block->replace_by_position(loc, std::move(_current_return_columns[cid]));
     }
     return Status::OK();
@@ -3097,7 +3032,7 @@ Status SegmentIterator::_process_eof(Block* block) {
     // Convert all columns in _current_return_columns to schema column
     RETURN_IF_ERROR(_convert_to_expected_type(_schema->column_ids()));
     for (int i = 0; i < block->columns(); i++) {
-        auto cid = _schema->column_id(i);
+        auto cid = cast_set<ColumnId>(i);
         if (!_is_pred_column[cid]) {
             block->replace_by_position(i, std::move(_current_return_columns[cid]));
         }
@@ -3360,7 +3295,7 @@ Status SegmentIterator::_apply_expr_zonemap_to_row_ranges(const VExprContextSPtr
         if (cast_set<size_t>(slot_index) >= _schema->num_column_ids()) {
             continue;
         }
-        const auto cid = _schema->column_id(cast_set<size_t>(slot_index));
+        const auto cid = cast_set<ColumnId>(slot_index);
         if (!_segment->can_apply_predicate_safely(cid, *_schema,
                                                   _opts.target_cast_type_for_variants, _opts)) {
             continue;
@@ -3457,7 +3392,7 @@ void SegmentIterator::_calculate_common_expr_index_exec_status() {
                             for (const auto& vir_child : vir_node->children()) {
                                 if (vir_child->is_slot_ref()) {
                                     auto* inner_slot_ref = assert_cast<VSlotRef*>(vir_child.get());
-                                    auto cid = _schema->column_id(inner_slot_ref->column_id());
+                                    auto cid = cast_set<ColumnId>(inner_slot_ref->column_id());
                                     _common_expr_index_exec_status[cid][expr.get()] = false;
                                     _common_expr_to_slotref_map[root_expr_ctx.get()]
                                                                [inner_slot_ref->column_id()] =
@@ -3475,7 +3410,7 @@ void SegmentIterator::_calculate_common_expr_index_exec_status() {
                 auto expr_without_cast = VExpr::expr_without_cast(child);
                 if (expr_without_cast->is_slot_ref() && expr->op() != TExprOpcode::CAST) {
                     auto* column_slot_ref = assert_cast<VSlotRef*>(expr_without_cast.get());
-                    auto cid = _schema->column_id(column_slot_ref->column_id());
+                    auto cid = cast_set<ColumnId>(column_slot_ref->column_id());
                     _common_expr_index_exec_status[cid][expr.get()] = false;
                     _common_expr_to_slotref_map[root_expr_ctx.get()][column_slot_ref->column_id()] =
                             expr.get();
@@ -3508,7 +3443,7 @@ bool SegmentIterator::_no_need_read_key_data(ColumnId cid, MutableColumnPtr& col
         return false;
     }
 
-    if (!_opts.tablet_schema->column(cid).is_key()) {
+    if (!_schema->column(cid)->is_key()) {
         return false;
     }
 
@@ -3547,7 +3482,7 @@ bool SegmentIterator::_can_opt_limit_reads() {
     }
 
     bool all_true = std::ranges::all_of(_schema->column_ids(), [this](auto cid) {
-        if (cid == _opts.tablet_schema->delete_sign_idx()) {
+        if (cid == _schema->delete_sign_idx()) {
             return true;
         }
         if (_check_all_conditions_passed_inverted_index_for_column(cid, true)) {
@@ -3572,7 +3507,7 @@ bool SegmentIterator::_can_opt_limit_reads() {
 // Before get next batch. make sure all virtual columns in block has type ColumnNothing.
 void SegmentIterator::_init_virtual_columns(Block* block) {
     for (const auto& [cid, expr_ctx] : _virtual_column_exprs) {
-        auto idx = _schema->column_index(cid);
+        auto idx = cid;
         auto& col_with_type_and_name = block->get_by_position(idx);
         col_with_type_and_name.column = ColumnNothing::create(0);
         col_with_type_and_name.type = expr_ctx->root()->data_type();
@@ -3584,7 +3519,7 @@ Status SegmentIterator::_materialization_of_virtual_column(Block* block) {
     // So materialize virtual column in advance to avoid errors.
     if (_selected_size == 0) {
         for (const auto& [cid, expr_ctx] : _virtual_column_exprs) {
-            auto idx = _schema->column_index(cid);
+            auto idx = cid;
             auto& col_with_type_and_name = block->get_by_position(idx);
             col_with_type_and_name.column = expr_ctx->root()->data_type()->create_column();
             col_with_type_and_name.type = expr_ctx->root()->data_type();
@@ -3598,7 +3533,7 @@ Status SegmentIterator::_materialization_of_virtual_column(Block* block) {
     for (const auto& cid_and_expr : _virtual_column_exprs) {
         auto cid = cid_and_expr.first;
         auto column_expr = cid_and_expr.second;
-        auto materialized_pos = _schema->column_index(cid);
+        auto materialized_pos = cid;
         auto& column = block->get_by_position(materialized_pos).column;
         if (check_and_get_column<const ColumnNothing>(column.get())) {
             VLOG_DEBUG << fmt::format("Virtual column is doing materialization, cid {}, col idx {}",
@@ -3640,7 +3575,8 @@ void SegmentIterator::_prepare_score_column_materialization() {
                                                                      result_row_ids, filter);
     }
     const size_t dst_col_idx = _score_runtime->get_dest_column_idx();
-    auto* column_iter = _column_iterators[_schema->column_id(dst_col_idx)].get();
+    DORIS_CHECK_LT(dst_col_idx, _schema->size());
+    auto* column_iter = _column_iterators[dst_col_idx].get();
     auto* virtual_column_iter = dynamic_cast<VirtualColumnIterator*>(column_iter);
     virtual_column_iter->prepare_materialization(
             std::move(result_column),

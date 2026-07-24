@@ -36,6 +36,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 #include "agent/be_exec_version_manager.h"
@@ -45,6 +46,8 @@
 #include "core/column/column_vector.h"
 #include "core/data_type/data_type_number.h"
 #include "exprs/aggregate/aggregate_function_simple_factory.h"
+#include "storage/dense_read_schema.h"
+#include "storage/tablet/tablet_schema.h"
 
 namespace doris {
 
@@ -92,9 +95,8 @@ void configure_reader_for_int64_sum(BlockReader& reader, const Block& src_block,
     config::enable_adaptive_batch_size = false;
 
     // Column layout: [0]=key, [1]=agg value. Output layout matches input.
-    reader._normal_columns_idx = {0};
-    reader._agg_columns_idx = {1};
-    reader._return_columns_loc = {0, 1};
+    reader._passthrough_positions = {0};
+    reader._aggregate_positions = {1};
 
     reader._stored_data_columns = make_stored_columns(src_block, batch_max_rows);
     reader._stored_has_null_tag.assign(reader._stored_data_columns.size(), false);
@@ -235,6 +237,83 @@ TEST_F(BlockReaderAggFlushTest, PeriodicFlushManyWindowsSingleGroup) {
     ASSERT_EQ(target_columns[1]->size(), 1);
     int64_t expected = static_cast<int64_t>(kRows) * (kRows + 1) / 2; // 5050
     EXPECT_EQ(read_int64(*target_columns[1], 0), expected);
+}
+
+TEST_F(BlockReaderAggFlushTest, ClassifiesColumnsByDensePosition) {
+    TabletColumn key;
+    key.set_unique_id(10);
+    key.set_name("k");
+    key.set_type(FieldType::OLAP_FIELD_TYPE_INT);
+    key.set_is_key(true);
+    key.set_length(sizeof(int32_t));
+    key.set_index_length(sizeof(int32_t));
+    key.set_aggregation_method(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE);
+
+    TabletColumn value;
+    value.set_unique_id(11);
+    value.set_name("v");
+    value.set_type(FieldType::OLAP_FIELD_TYPE_INT);
+    value.set_is_key(false);
+    value.set_length(sizeof(int32_t));
+    value.set_index_length(sizeof(int32_t));
+    value.set_aggregation_method(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_SUM);
+
+    auto tablet_schema = std::make_shared<TabletSchema>();
+    tablet_schema->append_column(key);
+    tablet_schema->append_column(value);
+    tablet_schema->_keys_type = KeysType::AGG_KEYS;
+
+    auto read_schema_result = DenseReadSchema::create(*tablet_schema, {1, 0});
+    ASSERT_TRUE(read_schema_result.has_value()) << read_schema_result.error().to_string();
+
+    BlockReader reader;
+    reader._tablet_schema = tablet_schema;
+    reader._read_schema = read_schema_result.value();
+    TabletReader::ReaderParams params;
+    ASSERT_TRUE(reader._init_read_positions(params).ok());
+
+    EXPECT_EQ((std::vector<uint32_t> {1}), reader._passthrough_positions);
+    EXPECT_EQ((std::vector<uint32_t> {0}), reader._aggregate_positions);
+}
+
+TEST_F(BlockReaderAggFlushTest, InitializesAggregateFunctionWithDenseNullableType) {
+    TabletColumn key;
+    key.set_unique_id(10);
+    key.set_name("k");
+    key.set_type(FieldType::OLAP_FIELD_TYPE_INT);
+    key.set_is_key(true);
+    key.set_length(sizeof(int32_t));
+    key.set_index_length(sizeof(int32_t));
+    key.set_aggregation_method(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE);
+
+    TabletColumn value;
+    value.set_unique_id(11);
+    value.set_name("v");
+    value.set_type(FieldType::OLAP_FIELD_TYPE_INT);
+    value.set_is_key(false);
+    value.set_length(sizeof(int32_t));
+    value.set_index_length(sizeof(int32_t));
+    value.set_aggregation_method(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_SUM);
+
+    auto tablet_schema = std::make_shared<TabletSchema>();
+    tablet_schema->append_column(key);
+    tablet_schema->append_column(value);
+    tablet_schema->_keys_type = KeysType::AGG_KEYS;
+
+    std::unordered_set<TabletColumnId> nullable_columns {1};
+    auto read_schema_result = DenseReadSchema::create(*tablet_schema, {0, 1}, &nullable_columns);
+    ASSERT_TRUE(read_schema_result.has_value()) << read_schema_result.error().to_string();
+
+    BlockReader reader;
+    reader._tablet_schema = tablet_schema;
+    reader._read_schema = read_schema_result.value();
+    reader._next_row.block = std::make_shared<Block>(reader._read_schema->create_block());
+
+    TabletReader::ReaderParams params;
+    ASSERT_TRUE(reader._init_read_positions(params).ok());
+    EXPECT_EQ("Nullable(INT)", reader._read_schema->field(ReadPosition(1)).block_type->get_name());
+    EXPECT_TRUE(reader._init_agg_state(params).ok());
+    ASSERT_EQ(1, reader._agg_functions.size());
 }
 
 } // namespace doris

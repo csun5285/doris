@@ -18,8 +18,8 @@
 #pragma once
 
 #include "common/status.h"
+#include "storage/dense_read_schema.h"
 #include "storage/iterators.h"
-#include "storage/schema.h"
 
 namespace doris {
 class Block;
@@ -28,15 +28,15 @@ namespace segment_v2 {
 
 class EmptySegmentIterator : public RowwiseIterator {
 public:
-    explicit EmptySegmentIterator(const Schema& schema);
+    explicit EmptySegmentIterator(DenseReadSchemaSPtr schema);
     ~EmptySegmentIterator() override {}
     Status init(const StorageReadOptions& opts) override { return Status::OK(); }
-    const Schema& schema() const override { return _schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
     Status next_batch(Block* block) override;
     bool empty() const override { return true; }
 
 private:
-    const Schema& _schema;
+    DenseReadSchemaSPtr _schema;
 };
 
 } // namespace segment_v2

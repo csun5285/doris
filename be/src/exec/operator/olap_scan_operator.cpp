@@ -298,8 +298,8 @@ Status OlapScanLocalState::_init_profile() {
             ADD_CHILD_TIMER(_scanner_profile, "TabletReaderInitTimer", "ReaderInitTime");
     _tablet_reader_capture_rs_readers_timer = ADD_CHILD_TIMER(
             _scanner_profile, "TabletReaderCaptureRsReadersTimer", "TabletReaderInitTimer");
-    _tablet_reader_init_return_columns_timer = ADD_CHILD_TIMER(
-            _scanner_profile, "TabletReaderInitReturnColumnsTimer", "TabletReaderInitTimer");
+    _tablet_reader_init_read_schema_timer = ADD_CHILD_TIMER(
+            _scanner_profile, "TabletReaderInitReadSchemaTimer", "TabletReaderInitTimer");
     _tablet_reader_init_keys_param_timer = ADD_CHILD_TIMER(
             _scanner_profile, "TabletReaderInitKeysParamTimer", "TabletReaderInitTimer");
     _tablet_reader_init_orderby_keys_param_timer = ADD_CHILD_TIMER(

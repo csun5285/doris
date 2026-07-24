@@ -20,6 +20,7 @@
 #include <gtest/gtest-message.h>
 #include <gtest/gtest-test-part.h>
 
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -28,8 +29,8 @@
 #include "core/data_type/data_type.h"
 #include "core/field.h"
 #include "gtest/gtest_pred_impl.h"
+#include "storage/dense_read_schema.h"
 #include "storage/olap_common.h"
-#include "storage/schema.h"
 #include "storage/segment/column_reader.h"
 #include "storage/tablet/tablet_schema.h"
 
@@ -42,40 +43,36 @@ public:
     virtual ~VGenericIteratorsTest() {}
 };
 
-static Schema create_schema() {
-    std::vector<TabletColumnPtr> col_schemas;
+static DenseReadSchemaSPtr create_schema(const std::vector<TabletColumnId>& tablet_column_ids = {
+                                                 0, 1, 2}) {
+    TabletSchema tablet_schema;
     auto c1 = std::make_shared<TabletColumn>(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE,
                                              FieldType::OLAP_FIELD_TYPE_SMALLINT, true);
     c1->set_is_key(true);
-    col_schemas.emplace_back(c1);
+    c1->set_unique_id(10);
+    c1->set_name("c1");
+    tablet_schema.append_column(*c1);
     // c2: int
     auto c2 = std::make_shared<TabletColumn>(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE,
                                              FieldType::OLAP_FIELD_TYPE_INT, true);
     c2->set_is_key(true);
-    col_schemas.emplace_back(c2);
+    c2->set_unique_id(11);
+    c2->set_name("c2");
+    tablet_schema.append_column(*c2);
     // c3: big int
-    col_schemas.emplace_back(
-            std::make_shared<TabletColumn>(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_SUM,
-                                           FieldType::OLAP_FIELD_TYPE_BIGINT, true));
+    TabletColumn c3(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_SUM,
+                    FieldType::OLAP_FIELD_TYPE_BIGINT, true);
+    c3.set_unique_id(12);
+    c3.set_name("c3");
+    tablet_schema.append_column(c3);
 
-    std::vector<ColumnId> column_ids(col_schemas.size());
-    for (uint32_t cid = 0; cid < column_ids.size(); ++cid) {
-        column_ids[cid] = cid;
-    }
-
-    Schema schema(col_schemas, column_ids);
-    return schema;
+    auto result = DenseReadSchema::create(tablet_schema, tablet_column_ids);
+    CHECK(result.has_value()) << result.error().to_string();
+    return result.value();
 }
 
-static void create_block(Schema& schema, Block& block) {
-    for (auto& column_desc : schema.columns()) {
-        EXPECT_TRUE(column_desc);
-        auto data_type = Schema::get_data_type_ptr(*column_desc);
-        EXPECT_NE(data_type, nullptr);
-        auto column = data_type->create_column();
-        ColumnWithTypeAndName ctn(std::move(column), data_type, column_desc->name());
-        block.insert(ctn);
-    }
+static void create_block(const DenseReadSchema& schema, Block& block) {
+    block = schema.create_block();
 }
 
 TEST(VGenericIteratorsTest, AutoIncrement) {
@@ -87,7 +84,7 @@ TEST(VGenericIteratorsTest, AutoIncrement) {
     EXPECT_TRUE(st.ok());
 
     Block block;
-    create_block(schema, block);
+    create_block(*schema, block);
 
     auto ret = iter->next_batch(&block);
     EXPECT_TRUE(ret.ok());
@@ -109,7 +106,7 @@ TEST(VGenericIteratorsTest, AutoIncrement) {
 
 TEST(VGenericIteratorsTest, Union) {
     auto schema = create_schema();
-    auto output_schema = std::make_shared<Schema>(schema);
+    auto output_schema = schema;
     std::vector<RowwiseIteratorUPtr> inputs;
 
     inputs.push_back(new_auto_increment_iterator(schema, 100));
@@ -122,7 +119,7 @@ TEST(VGenericIteratorsTest, Union) {
     EXPECT_TRUE(st.ok());
 
     Block block;
-    create_block(schema, block);
+    create_block(*schema, block);
 
     do {
         st = iter->next_batch(&block);
@@ -151,10 +148,105 @@ TEST(VGenericIteratorsTest, Union) {
     }
 }
 
+TEST(VGenericIteratorsTest, ProjectionUsesStableFieldIdentity) {
+    auto segment_schema = create_schema();
+    auto scan_schema = create_schema({2, 0});
+    auto projection_result =
+            new_projection_iterator(new_auto_increment_iterator(segment_schema, 10), scan_schema);
+    ASSERT_TRUE(projection_result.has_value()) << projection_result.error().to_string();
+    auto iter = std::move(projection_result).value();
+
+    StorageReadOptions opts;
+    ASSERT_TRUE(iter->init(opts).ok());
+    Block block = scan_schema->create_block();
+    ASSERT_TRUE(iter->next_batch(&block).ok());
+    ASSERT_EQ(10, block.rows());
+
+    const auto& value_column = block.get_by_position(0).column;
+    const auto& key_column = block.get_by_position(1).column;
+    for (size_t row = 0; row < block.rows(); ++row) {
+        EXPECT_EQ(row + 2, (*value_column)[row].get<TYPE_BIGINT>());
+        EXPECT_EQ(row, (*key_column)[row].get<TYPE_SMALLINT>());
+    }
+}
+
+class ReorderedKeyIterator final : public RowwiseIterator {
+public:
+    ReorderedKeyIterator(DenseReadSchemaSPtr schema,
+                         std::vector<std::array<int64_t, 3>> physical_rows)
+            : _schema(std::move(schema)), _physical_rows(std::move(physical_rows)) {}
+
+    Status init(const StorageReadOptions& opts) override { return Status::OK(); }
+
+    Status next_batch(Block* block) override {
+        if (_finished) {
+            return Status::EndOfFile("End of ReorderedKeyIterator");
+        }
+        auto columns_guard = block->mutate_columns_scoped();
+        auto& columns = columns_guard.mutable_columns();
+        for (const auto& [k1, k2, value] : _physical_rows) {
+            const auto dense_row = std::array<int64_t, 3> {k2, k1, value};
+            for (size_t position = 0; position < dense_row.size(); ++position) {
+                auto& column = *columns[position];
+                if (position == 0) {
+                    const auto cell = static_cast<int32_t>(dense_row[position]);
+                    column.insert_data(reinterpret_cast<const char*>(&cell), sizeof(cell));
+                } else if (position == 1) {
+                    const auto cell = static_cast<int16_t>(dense_row[position]);
+                    column.insert_data(reinterpret_cast<const char*>(&cell), sizeof(cell));
+                } else {
+                    const auto cell = dense_row[position];
+                    column.insert_data(reinterpret_cast<const char*>(&cell), sizeof(cell));
+                }
+            }
+        }
+        _finished = true;
+        return Status::OK();
+    }
+
+    const DenseReadSchema& schema() const override { return *_schema; }
+
+private:
+    DenseReadSchemaSPtr _schema;
+    std::vector<std::array<int64_t, 3>> _physical_rows;
+    bool _finished = false;
+};
+
+TEST(VGenericIteratorsTest, MergeUsesPhysicalKeyOrderForReorderedLayout) {
+    auto schema = create_schema({1, 0, 2});
+    std::vector<RowwiseIteratorUPtr> inputs;
+    inputs.push_back(std::make_unique<ReorderedKeyIterator>(
+            schema, std::vector<std::array<int64_t, 3>> {{0, 10, 1}, {1, 0, 2}}));
+    inputs.push_back(std::make_unique<ReorderedKeyIterator>(
+            schema, std::vector<std::array<int64_t, 3>> {{0, 20, 3}, {1, 5, 4}}));
+
+    auto iter = new_merge_iterator(std::move(inputs), -1, false, false, nullptr, schema);
+    StorageReadOptions opts;
+    ASSERT_TRUE(iter->init(opts).ok());
+    Block block = schema->create_block();
+    Status status;
+    do {
+        status = iter->next_batch(&block);
+    } while (status.ok());
+
+    EXPECT_TRUE(status.is<END_OF_FILE>());
+    ASSERT_EQ(4, block.rows());
+    const auto& k2 = block.get_by_position(0).column;
+    const auto& k1 = block.get_by_position(1).column;
+    EXPECT_EQ(0, (*k1)[0].get<TYPE_SMALLINT>());
+    EXPECT_EQ(10, (*k2)[0].get<TYPE_INT>());
+    EXPECT_EQ(0, (*k1)[1].get<TYPE_SMALLINT>());
+    EXPECT_EQ(20, (*k2)[1].get<TYPE_INT>());
+    EXPECT_EQ(1, (*k1)[2].get<TYPE_SMALLINT>());
+    EXPECT_EQ(0, (*k2)[2].get<TYPE_INT>());
+    EXPECT_EQ(1, (*k1)[3].get<TYPE_SMALLINT>());
+    EXPECT_EQ(5, (*k2)[3].get<TYPE_INT>());
+}
+
 TEST(VGenericIteratorsTest, MergeAgg) {
     EXPECT_TRUE(1);
     auto schema = create_schema();
-    auto output_schema = std::make_shared<Schema>(schema);
+    auto output_schema = schema;
     std::vector<RowwiseIteratorUPtr> inputs;
 
     inputs.push_back(new_auto_increment_iterator(schema, 100));
@@ -169,7 +261,7 @@ TEST(VGenericIteratorsTest, MergeAgg) {
     Block block;
     std::vector<bool> row_is_same;
     BlockWithSameBit block_with_same_bit {.block = &block, .same_bit = row_is_same};
-    create_block(schema, block);
+    create_block(*schema, block);
 
     do {
         st = iter->next_batch(&block_with_same_bit);
@@ -204,7 +296,7 @@ TEST(VGenericIteratorsTest, MergeAgg) {
 TEST(VGenericIteratorsTest, MergeUnique) {
     EXPECT_TRUE(1);
     auto schema = create_schema();
-    auto output_schema = std::make_shared<Schema>(schema);
+    auto output_schema = schema;
     std::vector<RowwiseIteratorUPtr> inputs;
 
     inputs.push_back(new_auto_increment_iterator(schema, 100));
@@ -219,7 +311,7 @@ TEST(VGenericIteratorsTest, MergeUnique) {
     Block block;
     std::vector<bool> row_is_same;
     BlockWithSameBit block_with_same_bit {.block = &block, .same_bit = row_is_same};
-    create_block(schema, block);
+    create_block(*schema, block);
 
     do {
         st = iter->next_batch(&block_with_same_bit);
@@ -247,9 +339,9 @@ TEST(VGenericIteratorsTest, MergeUnique) {
 class SeqColumnUtIterator : public RowwiseIterator {
 public:
     // Will generate num_rows rows in total
-    SeqColumnUtIterator(const Schema& schema, size_t num_rows, size_t rows_returned,
+    SeqColumnUtIterator(DenseReadSchemaSPtr schema, size_t num_rows, size_t rows_returned,
                         size_t seq_col_idx, size_t seq_col_rows_returned)
-            : _schema(schema),
+            : _schema(std::move(schema)),
               _num_rows(num_rows),
               _rows_returned(rows_returned),
               _seq_col_idx(seq_col_idx),
@@ -262,13 +354,13 @@ public:
     Status next_batch(Block* block) override {
         int row_idx = 0;
         while (_rows_returned < _num_rows) {
-            for (int j = 0; j < _schema.num_columns(); ++j) {
+            for (int j = 0; j < _schema->num_columns(); ++j) {
                 ColumnWithTypeAndName& vc = block->get_by_position(j);
                 IColumn& vi = (IColumn&)(*vc.column);
 
                 char data[16] = {};
                 size_t data_len = 0;
-                const auto* col_schema = _schema.column(j);
+                const auto* col_schema = _schema->column(j);
                 switch (col_schema->type()) {
                 case FieldType::OLAP_FIELD_TYPE_SMALLINT:
                     *(int16_t*)data = j == _seq_col_idx ? _seq_col_rows_returned : 1;
@@ -306,9 +398,9 @@ public:
         return Status::EndOfFile("End of VAutoIncrementIterator");
     }
 
-    const Schema& schema() const override { return _schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
 
-    const Schema& _schema;
+    DenseReadSchemaSPtr _schema;
     size_t _num_rows;
     size_t _rows_returned;
     int _seq_col_idx = -1;
@@ -318,7 +410,7 @@ public:
 TEST(VGenericIteratorsTest, MergeWithSeqColumn) {
     EXPECT_TRUE(1);
     auto schema = create_schema();
-    auto output_schema = std::make_shared<Schema>(schema);
+    auto output_schema = schema;
     std::vector<RowwiseIteratorUPtr> inputs;
 
     int seq_column_id = 2;
@@ -343,7 +435,7 @@ TEST(VGenericIteratorsTest, MergeWithSeqColumn) {
     Block block;
     std::vector<bool> row_is_same;
     BlockWithSameBit block_with_same_bit {.block = &block, .same_bit = row_is_same};
-    create_block(schema, block);
+    create_block(*schema, block);
 
     do {
         st = iter->next_batch(&block_with_same_bit);
@@ -364,7 +456,7 @@ TEST(VGenericIteratorsTest, MergeWithSeqColumn) {
 // iterator should keep exactly one row whose seq value is the smallest (0).
 TEST(VGenericIteratorsTest, MergeWithSeqColumnSmallSeqFirst) {
     auto schema = create_schema();
-    auto output_schema = std::make_shared<Schema>(schema);
+    auto output_schema = schema;
     std::vector<RowwiseIteratorUPtr> inputs;
 
     int seq_column_id = 2;
@@ -388,7 +480,7 @@ TEST(VGenericIteratorsTest, MergeWithSeqColumnSmallSeqFirst) {
     Block block;
     std::vector<bool> row_is_same;
     BlockWithSameBit block_with_same_bit {.block = &block, .same_bit = row_is_same};
-    create_block(schema, block);
+    create_block(*schema, block);
 
     do {
         st = iter->next_batch(&block_with_same_bit);

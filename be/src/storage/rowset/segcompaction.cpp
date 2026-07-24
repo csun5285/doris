@@ -42,6 +42,7 @@
 #include "runtime/memory/global_memory_arbitrator.h"
 #include "runtime/thread_context.h"
 #include "storage/data_dir.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/inverted/inverted_index_cache.h"
 #include "storage/index/inverted/inverted_index_desc.h"
 #include "storage/iterator/vertical_block_reader.h"
@@ -54,7 +55,6 @@
 #include "storage/rowset/beta_rowset_writer.h"
 #include "storage/rowset/rowset_meta.h"
 #include "storage/rowset/rowset_writer_context.h"
-#include "storage/schema.h"
 #include "storage/segment/segment.h"
 #include "storage/segment/segment_writer.h"
 #include "storage/storage_engine.h"
@@ -84,9 +84,8 @@ void SegcompactionWorker::init_mem_tracker(const RowsetWriterContext& rowset_wri
 
 Status SegcompactionWorker::_get_segcompaction_reader(
         SegCompactionCandidatesSharedPtr segments, TabletSharedPtr tablet,
-        std::shared_ptr<Schema> schema, OlapReaderStatistics* stat,
-        RowSourcesBuffer& row_sources_buf, bool is_key, std::vector<uint32_t>& return_columns,
-        std::vector<uint32_t>& key_group_cluster_key_idxes,
+        DenseReadSchemaSPtr schema, OlapReaderStatistics* stat, RowSourcesBuffer& row_sources_buf,
+        bool is_key, std::vector<uint32_t>& key_group_cluster_key_idxes,
         std::unique_ptr<VerticalBlockReader>* reader) {
     const auto& ctx = _writer->_context;
     bool record_rowids = need_convert_delete_bitmap() && is_key;
@@ -132,7 +131,7 @@ Status SegcompactionWorker::_get_segcompaction_reader(
     // no reader_params.version shouldn't break segcompaction
     reader_params.tablet_schema = ctx.tablet_schema;
     reader_params.tablet = tablet;
-    reader_params.return_columns = return_columns;
+    reader_params.read_schema = std::move(schema);
     reader_params.is_key_column_group = is_key;
     reader_params.use_page_cache = false;
     reader_params.record_rowids = record_rowids;
@@ -304,12 +303,12 @@ Status SegcompactionWorker::_do_compact_segments(SegCompactionCandidatesSharedPt
 
         writer->clear();
         RETURN_IF_ERROR(writer->init(column_ids, is_key));
-        auto schema = std::make_shared<Schema>(ctx.tablet_schema->columns(), column_ids);
+        DenseReadSchemaSPtr schema =
+                DORIS_TRY(DenseReadSchema::create(*ctx.tablet_schema, column_ids));
         OlapReaderStatistics reader_stats;
         std::unique_ptr<VerticalBlockReader> reader;
-        auto s =
-                _get_segcompaction_reader(segments, tablet, schema, &reader_stats, row_sources_buf,
-                                          is_key, column_ids, key_group_cluster_key_idxes, &reader);
+        auto s = _get_segcompaction_reader(segments, tablet, schema, &reader_stats, row_sources_buf,
+                                           is_key, key_group_cluster_key_idxes, &reader);
         if (UNLIKELY(reader == nullptr || !s.ok())) {
             return Status::Error<SEGCOMPACTION_INIT_READER>(
                     "failed to get segcompaction reader. err: {}", s.to_string());

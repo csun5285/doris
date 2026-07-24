@@ -112,7 +112,7 @@ struct ColumnPredicateInfo {
 
 class SegmentIterator : public RowwiseIterator {
 public:
-    SegmentIterator(std::shared_ptr<Segment> segment, SchemaSPtr schema);
+    SegmentIterator(std::shared_ptr<Segment> segment, DenseReadSchemaSPtr schema);
     ~SegmentIterator() override;
 
     [[nodiscard]] Status init_iterators();
@@ -125,7 +125,7 @@ public:
     [[nodiscard]] Status current_block_row_locations(
             std::vector<RowLocation>* block_row_locations) override;
 
-    const Schema& schema() const override { return *_schema; }
+    const DenseReadSchema& schema() const override { return *_schema; }
     Segment& segment() { return *_segment; }
     StorageReadOptions& storage_read_options() { return _opts; }
     uint64_t data_id() const override { return _segment->id(); }
@@ -210,7 +210,6 @@ private:
     uint32_t segment_id() const { return _segment->id(); }
     uint32_t num_rows() const { return _segment->num_rows(); }
 
-    [[nodiscard]] Status _seek_columns(const std::vector<ColumnId>& column_ids, rowid_t pos);
     // read `nrows` of columns specified by `column_ids` into `block` at `row_offset`.
     // for vectorization implementation
     [[nodiscard]] Status _read_columns(const std::vector<ColumnId>& column_ids,
@@ -243,16 +242,6 @@ private:
         SCOPED_RAW_TIMER(&_opts.stats->output_col_ns);
         for (auto cid : column_ids) {
             int block_cid = _schema->column_index(cid);
-            // Only the additional deleted filter condition need to materialize column be at the end of the block
-            // We should not to materialize the column of query engine do not need. So here just return OK.
-            // Eg:
-            //      `delete from table where a = 10;`
-            //      `select b from table;`
-            // a column only effective in segment iterator, the block from query engine only contain the b column.
-            // so the `block_cid >= data.size()` is true
-            if (block_cid >= block->columns()) {
-                continue;
-            }
             DataTypePtr storage_type = _segment->get_data_type_of(*_schema->column(cid), _opts);
             if (storage_type && !storage_type->equals(*block->get_by_position(block_cid).type)) {
                 // Do additional cast
@@ -347,7 +336,7 @@ private:
 
     std::shared_ptr<Segment> _segment;
     // read schema from scanner
-    SchemaSPtr _schema;
+    DenseReadSchemaSPtr _schema;
     // storage type schema related to _schema, since column in segment may be different with type in _schema
     std::vector<IndexFieldNameAndTypePair> _storage_name_and_type;
     // vector idx -> column iterarator
@@ -423,6 +412,8 @@ private:
     // row schema of the key to seek
     // only used in `_get_row_ranges_by_keys`
     std::unique_ptr<Schema> _seek_schema;
+    // Dense read positions corresponding one-to-one with _seek_schema fields.
+    std::vector<ColumnId> _seek_read_positions;
     // used to binary search the rowid for a given key
     // only used in `_get_row_ranges_by_keys`
     MutableColumns _seek_block;

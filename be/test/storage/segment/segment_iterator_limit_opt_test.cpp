@@ -22,9 +22,12 @@
 #include "core/column/column_vector.h"
 #include "core/data_type/data_type_number.h"
 #include "gtest/gtest.h"
+#include "storage/dense_read_schema.h"
 #include "storage/olap_common.h"
+#include "storage/olap_tuple.h"
 #include "storage/predicate/block_column_predicate.h"
 #include "storage/predicate/null_predicate.h"
+#include "storage/row_cursor.h"
 #include "storage/tablet/tablet_schema.h"
 
 #if defined(__clang__)
@@ -78,7 +81,9 @@ protected:
         for (uint32_t cid = 0; cid < read_column_ids.size(); ++cid) {
             read_column_ids[cid] = cid;
         }
-        _read_schema = std::make_shared<Schema>(_tablet_schema->columns(), read_column_ids);
+        auto read_schema_result = DenseReadSchema::create(*_tablet_schema, read_column_ids);
+        ASSERT_TRUE(read_schema_result.has_value()) << read_schema_result.error().to_string();
+        _read_schema = read_schema_result.value();
     }
 
     // Build a SegmentIterator with minimal opts for _can_opt_limit_reads() testing.
@@ -92,7 +97,7 @@ protected:
     }
 
     std::shared_ptr<TabletSchema> _tablet_schema;
-    SchemaSPtr _read_schema;
+    DenseReadSchemaSPtr _read_schema;
     OlapReaderStatistics _stats;
 };
 
@@ -206,6 +211,37 @@ TEST_F(SegmentIteratorLimitOptTest, column_predicate_passed_index) {
     iter->_column_predicate_index_exec_status[0][pred] = true;
 
     EXPECT_TRUE(iter->_can_opt_limit_reads());
+}
+
+TEST(SegmentIteratorSeekTest, MapsLegacyKeyCidsIntoReorderedDenseSchema) {
+    TabletSchemaPB schema_pb;
+    schema_pb.set_keys_type(KeysType::DUP_KEYS);
+    for (const std::string& name : {"k0", "k1"}) {
+        auto* column = schema_pb.add_column();
+        column->set_unique_id(-1);
+        column->set_name(name);
+        column->set_type("INT");
+        column->set_is_key(true);
+        column->set_is_nullable(false);
+    }
+
+    auto tablet_schema = std::make_shared<TabletSchema>();
+    tablet_schema->init_from_pb(schema_pb);
+    auto read_schema_result = DenseReadSchema::create(*tablet_schema, {1, 0});
+    ASSERT_TRUE(read_schema_result.has_value()) << read_schema_result.error().to_string();
+
+    OlapTuple lower_tuple;
+    lower_tuple.add_field(Field::create_field<TYPE_INT>(1));
+    lower_tuple.add_field(Field::create_field<TYPE_INT>(2));
+    RowCursor lower_key;
+    ASSERT_TRUE(lower_key.init(tablet_schema, lower_tuple).ok());
+
+    SegmentIterator iter(nullptr, read_schema_result.value());
+    iter._opts.tablet_schema = tablet_schema;
+    StorageReadOptions::KeyRange key_range(&lower_key, true, nullptr, false);
+    ASSERT_TRUE(iter._prepare_seek(key_range).ok());
+
+    EXPECT_EQ((std::vector<uint32_t> {1, 0}), iter._seek_read_positions);
 }
 
 } // namespace doris::segment_v2

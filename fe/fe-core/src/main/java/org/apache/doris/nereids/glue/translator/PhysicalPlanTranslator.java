@@ -38,6 +38,8 @@ import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.OlapTable;
+import org.apache.doris.catalog.OlapTableWrapper;
+import org.apache.doris.catalog.RowBinlogTableWrapper;
 import org.apache.doris.catalog.TableIf;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.Pair;
@@ -104,6 +106,7 @@ import org.apache.doris.nereids.trees.expressions.OrderExpression;
 import org.apache.doris.nereids.trees.expressions.SessionVarGuardExpr;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
+import org.apache.doris.nereids.trees.expressions.StatementScopeIdGenerator;
 import org.apache.doris.nereids.trees.expressions.WindowFrame;
 import org.apache.doris.nereids.trees.expressions.functions.Udf;
 import org.apache.doris.nereids.trees.expressions.functions.agg.AggregateFunction;
@@ -235,6 +238,7 @@ import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.qe.SessionVariable;
 import org.apache.doris.statistics.StatisticConstants;
 import org.apache.doris.tablefunction.TableValuedFunctionIf;
+import org.apache.doris.thrift.TBinlogScanType;
 import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TPushAggOp;
 import org.apache.doris.thrift.TResultSinkType;
@@ -874,8 +878,52 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         return computePhysicalOlapScan(olapScan, context);
     }
 
+    /**
+     * LogicalOlapScan intentionally omits row-binlog BEFORE columns so they cannot participate in
+     * name binding or SELECT *. Add them only to the physical scan tuple, in storage schema order.
+     */
+    private List<Slot> buildPhysicalOlapScanSlots(PhysicalOlapScan olapScan) {
+        List<Slot> logicalSlots = olapScan.getOutput();
+        if (!(olapScan.getTable() instanceof RowBinlogTableWrapper)
+                || !olapScan.getScanParams().isPresent()
+                || !olapScan.getScanParams().get().incrementalRead()) {
+            return logicalSlots;
+        }
+
+        RowBinlogTableWrapper wrapper = (RowBinlogTableWrapper) olapScan.getTable();
+        TBinlogScanType scanType = OlapScanNode.parseBinlogScanType(
+                olapScan.getScanParams().get(), wrapper.getOriginTable());
+        if (scanType == TBinlogScanType.APPEND_ONLY || scanType == TBinlogScanType.NONE) {
+            return logicalSlots;
+        }
+
+        Map<String, Slot> logicalSlotByName = logicalSlots.stream()
+                .filter(SlotReference.class::isInstance)
+                .map(SlotReference.class::cast)
+                .filter(slot -> slot.getOriginalColumn().isPresent())
+                .collect(Collectors.toMap(Slot::getName, slot -> slot, (left, right) -> left));
+        List<Slot> physicalSlots = new ArrayList<>();
+        Set<ExprId> addedExprIds = Sets.newHashSet();
+        for (Column column : wrapper.getBaseSchema(true)) {
+            Slot logicalSlot = logicalSlotByName.get(column.getName());
+            if (logicalSlot != null) {
+                physicalSlots.add(logicalSlot);
+                addedExprIds.add(logicalSlot.getExprId());
+            } else if (column.getName().startsWith(Column.BINLOG_BEFORE_PREFIX)) {
+                physicalSlots.add(SlotReference.fromColumn(StatementScopeIdGenerator.newExprId(),
+                        wrapper, column, olapScan.qualified()));
+            }
+        }
+        for (Slot logicalSlot : logicalSlots) {
+            if (addedExprIds.add(logicalSlot.getExprId())) {
+                physicalSlots.add(logicalSlot);
+            }
+        }
+        return physicalSlots;
+    }
+
     private PlanFragment computePhysicalOlapScan(PhysicalOlapScan olapScan, PlanTranslatorContext context) {
-        List<Slot> slots = olapScan.getOutput();
+        List<Slot> slots = buildPhysicalOlapScanSlots(olapScan);
         OlapTable olapTable = olapScan.getTable();
         // generate real output tuple
         TupleDescriptor tupleDescriptor = generateTupleDesc(slots, olapTable, context);
@@ -899,6 +947,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
 
         OlapScanNode olapScanNode = new OlapScanNode(context.nextPlanNodeId(), tupleDescriptor, "OlapScanNode",
                 context.getScanContext());
+        olapScanNode.setScanSchemaLayoutVersion(OlapScanNode.ALIGNED_SCAN_SCHEMA_LAYOUT_VERSION);
         olapScanNode.setNereidsId(olapScan.getId());
         context.getNereidsIdToPlanNodeIdMap().put(olapScan.getId(), olapScanNode.getId());
         olapScanNode.setDistributeExprLists(getDistributeExpr(olapScan));
@@ -2937,6 +2986,11 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                 .map(context::findSlotRef).filter(Objects::nonNull).map(SlotRef::getSlotId)
                 .collect(Collectors.toSet());
 
+        // Lazy-slot pruning happens before the parent project gets a chance to preserve storage
+        // dependencies. Keep merge keys, sequence columns, and snapshot TSO slots while the full
+        // scan tuple is still available.
+        preserveStorageSemanticSlots(olapScanNode, scanIds);
+        preserveExtraStorageKeySlots(olapScanNode, scanIds);
         olapScanNode.getTupleDesc().getSlots().removeIf(slot -> !scanIds.contains(slot.getId()));
         context.createSlotDesc(olapScanNode.getTupleDesc(), lazyScan.getRowId());
         for (Slot slot : lazyScan.getOutput()) {
@@ -3020,6 +3074,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             requiredWithVirtualColumns.addAll(virtualColumnInputSlotIds);
         }
         if (scanNode instanceof OlapScanNode) {
+            preserveStorageSemanticSlots((OlapScanNode) scanNode, requiredWithVirtualColumns);
             preserveExtraStorageKeySlots((OlapScanNode) scanNode, requiredWithVirtualColumns);
         }
         // Find the smallest column, for count(*) or other situation that slot is empty after prune
@@ -3056,6 +3111,125 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
                 requiredSlotIds.add(slot.getId());
             }
         }
+    }
+
+    /**
+     * Add columns required by storage merge semantics to the physical scan tuple. These slots are
+     * deliberately separate from {@code extra_key_column_slot_ids}: storage semantic dependencies
+     * must always read their real values.
+     */
+    private void preserveStorageSemanticSlots(OlapScanNode scanNode, Set<SlotId> requiredSlotIds) {
+        if (scanNode.getOlapTable() instanceof RowBinlogTableWrapper
+                && scanNode.getScanParams() != null
+                && scanNode.getScanParams().incrementalRead()) {
+            preserveRowBinlogSemanticSlots(scanNode, requiredSlotIds);
+            return;
+        }
+        if (scanNode.getOlapTable() instanceof OlapTableWrapper
+                && !(scanNode.getOlapTable() instanceof RowBinlogTableWrapper)) {
+            preserveSnapshotCommitTsoSlot(scanNode, requiredSlotIds);
+        }
+        preserveMergeSequenceSlots(scanNode, requiredSlotIds);
+    }
+
+    private void preserveSnapshotCommitTsoSlot(OlapScanNode scanNode, Set<SlotId> requiredSlotIds) {
+        SlotDescriptor commitTsoSlot = scanNode.getTupleDesc().getSlots().stream()
+                .filter(slot -> slot.getColumn() != null
+                        && slot.getColumn().getName().equals(Column.COMMIT_TSO_COL))
+                .findFirst()
+                .orElse(null);
+        Preconditions.checkState(commitTsoSlot != null,
+                "commit TSO slot is missing from snapshot scan tuple");
+        preserveStorageSlot(scanNode, commitTsoSlot, requiredSlotIds);
+    }
+
+    private void preserveRowBinlogSemanticSlots(OlapScanNode scanNode, Set<SlotId> requiredSlotIds) {
+        RowBinlogTableWrapper wrapper = (RowBinlogTableWrapper) scanNode.getOlapTable();
+        TBinlogScanType scanType = OlapScanNode.parseBinlogScanType(
+                scanNode.getScanParams(), wrapper.getOriginTable());
+        if (scanType == TBinlogScanType.NONE) {
+            return;
+        }
+
+        List<SlotDescriptor> scanSlots = scanNode.getTupleDesc().getSlots();
+        Map<String, SlotDescriptor> slotByName = scanSlots.stream()
+                .filter(slot -> slot.getColumn() != null)
+                .collect(Collectors.toMap(slot -> slot.getColumn().getName(), slot -> slot));
+
+        preserveStorageSlot(scanNode, slotByName.get(Column.BINLOG_TSO_COL), requiredSlotIds);
+        preserveStorageSlot(scanNode, slotByName.get(Column.BINLOG_OPERATION_COL), requiredSlotIds);
+        if (scanType == TBinlogScanType.APPEND_ONLY) {
+            return;
+        }
+
+        Set<SlotId> requestedSlots = Sets.newHashSet(requiredSlotIds);
+        for (SlotDescriptor slot : scanSlots) {
+            Column column = slot.getColumn();
+            if (column != null && column.isKey()) {
+                preserveStorageSlot(scanNode, slot, requiredSlotIds);
+            }
+        }
+        preserveStorageSlot(scanNode, slotByName.get(Column.BINLOG_LSN_COL), requiredSlotIds);
+
+        for (SlotDescriptor slot : scanSlots) {
+            Column column = slot.getColumn();
+            if (column == null || column.isKey() || !requestedSlots.contains(slot.getId())
+                    || isRowBinlogInternalColumn(column)) {
+                continue;
+            }
+            preserveStorageSlot(scanNode,
+                    slotByName.get(Column.generateBeforeColName(column.getName())), requiredSlotIds);
+        }
+    }
+
+    private boolean isRowBinlogInternalColumn(Column column) {
+        String columnName = column.getName();
+        return columnName.startsWith(Column.BINLOG_BEFORE_PREFIX)
+                || columnName.equals(Column.BINLOG_LSN_COL)
+                || columnName.equals(Column.BINLOG_OPERATION_COL)
+                || columnName.equals(Column.BINLOG_TSO_COL);
+    }
+
+    private void preserveMergeSequenceSlots(OlapScanNode scanNode, Set<SlotId> requiredSlotIds) {
+        if (!shouldPreserveStorageKeySlots(scanNode)) {
+            return;
+        }
+
+        List<SlotDescriptor> scanSlots = scanNode.getTupleDesc().getSlots();
+        Set<String> sequenceColumnNames = Sets.newHashSet();
+        boolean requiresSequenceColumn = false;
+        Map<String, List<String>> columnSeqMapping = scanNode.getOlapTable().getColumnSeqMapping();
+        for (SlotDescriptor slot : scanSlots) {
+            Column column = slot.getColumn();
+            if (column == null || column.isKey() || column.isSequenceColumn()
+                    || !requiredSlotIds.contains(slot.getId())) {
+                continue;
+            }
+            requiresSequenceColumn = true;
+            for (Map.Entry<String, List<String>> entry : columnSeqMapping.entrySet()) {
+                if (entry.getValue().stream().anyMatch(column.getName()::equalsIgnoreCase)) {
+                    sequenceColumnNames.add(entry.getKey());
+                }
+            }
+        }
+
+        for (SlotDescriptor slot : scanSlots) {
+            Column column = slot.getColumn();
+            if (column == null) {
+                continue;
+            }
+            if ((requiresSequenceColumn && column.isSequenceColumn())
+                    || sequenceColumnNames.stream().anyMatch(column.getName()::equalsIgnoreCase)) {
+                preserveStorageSlot(scanNode, slot, requiredSlotIds);
+            }
+        }
+    }
+
+    private void preserveStorageSlot(OlapScanNode scanNode, SlotDescriptor slot,
+            Set<SlotId> requiredSlotIds) {
+        Preconditions.checkNotNull(slot, "storage semantic dependency slot is missing");
+        requiredSlotIds.add(slot.getId());
+        scanNode.addStorageSemanticDependencySlot(slot);
     }
 
     private boolean shouldPreserveStorageKeySlots(OlapScanNode scanNode) {

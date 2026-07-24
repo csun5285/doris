@@ -21,6 +21,7 @@
 
 #include "common/logging.h"
 #include "common/status.h"
+#include "storage/dense_read_schema.h"
 #include "storage/index/index_file_reader.h"
 #include "storage/index/index_file_writer.h"
 #include "storage/index/inverted/inverted_index_desc.h"
@@ -564,8 +565,8 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
             OlapReaderStatistics stats;
             read_options.stats = &stats;
             read_options.tablet_schema = output_rowset_schema;
-            std::shared_ptr<Schema> schema =
-                    std::make_shared<Schema>(output_rowset_schema->columns(), return_columns);
+            DenseReadSchemaSPtr schema =
+                    DORIS_TRY(DenseReadSchema::create(*output_rowset_schema, return_columns));
             std::unique_ptr<RowwiseIterator> iter;
             auto res = seg_ptr->new_iterator(schema, read_options, &iter);
             DBUG_EXECUTE_IF("IndexBuilder::handle_single_rowset_create_iterator_error", {
@@ -578,7 +579,7 @@ Status IndexBuilder::handle_single_rowset(RowsetMetaSharedPtr output_rowset_meta
                 return Status::Error<ErrorCode::ROWSET_READER_INIT>(res.to_string());
             }
 
-            auto block = Block::create_unique(output_rowset_schema->create_block(return_columns));
+            auto block = Block::create_unique(schema->create_block());
             while (true) {
                 auto status = iter->next_batch(block.get());
                 DBUG_EXECUTE_IF("IndexBuilder::handle_single_rowset_iterator_next_batch_error", {
