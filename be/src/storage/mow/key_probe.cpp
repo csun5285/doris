@@ -21,7 +21,6 @@
 #include "common/config.h"
 #include "common/logging.h"
 #include "service/point_query_executor.h"
-#include "storage/key/row_key_encoder.h"
 #include "storage/partial_update_info.h"
 #include "storage/tablet/base_tablet.h"
 #include "storage/tablet/tablet_meta.h"
@@ -141,7 +140,7 @@ Result<PrevSeqProbe> MowKeyProbe::probe_previous_seq_value(
 }
 
 void MowKeyProbe::maybe_invalidate_row_cache(int64_t tablet_id, const TabletSchema& schema,
-                                             DataWriteType write_type, const std::string& key) {
+                                             DataWriteType write_type, const Slice& key) {
     // Just invalid row cache for simplicity, since the rowset is not visible at present. If we
     // update/insert cache, if load failed rowset will not be visible but cached data will be
     // visible, and lead to inconsistency.
@@ -150,19 +149,6 @@ void MowKeyProbe::maybe_invalidate_row_cache(int64_t tablet_id, const TabletSche
         // invalidate cache
         RowCache::instance()->erase({tablet_id, key});
     }
-}
-
-std::string encode_mow_key_invalidate_cache(
-        const RowKeyEncoder& key_encoder, const std::vector<IOlapColumnDataAccessor*>& key_columns,
-        const IOlapColumnDataAccessor* seq_column, size_t pos, bool row_has_seq, int64_t tablet_id,
-        const TabletSchema& schema, DataWriteType write_type) {
-    std::string key = key_encoder.full_encode_primary_keys(key_columns, pos);
-    // the row cache uses the key without the seq as its key, so invalidate before the suffix
-    MowKeyProbe::maybe_invalidate_row_cache(tablet_id, schema, write_type, key);
-    if (row_has_seq) {
-        key_encoder.append_seq_suffix(&key, seq_column, pos);
-    }
-    return key;
 }
 
 } // namespace doris::segment_v2

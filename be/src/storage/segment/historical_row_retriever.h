@@ -17,8 +17,11 @@
 
 #pragma once
 
+#include <span>
+
 #include "common/status.h"
 #include "core/block/block.h"
+#include "core/block/column_with_type_and_name.h"
 #include "storage/olap_define.h"
 #include "storage/olap_utils.h"
 #include "storage/partial_update_info.h"
@@ -63,20 +66,18 @@ protected:
 
 class PrimaryKeyModelRowRetriever : public HistoricalRowRetriever {
 public:
-    // Out of line: _row_fetcher/_key_encoder are held by unique_ptr to types this header only
-    // forward-declares.
+    // Out of line: _row_fetcher/_key_encoder are held by unique_ptr to types
+    // this header only forward-declares.
     PrimaryKeyModelRowRetriever();
     ~PrimaryKeyModelRowRetriever() override;
     Status init(const HistoricalRowRetrieverContext& context) override;
 
-    Status prepare_lookup_plan_from_source_columns(
-            const std::vector<IOlapColumnDataAccessor*>& key_columns,
-            const IOlapColumnDataAccessor* seq_column, std::shared_ptr<MowContext> mow_context) {
-        _key_columns = key_columns;
-        _seq_column = seq_column;
-        _mow_context = mow_context;
-        return Status::OK();
-    }
+    // The source block the lookup encodes its keys out of, held so it outlives
+    // the lookup. `block_cids[position]` is the schema column id at that block
+    // position; an empty layout is a block in source schema order, which is
+    // everything but a fixed partial update's narrow block.
+    Status prepare_lookup_plan(Block block, std::span<const uint32_t> block_cids,
+                               std::shared_ptr<MowContext> mow_context);
 
     Status retrieve_historical_row(const Int8* delete_sign_column_data, size_t row_pos,
                                    size_t num_rows) override;
@@ -102,11 +103,11 @@ private:
     Status _fill_old_delete_signs(const Block& old_value_block,
                                   const std::map<uint32_t, uint32_t>& read_index, size_t num_rows);
 
-    // get key_columns, seq column, delete data from source block, prepare for searching historial data
-    std::vector<IOlapColumnDataAccessor*> _key_columns;
-    const IOlapColumnDataAccessor* _seq_column = nullptr;
-    std::shared_ptr<MowContext> _mow_context;
+    // The block the lookup encodes its keys out of, held by value so it stays
+    // alive for as long as the lookup needs it.
+    Block _lookup_block;
     std::unique_ptr<RowKeyEncoder> _key_encoder;
+    std::shared_ptr<MowContext> _mow_context;
 
     // owns the rowset pins and the read plan fed by the probe outcomes
     std::unique_ptr<HistoricalRowFetcher> _row_fetcher;

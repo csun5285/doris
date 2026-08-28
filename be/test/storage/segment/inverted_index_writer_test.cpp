@@ -53,6 +53,7 @@
 #include "storage/index/snii/snii_index_writer.h"
 #include "storage/index/snii/stats/snii_stats_provider.h"
 #include "storage/iterator/olap_data_convertor.h"
+#include "storage/segment/array_index_input_helper.h"
 #include "storage/tablet/tablet_schema.h"
 #include "storage/types.h"
 #include "util/defer_op.h"
@@ -1322,10 +1323,9 @@ TEST_F(InvertedIndexWriterTest, ArrayValuesWithNulls) {
     Block block;
     block.insert(type_and_name);
 
-    // Use OlapBlockDataConvertor to convert (reference inverted_index_array_test.cpp)
-    OlapBlockDataConvertor convertor(tablet_schema.get(), {0});
-    convertor.set_source_content(&block, 0, block.rows());
-    auto [st, accessor] = convertor.convert_column_data(0);
+    // Convert through the storage encoder (reference inverted_index_array_test.cpp)
+    ArrayIndexInput array_input;
+    auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
     EXPECT_EQ(st, Status::OK());
 
     // The conversion result is an array of 4 pointers:
@@ -1333,10 +1333,9 @@ TEST_F(InvertedIndexWriterTest, ArrayValuesWithNulls) {
     //   [1]: Offsets array pointer
     //   [2]: Nested item data pointer
     //   [3]: Nested nullmap pointer
-    const auto* data_ptr = reinterpret_cast<const uint64_t*>(accessor->get_data());
-    const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(data_ptr[1]);
-    const void* item_data = reinterpret_cast<const void*>(data_ptr[2]);
-    const auto* item_nullmap = reinterpret_cast<const uint8_t*>(data_ptr[3]);
+    const auto* offsets_ptr = array_input.offsets_ptr();
+    const void* item_data = array_input.item_data;
+    const auto* item_nullmap = array_input.item_nullmap;
 
     // Get the length of the subfield
     auto field_size = field_type_size(field->get_sub_column(0).type());
@@ -1347,7 +1346,7 @@ TEST_F(InvertedIndexWriterTest, ArrayValuesWithNulls) {
     EXPECT_TRUE(status.ok()) << status;
 
     // Add array nulls
-    const auto* null_map = accessor->get_nullmap();
+    const auto* null_map = array_input.outer_nullmap;
     status = column_writer->add_array_nulls(null_map, block.rows());
     EXPECT_TRUE(status.ok()) << status;
 
@@ -1453,10 +1452,9 @@ TEST_F(InvertedIndexWriterTest, NumericArrayWithErrorConditions) {
     Block block;
     block.insert(type_and_name);
 
-    // Use OlapBlockDataConvertor to convert (reference inverted_index_array_test.cpp)
-    OlapBlockDataConvertor convertor(tablet_schema.get(), {0});
-    convertor.set_source_content(&block, 0, block.rows());
-    auto [st, accessor] = convertor.convert_column_data(0);
+    // Convert through the storage encoder (reference inverted_index_array_test.cpp)
+    ArrayIndexInput array_input;
+    auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
     EXPECT_EQ(st, Status::OK());
 
     // The conversion result is an array of 4 pointers:
@@ -1464,10 +1462,9 @@ TEST_F(InvertedIndexWriterTest, NumericArrayWithErrorConditions) {
     //   [1]: Offsets array pointer
     //   [2]: Nested item data pointer
     //   [3]: Nested nullmap pointer
-    const auto* data_ptr = reinterpret_cast<const uint64_t*>(accessor->get_data());
-    const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(data_ptr[1]);
-    const void* item_data = reinterpret_cast<const void*>(data_ptr[2]);
-    const auto* item_nullmap = reinterpret_cast<const uint8_t*>(data_ptr[3]);
+    const auto* offsets_ptr = array_input.offsets_ptr();
+    const void* item_data = array_input.item_data;
+    const auto* item_nullmap = array_input.item_nullmap;
 
     // Get the length of the subfield
     auto field_size = field_type_size(field->get_sub_column(0).type());
@@ -1478,7 +1475,7 @@ TEST_F(InvertedIndexWriterTest, NumericArrayWithErrorConditions) {
     EXPECT_TRUE(status.ok()) << status;
 
     // Add array nulls
-    const auto* null_map = accessor->get_nullmap();
+    const auto* null_map = array_input.outer_nullmap;
     status = column_writer->add_array_nulls(null_map, block.rows());
     EXPECT_TRUE(status.ok()) << status;
 

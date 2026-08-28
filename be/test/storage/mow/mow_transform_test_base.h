@@ -625,43 +625,33 @@ protected:
         return std::make_shared<MowContext>(version, /*txn_id=*/1, rsids, rowsets, delete_bitmap);
     }
 
-    // Encodes a primary key (single INT key column = `k`) the same way the fill stage does: convert
-    // a 1-row block then RowKeyEncoder::full_encode_primary_keys.
-    std::string encode_key(const TabletSchemaSPtr& schema, const RowKeyEncoder& encoder,
-                           int32_t k) {
-        Block block = schema->create_storage_block({0});
+    // Encodes a primary key (single INT key column = `k`) the same way the fill stage does:
+    // prepare a 1-row block then RowKeyEncoder::encode_primary_key.
+    std::string encode_key(const TabletSchemaSPtr& schema, RowKeyEncoder& encoder, int32_t k) {
+        const std::vector<uint32_t> block_cids {0};
+        Block block = schema->create_storage_block(block_cids);
         block.get_by_position(0).column->assert_mutable()->insert_data(
                 reinterpret_cast<const char*>(&k), sizeof(int32_t));
-        OlapBlockDataConvertor convertor;
-        convertor.add_column_data_convertor(schema->column(0));
-        convertor.set_source_content(&block, 0, 1);
-        auto [st, accessor] = convertor.convert_column_data(0);
-        EXPECT_TRUE(st.ok()) << st;
-        std::vector<IOlapColumnDataAccessor*> key_columns {accessor};
-        return encoder.full_encode_primary_keys(key_columns, 0);
+        std::string key;
+        EXPECT_TRUE(encoder.set_block_layout(block_cids).ok());
+        EXPECT_TRUE(encoder.encode_primary_key(block, 0, /*with_seq_col=*/false, &key).ok());
+        return key;
     }
 
     // Encodes a primary key plus its sequence suffix (incoming seq value), the way
     // MowKeyProbe::probe expects when key_has_seq_suffix is true.
-    std::string encode_key_with_seq(const TabletSchemaSPtr& schema, const RowKeyEncoder& encoder,
+    std::string encode_key_with_seq(const TabletSchemaSPtr& schema, RowKeyEncoder& encoder,
                                     int32_t k, int32_t seq) {
-        const auto seq_idx = static_cast<uint32_t>(schema->sequence_col_idx());
-        Block block = schema->create_storage_block({0, seq_idx});
+        const std::vector<uint32_t> block_cids {0,
+                                                static_cast<uint32_t>(schema->sequence_col_idx())};
+        Block block = schema->create_storage_block(block_cids);
         block.get_by_position(0).column->assert_mutable()->insert_data(
                 reinterpret_cast<const char*>(&k), sizeof(int32_t));
         block.get_by_position(1).column->assert_mutable()->insert_data(
                 reinterpret_cast<const char*>(&seq), sizeof(int32_t));
-        OlapBlockDataConvertor convertor;
-        convertor.add_column_data_convertor(schema->column(0));
-        convertor.add_column_data_convertor(schema->column(seq_idx));
-        convertor.set_source_content(&block, 0, 1);
-        auto [st0, key_acc] = convertor.convert_column_data(0);
-        EXPECT_TRUE(st0.ok()) << st0;
-        auto [st1, seq_acc] = convertor.convert_column_data(1);
-        EXPECT_TRUE(st1.ok()) << st1;
-        std::vector<IOlapColumnDataAccessor*> key_columns {key_acc};
-        std::string key = encoder.full_encode_primary_keys(key_columns, 0);
-        encoder.append_seq_suffix(&key, seq_acc, 0);
+        std::string key;
+        EXPECT_TRUE(encoder.set_block_layout(block_cids).ok());
+        EXPECT_TRUE(encoder.encode_primary_key(block, 0, /*with_seq_col=*/true, &key).ok());
         return key;
     }
 

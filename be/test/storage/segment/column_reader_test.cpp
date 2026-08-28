@@ -403,10 +403,15 @@ TEST_F(ColumnReaderTest, NullMapOnlyReadBySparseRowidsAcrossPages) {
         st = writer->init();
         ASSERT_TRUE(st.ok()) << st.to_string();
 
+        auto values = ColumnInt32::create();
+        auto nulls = ColumnUInt8::create();
         for (int32_t i = 0; i < 6; ++i) {
-            st = writer->append(i == 2, &i);
-            ASSERT_TRUE(st.ok()) << st.to_string();
+            values->insert_value(i);
+            nulls->insert_value((i == 2) ? 1 : 0);
         }
+        auto src = ColumnNullable::create(std::move(values), std::move(nulls));
+        st = writer->append(*src, 0, 6);
+        ASSERT_TRUE(st.ok()) << st.to_string();
 
         st = writer->finish();
         ASSERT_TRUE(st.ok()) << st.to_string();

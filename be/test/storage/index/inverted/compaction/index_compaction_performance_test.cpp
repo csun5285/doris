@@ -86,7 +86,9 @@ protected:
         config::enable_ordered_data_compaction = true;
         config::total_permits_for_compaction_score = 1000000;
         config::inverted_index_ram_dir_enable = true;
-        config::string_type_length_soft_limit_bytes = 1048576;
+        // back to the default, not the 1MB this used to be: leaving it lowered
+        // makes every later test in this binary reject strings over 1MB
+        config::string_type_length_soft_limit_bytes = 10485760;
     }
 
     DISABLED_IndexCompactionPerformanceTest() = default;

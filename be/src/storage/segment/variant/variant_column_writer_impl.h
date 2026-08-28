@@ -36,8 +36,6 @@
 
 namespace doris {
 
-class OlapBlockDataConvertor;
-struct VariantColumnData;
 namespace segment_v2 {
 
 class ColumnWriter;
@@ -53,8 +51,7 @@ public:
     virtual Status init(const TabletColumn* parent_column, int bucket_num, int& column_id,
                         const ColumnWriterOptions& opts, SegmentFooterPB* footer) = 0;
     virtual Status append_shredded(const TabletColumn* parent_column,
-                                   const VariantShreddedColumns& shredded, size_t num_rows,
-                                   OlapBlockDataConvertor* converter) = 0;
+                                   const VariantShreddedColumns& shredded, size_t num_rows) = 0;
     virtual Status finish() = 0;
     virtual Status write_data() = 0;
     virtual Status write_ordinal_index() = 0;
@@ -71,8 +68,7 @@ public:
     Status init(const TabletColumn* parent_column, int bucket_num, int& column_id,
                 const ColumnWriterOptions& opts, SegmentFooterPB* footer) override;
     Status append_shredded(const TabletColumn* parent_column,
-                           const VariantShreddedColumns& shredded, size_t num_rows,
-                           OlapBlockDataConvertor* converter) override;
+                           const VariantShreddedColumns& shredded, size_t num_rows) override;
     Status finish() override;
     Status write_data() override;
     Status write_ordinal_index() override;
@@ -106,7 +102,7 @@ private:
 //
 // Invariants:
 // - `_first_column_id` stores the column_id assigned to the first sparse meta created by init*
-//   and is used to bind converter column ids deterministically.
+//   and is used to bind subcolumn ids deterministically.
 // - Single mode: convert src.get_sparse_column() and append to the single writer, populate
 //   out_stats (merged) and write stats to meta
 // - Bucket mode: materialize N ColumnMap temporaries, distribute entries by
@@ -118,8 +114,7 @@ public:
     Status init(const TabletColumn* parent_column, int bucket_num, int& column_id,
                 const ColumnWriterOptions& opts, SegmentFooterPB* footer) override;
     Status append_shredded(const TabletColumn* parent_column,
-                           const VariantShreddedColumns& shredded, size_t num_rows,
-                           OlapBlockDataConvertor* converter) override;
+                           const VariantShreddedColumns& shredded, size_t num_rows) override;
     uint64_t estimate_buffer_size() const override;
     Status finish() override;
     Status write_data() override;
@@ -161,8 +156,9 @@ public:
     bool is_finalized() const;
     bool has_streaming_compaction_writer_for_test() const;
 
-    Status append_data(const uint8_t** ptr, size_t num_rows);
-    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows);
+    // null_map is one byte per row (1 = null) or nullptr when the input column
+    // is not nullable.
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows, const uint8_t* null_map);
 
     Status finish();
     Status write_data();
@@ -189,8 +185,6 @@ public:
 
     Status init() override;
     bool is_finalized() const { return _is_finalized; }
-
-    Status append_data(const uint8_t** ptr, size_t num_rows) override;
 
     uint64_t estimate_buffer_size() override;
 
@@ -219,7 +213,10 @@ public:
     Status append_nulls(size_t num_rows) override {
         return Status::NotSupported("variant writer can not append_nulls");
     }
-    Status append_nullable(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows) override;
+
+    // Splits off the null map and hands the column down as the
+    // column the variant writers read.
+    Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
 
     Status finish_current_page() override {
         return Status::NotSupported("variant writer has no data, can not finish_current_page");
@@ -228,19 +225,16 @@ public:
     Status finalize();
 
 private:
-    Status _append(const uint8_t* null_map, const uint8_t** ptr, size_t num_rows);
-    Status _ensure_input_format(const VariantColumnData& column);
+    Status _append(const IColumn& column, size_t row_pos, size_t num_rows, const uint8_t* null_map);
+    Status _ensure_input_format(const IColumn& column);
     Status _initialize_v2_shredder();
     Status _write_materialized_subcolumns(const TabletColumn& parent_column,
-                                          const VariantShreddedColumns& shredded,
-                                          OlapBlockDataConvertor* converter, size_t num_rows,
+                                          const VariantShreddedColumns& shredded, size_t num_rows,
                                           int& column_id);
     Status _write_doc_value_column(const TabletColumn& parent_column, int bucket_value,
                                    const ColumnPtr& source_column, const DataTypePtr& source_type,
-                                   OlapBlockDataConvertor* converter, int column_id,
-                                   size_t num_rows);
-    Status _finalize_v2(const TabletColumn& parent_column, size_t num_rows,
-                        OlapBlockDataConvertor* converter, int& column_id);
+                                   int column_id, size_t num_rows);
+    Status _finalize_v2(const TabletColumn& parent_column, size_t num_rows, int& column_id);
 
     ordinal_t _next_rowid = 0;
     VariantWriterInputFormat _input_format = VariantWriterInputFormat::UNSET;

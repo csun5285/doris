@@ -18,6 +18,7 @@
 #include "storage/transform/partial_update_fill.h"
 
 #include <algorithm>
+#include <numeric>
 
 #include "common/cast_set.h"
 #include "common/config.h"
@@ -51,18 +52,17 @@ void maybe_add_sentinel_mark(TransformExecContext& ctx) {
 // The probe + read-plan loop of the fixed fill. For each row: encode the key
 // (with seq suffix when the load provides one), probe the load's rowset
 // snapshot, register a brand-new key on a miss, then either flag the row for
-// default fill or plan a whole-row historical read.
+// default fill or plan a whole-row historical read. Keys are encoded out of
+// `full_block`, which the load's own `block` only fills part of.
 Status probe_and_plan(TransformExecContext& ctx, RowKeyEncoder& key_encoder, MowKeyProbe& probe,
                       HistoricalRowFetcher& fetcher,
                       const std::vector<RowsetSharedPtr>& specified_rowsets,
                       std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches,
-                      const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                      IOlapColumnDataAccessor* seq_column, const signed char* delete_signs,
-                      size_t num_rows, Block* block, std::vector<bool>& use_default_or_null_flag,
-                      bool& has_default_or_nullable) {
+                      const Block& full_block, bool have_input_seq_column,
+                      const signed char* delete_signs, size_t num_rows, Block* block,
+                      std::vector<bool>& use_default_or_null_flag, bool& has_default_or_nullable) {
     const TabletSchema& schema = *ctx.tablet_schema;
     PartialUpdateInfo& info = *ctx.partial_update_info;
-    const bool have_input_seq_column = (seq_column != nullptr);
 
     use_default_or_null_flag.reserve(num_rows);
     for (size_t pos = 0; pos < num_rows; ++pos) {
@@ -70,10 +70,9 @@ Status probe_and_plan(TransformExecContext& ctx, RowKeyEncoder& key_encoder, Mow
         // invalidates every row's cache entry under the same conditions, so the
         // erase runs once there, not twice.
         // one block == one fresh segment: segment_pos == block row index
-        std::string key = key_encoder.full_encode_primary_keys(key_columns, pos);
-        if (have_input_seq_column) {
-            key_encoder.append_seq_suffix(&key, seq_column, pos);
-        }
+        std::string key;
+        RETURN_IF_ERROR(
+                key_encoder.encode_primary_key(full_block, pos, have_input_seq_column, &key));
         const bool have_delete_sign = (delete_signs != nullptr && delete_signs[pos] != 0);
         ProbeOutcome out = DORIS_TRY(probe.probe(key, /*segment_pos=*/pos, have_input_seq_column,
                                                  have_delete_sign, specified_rowsets,
@@ -101,9 +100,7 @@ Status probe_and_plan_flexible(TransformExecContext& ctx, RowKeyEncoder& key_enc
                                MowKeyProbe& probe, HistoricalRowFetcher& fetcher,
                                const std::vector<RowsetSharedPtr>& specified_rowsets,
                                std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches,
-                               const std::vector<IOlapColumnDataAccessor*>& key_columns,
-                               IOlapColumnDataAccessor* seq_column, const signed char* delete_signs,
-                               size_t num_rows, Block* block,
+                               const signed char* delete_signs, size_t num_rows, Block* block,
                                std::vector<BitmapValue>& skip_bitmaps,
                                std::vector<bool>& use_default_or_null_flag,
                                bool& has_default_or_nullable) {
@@ -121,10 +118,8 @@ Status probe_and_plan_flexible(TransformExecContext& ctx, RowKeyEncoder& key_enc
         // erase runs once there, not twice.
         // one block == one fresh segment: segment_pos == block row index
         const bool row_has_seq = schema_has_seq && !skip_bitmaps[pos].contains(seq_col_unique_id);
-        std::string key = key_encoder.full_encode_primary_keys(key_columns, pos);
-        if (row_has_seq) {
-            key_encoder.append_seq_suffix(&key, seq_column, pos);
-        }
+        std::string key;
+        RETURN_IF_ERROR(key_encoder.encode_primary_key(*block, pos, row_has_seq, &key));
         const bool have_delete_sign =
                 !skip_bitmaps[pos].contains(delete_sign_col_unique_id) && delete_signs[pos] != 0;
         ProbeOutcome out =
@@ -165,25 +160,18 @@ Status FixedPartialUpdateFillStage::apply(TransformExecContext& ctx, Block* bloc
     const auto& update_cids = info.update_cids;
     Block full_block = widen_partial_update_block(schema, update_cids, *block);
 
-    // 2. key-only conversion with stage-local encoder + convertor
+    // 2. key-only conversion with a stage-local key encoder. full_block is in
+    //    schema order, the encoder's default layout, so it picks its own key
+    //    columns out of it.
     RowKeyEncoder key_encoder(schema, /*mow=*/true);
-    // FE forbids partial update on mow tables with cluster keys; everything
-    // below assumes sort keys == schema keys
-    DCHECK_EQ(key_encoder.num_sort_key_columns(), schema.num_key_columns());
-    OlapBlockDataConvertor convertor;
-    convertor.resize(schema.num_columns());
-    std::vector<IOlapColumnDataAccessor*> key_columns;
-    RETURN_IF_ERROR(convert_key_columns(convertor, schema, full_block, num_rows, key_columns));
-    IOlapColumnDataAccessor* seq_column = nullptr;
-    if (schema.has_sequence_col()) {
-        const auto seq_cid = cast_set<uint32_t>(schema.sequence_col_idx());
-        const bool have_input_seq_column =
-                std::find(update_cids.begin(), update_cids.end(), seq_cid) != update_cids.end();
-        if (have_input_seq_column) {
-            RETURN_IF_ERROR(convert_seq_column(convertor, schema, full_block, seq_cid, num_rows,
-                                               seq_column));
-        }
-    }
+    // FE forbids partial update on mow tables with cluster keys, so the sort key view and the
+    // primary key view hold the same columns here.
+    // full_block holds the sequence column whether or not the update sets it,
+    // so the encoder cannot tell; the update's own column list can.
+    const bool have_input_seq_column =
+            schema.has_sequence_col() &&
+            std::find(update_cids.begin(), update_cids.end(),
+                      cast_set<uint32_t>(schema.sequence_col_idx())) != update_cids.end();
 
     // 3. probe every key against the load's rowset snapshot
     DBUG_EXECUTE_IF("VerticalSegmentWriter._append_block_with_partial_content.sleep",
@@ -200,8 +188,9 @@ Status FixedPartialUpdateFillStage::apply(TransformExecContext& ctx, Block* bloc
     std::vector<bool> use_default_or_null_flag;
     const auto* delete_signs = BaseTablet::get_delete_sign_column_data(full_block, num_rows);
     RETURN_IF_ERROR(probe_and_plan(ctx, key_encoder, probe, fetcher, specified_rowsets,
-                                   segment_caches, key_columns, seq_column, delete_signs, num_rows,
-                                   block, use_default_or_null_flag, has_default_or_nullable));
+                                   segment_caches, full_block, have_input_seq_column, delete_signs,
+                                   num_rows, block, use_default_or_null_flag,
+                                   has_default_or_nullable));
 
     maybe_add_sentinel_mark(ctx);
 
@@ -234,9 +223,8 @@ Status FlexiblePartialUpdateFillStage::apply(TransformExecContext& ctx, Block* b
 
     // encoder shared with the aggregator, which owns the conversion code
     RowKeyEncoder key_encoder(schema, /*mow=*/true);
-    // FE forbids partial update on mow tables with cluster keys; everything
-    // below assumes sort keys == schema keys
-    DCHECK_EQ(key_encoder.num_sort_key_columns(), schema.num_key_columns());
+    // FE forbids partial update on mow tables with cluster keys, so the sort key view and the
+    // primary key view hold the same columns here.
 
     MowKeyProbe probe = MowKeyProbe::for_partial_update(
             ctx.tablet.get(), tablet_schema.get(), schema.has_sequence_col(), ctx.mow_context,
@@ -251,12 +239,8 @@ Status FlexiblePartialUpdateFillStage::apply(TransformExecContext& ctx, Block* b
             block, num_rows, specified_rowsets, segment_caches));
     num_rows = block->rows();
 
-    // 2. encode primary key columns + sequence column
-    std::vector<IOlapColumnDataAccessor*> key_columns;
-    RETURN_IF_ERROR(aggregator.convert_pk_columns(block, 0, num_rows, key_columns));
-    IOlapColumnDataAccessor* seq_column = nullptr;
-    RETURN_IF_ERROR(aggregator.convert_seq_column(block, 0, num_rows, seq_column));
-
+    // 2. the probe loop encodes keys straight out of `block`, which is in
+    //    schema order -- the encoder's default layout
     std::vector<BitmapValue>* skip_bitmaps =
             &get_mutable_skip_bitmap_column(block, skip_bitmap_col_idx)->get_data();
     const auto* delete_signs = BaseTablet::get_delete_sign_column_data(*block, num_rows);
@@ -274,10 +258,9 @@ Status FlexiblePartialUpdateFillStage::apply(TransformExecContext& ctx, Block* b
     // 3. probe every key against the load's rowset snapshot
     bool has_default_or_nullable = false;
     std::vector<bool> use_default_or_null_flag;
-    RETURN_IF_ERROR(probe_and_plan_flexible(ctx, key_encoder, probe, fetcher, specified_rowsets,
-                                            segment_caches, key_columns, seq_column, delete_signs,
-                                            num_rows, block, *skip_bitmaps,
-                                            use_default_or_null_flag, has_default_or_nullable));
+    RETURN_IF_ERROR(probe_and_plan_flexible(
+            ctx, key_encoder, probe, fetcher, specified_rowsets, segment_caches, delete_signs,
+            num_rows, block, *skip_bitmaps, use_default_or_null_flag, has_default_or_nullable));
 
     maybe_add_sentinel_mark(ctx);
 

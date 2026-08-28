@@ -1410,12 +1410,7 @@ protected:
         columns[0] = std::move(variant_col);
         block.set_columns(std::move(columns));
 
-        auto converter = std::make_unique<OlapBlockDataConvertor>();
-        converter->add_column_data_convertor(_tablet_schema->column(0));
-        converter->set_source_content(&block, 0, jsons.size());
-        auto [status, accessor] = converter->convert_column_data(0);
-        RETURN_IF_ERROR(status);
-        return writer->append(accessor->get_nullmap(), accessor->get_data(), jsons.size());
+        return writer->append(*block.get_by_position(0).column, 0, jsons.size());
     }
 
     Status read_root_rows(const SegmentFooterPB& footer, const std::string& file_path,
@@ -1582,16 +1577,8 @@ protected:
         RETURN_IF_ERROR(ColumnWriter::create(opts, &column, file_writer.get(), &writer));
         RETURN_IF_ERROR(writer->init());
 
-        auto converter = std::make_unique<OlapBlockDataConvertor>();
-        converter->add_column_data_convertor(column);
         const auto append_batch = [&](size_t row_pos, size_t rows) -> Status {
-            RETURN_IF_ERROR(converter->set_source_content_with_specifid_column(
-                    {source, source_type, column.name()}, row_pos, rows, 0));
-            auto [convert_status, accessor] = converter->convert_column_data(0);
-            RETURN_IF_ERROR(convert_status);
-            DCHECK(accessor != nullptr);
-            RETURN_IF_ERROR(writer->append(accessor->get_nullmap(), accessor->get_data(), rows));
-            converter->clear_source_content(0);
+            RETURN_IF_ERROR(writer->append(*source, row_pos, rows));
             return Status::OK();
         };
         if (first_batch_rows > 0 && first_batch_rows < num_rows) {
@@ -1656,16 +1643,8 @@ protected:
         DORIS_CHECK(dynamic_cast<VariantSubcolumnWriter*>(writer.get()) != nullptr);
         RETURN_IF_ERROR(writer->init());
 
-        OlapBlockDataConvertor converter;
-        converter.add_column_data_convertor(column);
         const auto append_batch = [&](size_t row_pos, size_t rows) -> Status {
-            RETURN_IF_ERROR(converter.set_source_content_with_specifid_column(
-                    {source, source_type, column.name()}, row_pos, rows, 0));
-            auto [convert_status, accessor] = converter.convert_column_data(0);
-            RETURN_IF_ERROR(convert_status);
-            DORIS_CHECK(accessor != nullptr);
-            RETURN_IF_ERROR(writer->append(accessor->get_nullmap(), accessor->get_data(), rows));
-            converter.clear_source_content(0);
+            RETURN_IF_ERROR(writer->append(*source, row_pos, rows));
             return Status::OK();
         };
         if (first_batch_rows > 0 && first_batch_rows < source->size()) {
@@ -1891,12 +1870,7 @@ protected:
             result->doc_value_entries = parsed_variant.size();
         }
 
-        auto converter = std::make_unique<OlapBlockDataConvertor>();
-        converter->add_column_data_convertor(parent_column);
-        converter->set_source_content(&block, 0, num_rows);
-        auto [convert_status, accessor] = converter->convert_column_data(0);
-        RETURN_IF_ERROR(convert_status);
-        RETURN_IF_ERROR(writer->append(accessor->get_nullmap(), accessor->get_data(), num_rows));
+        RETURN_IF_ERROR(writer->append(*block.get_by_position(0).column, 0, num_rows));
 
         RETURN_IF_ERROR(writer->finish());
         RETURN_IF_ERROR(writer->write_data());
@@ -2874,14 +2848,7 @@ TEST_P(VariantSpecializedWriterCompatibilityTest,
 
     const auto append_range = [&](const ColumnPtr& batch_source, const DataTypePtr& batch_type,
                                   size_t row_pos, size_t num_rows) -> Status {
-        auto converter = std::make_unique<OlapBlockDataConvertor>();
-        converter->add_column_data_convertor(writer_column);
-        RETURN_IF_ERROR(converter->set_source_content_with_specifid_column(
-                {batch_source, batch_type, writer_column.name()}, row_pos, num_rows, 0));
-        auto [status, accessor] = converter->convert_column_data(0);
-        RETURN_IF_ERROR(status);
-        DORIS_CHECK(accessor != nullptr);
-        return writer->append(accessor->get_nullmap(), accessor->get_data(), num_rows);
+        return writer->append(*batch_source, row_pos, num_rows);
     };
 
     const Status first_append_status = append_range(source, source_type, 0, 2);
@@ -3834,18 +3801,12 @@ TEST_F(VariantColumnWriterReaderTest, test_write_data_normal) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     auto path_with_size =
             VariantUtil::fill_object_column_with_test_data(column_object, 1000, &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 1000).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 1000).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -4456,17 +4417,11 @@ TEST_F(VariantColumnWriterReaderTest, test_write_doc_and_read_hierarchical_doc) 
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write doc-value-only data into variant
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     fill_variant_column_with_doc_value_only(column_object, kRows, &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(parent_column);
-    olap_data_convertor->set_source_content(&block, 0, kRows);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), kRows).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, kRows).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -4645,17 +4600,11 @@ TEST_F(VariantColumnWriterReaderTest,
     EXPECT_TRUE(ColumnWriter::create(opts, &parent_column, file_writer.get(), &writer).ok());
     EXPECT_TRUE(writer->init().ok());
 
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     fill_variant_column_with_doc_value_only(column_object, kRows, &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(parent_column);
-    olap_data_convertor->set_source_content(&block, 0, kRows);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), kRows).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, kRows).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -4808,17 +4757,11 @@ TEST_F(VariantColumnWriterReaderTest, test_write_doc_materialized_v3_uses_v3_enc
     EXPECT_TRUE(ColumnWriter::create(opts, &parent_column, file_writer.get(), &writer).ok());
     EXPECT_TRUE(writer->init().ok());
 
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     fill_variant_column_with_doc_value_only(column_object, kRows, &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(parent_column);
-    olap_data_convertor->set_source_content(&block, 0, kRows);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), kRows).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, kRows).ok());
     EXPECT_TRUE(writer->finish().ok());
     EXPECT_TRUE(writer->write_data().ok());
     EXPECT_TRUE(writer->write_ordinal_index().ok());
@@ -4917,17 +4860,11 @@ TEST_F(VariantColumnWriterReaderTest, test_read_doc_compact_from_doc_value_bucke
     EXPECT_TRUE(ColumnWriter::create(opts, &parent_column, file_writer.get(), &writer).ok());
     EXPECT_TRUE(writer->init().ok());
 
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     fill_variant_column_with_doc_value_only(column_object, kRows, &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(parent_column);
-    olap_data_convertor->set_source_content(&block, 0, kRows);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), kRows).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, kRows).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -5128,9 +5065,7 @@ TEST_P(VariantSpecializedWriterCompatibilityTest, doc_compact_writer_round_trip)
     // 6. append and write
     const auto append_batch = [](ColumnWriter* writer, const ColumnPtr& source, size_t row_pos,
                                  size_t num_rows) {
-        VariantColumnData column_data {source.get(), row_pos};
-        const auto* data = reinterpret_cast<const uint8_t*>(&column_data);
-        return writer->append_data(&data, num_rows);
+        return writer->append(*source, row_pos, num_rows);
     };
     constexpr size_t kFirstBatchRows = 73;
     ASSERT_TRUE(append_batch(root_writer.get(), root_variant, 0, kFirstBatchRows).ok());
@@ -5304,11 +5239,7 @@ TEST_F(VariantColumnWriterReaderTest, test_doc_compact_sparse_write_array_gap) {
     MutableColumnPtr bucket_variant = ColumnVariantV2::create();
     VariantUtil::insert_json_rows(*assert_cast<ColumnVariantV2*>(bucket_variant.get()), *strings);
 
-    auto bucket_data = std::make_unique<VariantColumnData>();
-    bucket_data->column_data = bucket_variant.get();
-    bucket_data->row_pos = 0;
-    const auto* data = reinterpret_cast<const uint8_t*>(bucket_data.get());
-    EXPECT_TRUE(doc_compact_writer->append_data(&data, kRows).ok());
+    EXPECT_TRUE(doc_compact_writer->append(*bucket_variant, 0, kRows).ok());
 
     EXPECT_TRUE(doc_compact_writer->finish().ok());
     EXPECT_TRUE(doc_compact_writer->write_data().ok());
@@ -5402,11 +5333,7 @@ TEST_F(VariantColumnWriterReaderTest, test_write_doc_sparse_write_array_gap_and_
     MutableColumnPtr variant_column = ColumnVariantV2::create();
     VariantUtil::insert_json_rows(assert_cast<ColumnVariantV2&>(*variant_column), *strings);
 
-    auto variant_data = std::make_unique<VariantColumnData>();
-    variant_data->column_data = variant_column.get();
-    variant_data->row_pos = 0;
-    const auto* data = reinterpret_cast<const uint8_t*>(variant_data.get());
-    EXPECT_TRUE(writer->append_data(&data, kRows).ok());
+    EXPECT_TRUE(writer->append(*variant_column, 0, kRows).ok());
 
     EXPECT_TRUE(writer->finish().ok());
     EXPECT_TRUE(writer->write_data().ok());
@@ -5547,13 +5474,7 @@ TEST_F(VariantColumnWriterReaderTest, test_storage_parse_kv_write_materialized_a
             assert_cast<const ColumnVariantV2&>(*block.get_by_position(0).column);
     EXPECT_EQ(parsed_variant.size(), kRows);
 
-    auto converter = std::make_unique<OlapBlockDataConvertor>();
-    converter->add_column_data_convertor(parent_column);
-    converter->set_source_content(&block, 0, kRows);
-    auto [convert_status, accessor] = converter->convert_column_data(0);
-    ASSERT_TRUE(convert_status.ok()) << convert_status.to_string();
-    ASSERT_NE(accessor, nullptr);
-    ASSERT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), kRows).ok());
+    ASSERT_TRUE(writer->append(*block.get_by_position(0).column, 0, kRows).ok());
 
     ASSERT_TRUE(writer->finish().ok());
     ASSERT_TRUE(writer->write_data().ok());
@@ -6060,11 +5981,7 @@ TEST_F(VariantColumnWriterReaderTest,
     VariantUtil::insert_json_rows(*variant_column, *strings);
     ASSERT_EQ(variant_column->size(), kRows);
 
-    auto variant_data = std::make_unique<VariantColumnData>();
-    variant_data->column_data = variant_column.get();
-    variant_data->row_pos = 0;
-    const auto* data = reinterpret_cast<const uint8_t*>(variant_data.get());
-    ASSERT_TRUE(writer->append_data(&data, kRows).ok());
+    ASSERT_TRUE(writer->append(*variant_column, 0, kRows).ok());
 
     ASSERT_TRUE(writer->finish().ok());
     ASSERT_TRUE(writer->write_data().ok());
@@ -6199,11 +6116,7 @@ TEST_F(VariantColumnWriterReaderTest,
     auto variant_column = ColumnVariantV2::create();
     VariantUtil::insert_json_rows(*variant_column, *strings);
 
-    auto variant_data = std::make_unique<VariantColumnData>();
-    variant_data->column_data = variant_column.get();
-    variant_data->row_pos = 0;
-    const auto* data = reinterpret_cast<const uint8_t*>(variant_data.get());
-    ASSERT_TRUE(writer->append_data(&data, kRows).ok());
+    ASSERT_TRUE(writer->append(*variant_column, 0, kRows).ok());
 
     // `finish()` materializes the extracted BF-enabled subcolumn and creates its inner scalar
     // writer. The debug point verifies that the writer receives the parent bloom filter index fpp.
@@ -6266,18 +6179,12 @@ TEST_F(VariantColumnWriterReaderTest, test_write_data_advanced) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     auto path_with_size = VariantUtil::fill_object_column_with_nested_test_data(column_object, 1000,
                                                                                 &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 1000).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 1000).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -6480,12 +6387,7 @@ TEST_F(VariantColumnWriterReaderTest, test_write_sub_index) {
     auto column_object = VariantUtil::construct_basic_varint_column();
     auto vw = assert_cast<VariantColumnWriter*>(writer.get());
 
-    std::unique_ptr<VariantColumnData> _variant_column_data = std::make_unique<VariantColumnData>();
-    // pass the real ColumnVariantV2 pointer instead of address of shared_ptr
-    _variant_column_data->column_data = column_object.get();
-    _variant_column_data->row_pos = 0;
-    const uint8_t* data = (const uint8_t*)_variant_column_data.get();
-    st = vw->append_data(&data, 10);
+    st = vw->append(*column_object, 0, 10);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -6830,7 +6732,6 @@ TEST_F(VariantColumnWriterReaderTest, test_write_data_nullable) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     // here is nullable variant
     auto block = _tablet_schema->create_storage_block();
     std::unordered_map<int, std::string> inserted_jsonstr;
@@ -6850,15 +6751,8 @@ TEST_F(VariantColumnWriterReaderTest, test_write_data_nullable) {
         }
     }
     // sort path_with_size with value
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    // variant do not implement append_nulls
     auto* vw = assert_cast<VariantColumnWriter*>(writer.get());
-    const auto* ptr = (const uint8_t*)accessor->get_data();
-    st = vw->append_nullable(accessor->get_nullmap(), &ptr, 1000);
+    st = vw->append(*block.get_by_position(0).column, 0, 1000);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -7050,22 +6944,14 @@ TEST_F(VariantColumnWriterReaderTest, test_write_data_nullable_without_finalize)
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     // here is nullable variant
     auto block = _tablet_schema->create_storage_block();
     std::unordered_map<int, std::string> inserted_jsonstr;
     variant_util::PathToNoneNullValues path_with_size;
     fill_nullable_variant_block(&block, &inserted_jsonstr, &path_with_size);
     // sort path_with_size with value
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    // variant do not implement append_nulls
     auto* vw = assert_cast<VariantColumnWriter*>(writer.get());
-    const auto* ptr = (const uint8_t*)accessor->get_data();
-    st = vw->append_nullable(accessor->get_nullmap(), &ptr, 1000);
+    st = vw->append(*block.get_by_position(0).column, 0, 1000);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->write_data();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -7130,22 +7016,14 @@ TEST_F(VariantColumnWriterReaderTest, test_write_bm_with_finalize) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     // here is nullable variant
     auto block = _tablet_schema->create_storage_block();
     std::unordered_map<int, std::string> inserted_jsonstr;
     variant_util::PathToNoneNullValues path_with_size;
     fill_nullable_variant_block(&block, &inserted_jsonstr, &path_with_size);
     // sort path_with_size with value
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    // variant do not implement append_nulls
     auto* vw = assert_cast<VariantColumnWriter*>(writer.get());
-    const auto* ptr = (const uint8_t*)accessor->get_data();
-    st = vw->append_nullable(accessor->get_nullmap(), &ptr, 1000);
+    st = vw->append(*block.get_by_position(0).column, 0, 1000);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->_impl->finalize();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -7210,22 +7088,14 @@ TEST_F(VariantColumnWriterReaderTest, test_write_bf_with_finalize) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     // here is nullable variant
     auto block = _tablet_schema->create_storage_block();
     std::unordered_map<int, std::string> inserted_jsonstr;
     variant_util::PathToNoneNullValues path_with_size;
     fill_nullable_variant_block(&block, &inserted_jsonstr, &path_with_size);
     // sort path_with_size with value
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    // variant do not implement append_nulls
     auto* vw = assert_cast<VariantColumnWriter*>(writer.get());
-    const auto* ptr = (const uint8_t*)accessor->get_data();
-    st = vw->append_nullable(accessor->get_nullmap(), &ptr, 1000);
+    st = vw->append(*block.get_by_position(0).column, 0, 1000);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->_impl->finalize();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -7292,22 +7162,14 @@ TEST_F(VariantColumnWriterReaderTest, test_write_zm_with_finalize) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     // here is nullable variant
     auto block = _tablet_schema->create_storage_block();
     std::unordered_map<int, std::string> inserted_jsonstr;
     variant_util::PathToNoneNullValues path_with_size;
     fill_nullable_variant_block(&block, &inserted_jsonstr, &path_with_size);
     // sort path_with_size with value
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    // variant do not implement append_nulls
     auto* vw = assert_cast<VariantColumnWriter*>(writer.get());
-    const auto* ptr = (const uint8_t*)accessor->get_data();
-    st = vw->append_nullable(accessor->get_nullmap(), &ptr, 1000);
+    st = vw->append(*block.get_by_position(0).column, 0, 1000);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->_impl->finalize();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -7374,22 +7236,14 @@ TEST_F(VariantColumnWriterReaderTest, test_write_inverted_with_finalize) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     // here is nullable variant
     auto block = _tablet_schema->create_storage_block();
     std::unordered_map<int, std::string> inserted_jsonstr;
     variant_util::PathToNoneNullValues path_with_size;
     fill_nullable_variant_block(&block, &inserted_jsonstr, &path_with_size);
     // sort path_with_size with value
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    // variant do not implement append_nulls
     auto* vw = assert_cast<VariantColumnWriter*>(writer.get());
-    const auto* ptr = (const uint8_t*)accessor->get_data();
-    st = vw->append_nullable(accessor->get_nullmap(), &ptr, 1000);
+    st = vw->append(*block.get_by_position(0).column, 0, 1000);
     EXPECT_TRUE(st.ok()) << st.msg();
     st = vw->_impl->finalize();
     EXPECT_TRUE(st.ok()) << st.msg();
@@ -7454,7 +7308,6 @@ TEST_F(VariantColumnWriterReaderTest, test_no_sub_in_sparse_column) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     auto type_string = std::make_shared<DataTypeString>();
@@ -7473,12 +7326,7 @@ TEST_F(VariantColumnWriterReaderTest, test_no_sub_in_sparse_column) {
     VariantUtil::insert_json_rows(*assert_cast<ColumnVariantV2*>(column_object.get()),
                                   *column_string);
 
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 1000).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 1000).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -7588,7 +7436,6 @@ TEST_F(VariantColumnWriterReaderTest, test_prefix_in_sub_and_sparse) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     auto type_string = std::make_shared<DataTypeString>();
@@ -7619,12 +7466,7 @@ TEST_F(VariantColumnWriterReaderTest, test_prefix_in_sub_and_sparse) {
     VariantUtil::insert_json_rows(*assert_cast<ColumnVariantV2*>(column_object.get()),
                                   *column_string);
 
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 1000).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 1000).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -7742,7 +7584,6 @@ void test_write_variant_column(StorageEngine* _engine_ref, std::string _absolute
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. make test data for column_object
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     VariantUtil::VariantStringCreator simple_column_object = [](ColumnString* column_string,
@@ -7765,12 +7606,7 @@ void test_write_variant_column(StorageEngine* _engine_ref, std::string _absolute
         VariantUtil::fill_variant_column(column_object, 1000, 1, true, &simple_column_object);
     }
     EXPECT_TRUE(column_object->size() == 1000);
-    olap_data_convertor->add_column_data_convertor(tablet_column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 1000).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 1000).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -8069,19 +7905,13 @@ TEST_F(VariantColumnWriterReaderTest, test_read_with_checksum) {
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write data
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     variant_util::PathToNoneNullValues path_with_size;
     std::unordered_map<int, std::string> inserted_jsonstr;
     fill_object_column_with_test_data(column_object, 1000, &inserted_jsonstr, &path_with_size);
 
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 1000);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 1000).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 1000).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();
@@ -8228,18 +8058,12 @@ TEST_F(VariantColumnWriterReaderTest, test_concurrent_load_external_meta_and_get
     EXPECT_TRUE(assert_cast<VariantColumnWriter*>(writer.get()) != nullptr);
 
     // 5. write a small amount of data to build some subcolumns
-    auto olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
     auto block = _tablet_schema->create_storage_block();
     auto column_object = (*std::move(block.get_by_position(0).column)).mutate();
     std::unordered_map<int, std::string> inserted_jsonstr;
     auto path_with_size =
             VariantUtil::fill_object_column_with_test_data(column_object, 200, &inserted_jsonstr);
-    olap_data_convertor->add_column_data_convertor(column);
-    olap_data_convertor->set_source_content(&block, 0, 200);
-    auto [result, accessor] = olap_data_convertor->convert_column_data(0);
-    EXPECT_TRUE(result.ok());
-    EXPECT_TRUE(accessor != nullptr);
-    EXPECT_TRUE(writer->append(accessor->get_nullmap(), accessor->get_data(), 200).ok());
+    EXPECT_TRUE(writer->append(*block.get_by_position(0).column, 0, 200).ok());
     st = writer->finish();
     EXPECT_TRUE(st.ok()) << st.msg();
     st = writer->write_data();

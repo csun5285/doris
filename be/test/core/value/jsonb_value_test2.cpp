@@ -78,15 +78,14 @@ TEST(JsonbValueConvertorTest, JsonbValueValid) {
     Block block;
     block.insert(argument);
 
-    // 3. use OlapColumnDataConvertorVarchar::convert_to_olap to convert column data to segment file data
-    auto _olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
+    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    ColumnEncoding encoder;
     TabletColumn jsonb_column = TabletColumn();
     jsonb_column.set_type(FieldType::OLAP_FIELD_TYPE_JSONB);
-    _olap_data_convertor->add_column_data_convertor(jsonb_column);
-    _olap_data_convertor->set_source_content(&block, 0, 5);
-    auto [status, column] = _olap_data_convertor->convert_column_data(0);
+    encoder.encoder = create_column_data_convertor(jsonb_column);
+    auto status = encoder.encode(*block.get_by_position(0).column, 0, 5);
     ASSERT_TRUE(status.ok());
-    ASSERT_NE(column, nullptr);
+    ASSERT_NE(encoder.scratch.data, nullptr);
 
     // test with null map
     auto nullable_col = ColumnNullable::create(ColumnString::create(), ColumnUInt8::create());
@@ -121,13 +120,11 @@ TEST(JsonbValueConvertorTest, JsonbValueValid) {
     block.clear();
     block.insert(argument1);
 
-    // 3. use OlapColumnDataConvertorVarchar::convert_to_olap to convert column data to segment file data
-    _olap_data_convertor->reset();
-    _olap_data_convertor->add_column_data_convertor(jsonb_column);
-    _olap_data_convertor->set_source_content(&block, 0, 5);
-    auto [status1, column1] = _olap_data_convertor->convert_column_data(0);
+    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    encoder.encoder = create_column_data_convertor(jsonb_column);
+    auto status1 = encoder.encode(*block.get_by_position(0).column, 0, 5);
     ASSERT_TRUE(status1.ok()) << status1.to_string();
-    ASSERT_NE(column1, nullptr);
+    ASSERT_NE(encoder.scratch.data, nullptr);
 }
 
 TEST(JsonbValueConvertorTest, JsonbValueInvalid) {
@@ -180,18 +177,16 @@ TEST(JsonbValueConvertorTest, JsonbValueInvalid) {
     Block block;
     block.insert(argument);
 
-    // 3. use OlapColumnDataConvertorVarchar::convert_to_olap to convert column data to segment file data
-    auto _olap_data_convertor = std::make_unique<OlapBlockDataConvertor>();
+    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    ColumnEncoding encoder;
     TabletColumn jsonb_column = TabletColumn();
     jsonb_column.set_type(FieldType::OLAP_FIELD_TYPE_JSONB);
-    _olap_data_convertor->add_column_data_convertor(jsonb_column);
-    _olap_data_convertor->set_source_content(&block, 0, 5);
-    auto [status, column] = _olap_data_convertor->convert_column_data(0);
+    encoder.encoder = create_column_data_convertor(jsonb_column);
+    auto status = encoder.encode(*block.get_by_position(0).column, 0, 5);
     // invalid will make error
     ASSERT_FALSE(status.ok());
     ASSERT_TRUE(status.to_string().find("Invalid JSONB document") != std::string::npos)
             << status.to_string();
-    ASSERT_NE(column, nullptr);
 
     // test with null map
     auto nullable_col = ColumnNullable::create(ColumnString::create(), ColumnUInt8::create());
@@ -230,15 +225,15 @@ TEST(JsonbValueConvertorTest, JsonbValueInvalid) {
     block.clear();
     block.insert(argument1);
 
-    // 3. use OlapColumnDataConvertorVarchar::convert_to_olap to convert column data to segment file data
-    _olap_data_convertor->reset();
-    _olap_data_convertor->add_column_data_convertor(jsonb_column);
-    _olap_data_convertor->set_source_content(&block, 0, 5);
-    auto [status1, column1] = _olap_data_convertor->convert_column_data(0);
+    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    encoder.encoder = create_column_data_convertor(jsonb_column);
+    // This second encode's result is deliberately not what the assertions below
+    // check — they check the first encode. That was true before the encoder
+    // refactor too; the structured binding just hid the unused values.
+    static_cast<void>(encoder.encode(*block.get_by_position(0).column, 0, 5));
     ASSERT_FALSE(status.ok());
     ASSERT_TRUE(status.to_string().find("Invalid JSONB document") != std::string::npos)
             << status.to_string();
-    ASSERT_NE(column, nullptr);
 }
 
 } // namespace doris

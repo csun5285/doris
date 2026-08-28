@@ -253,7 +253,7 @@ public:
         auto tab_col = create_char_key(0, true, length);
         const TabletColumn* field = tab_col.get();
         // ZoneMap writer stores whatever slice bytes it receives. In production
-        // OlapColumnDataConvertorChar pads CHAR slices to the declared length
+        // CharDataConvertor pads CHAR slices to the declared length
         // before they reach the writer; from_olap_string strnlens at read time
         // so the materialized Field is always unpadded. This test passes raw
         // shorter slices directly to the writer to exercise the strnlen path.

@@ -26,11 +26,10 @@
 #include "storage/olap_common.h"
 #include "storage/rowset/rowset_fwd.h"
 #include "storage/utils.h"
+#include "util/slice.h"
 
 namespace doris {
 class BaseTablet;
-class IOlapColumnDataAccessor;
-class RowKeyEncoder;
 class TabletSchema;
 class SegmentCacheHandle;
 struct MowContext;
@@ -166,10 +165,12 @@ public:
             const std::string& key, const std::vector<RowsetSharedPtr>& specified_rowsets,
             std::vector<std::unique_ptr<SegmentCacheHandle>>& segment_caches) const;
 
-    // Erase the row-cache entry. Erase-only: the rowset isn't visible yet, so inserting could
+    // Erase the row-cache entry for one primary key. The cache is keyed by the
+    // key WITHOUT the sequence suffix -- the pk_prefix_len slice of a full
+    // entry. Erase-only: the rowset isn't visible yet, so inserting could
     // expose uncommitted data if the load fails.
     static void maybe_invalidate_row_cache(int64_t tablet_id, const TabletSchema& schema,
-                                           DataWriteType write_type, const std::string& key);
+                                           DataWriteType write_type, const Slice& key);
 
 private:
     BaseTablet* _tablet = nullptr;
@@ -180,11 +181,6 @@ private:
     uint32_t _writing_segment_id = 0;
     Policy _policy;
 };
-
-std::string encode_mow_key_invalidate_cache(
-        const RowKeyEncoder& key_encoder, const std::vector<IOlapColumnDataAccessor*>& key_columns,
-        const IOlapColumnDataAccessor* seq_column, size_t pos, bool row_has_seq, int64_t tablet_id,
-        const TabletSchema& schema, DataWriteType write_type);
 
 } // namespace segment_v2
 } // namespace doris

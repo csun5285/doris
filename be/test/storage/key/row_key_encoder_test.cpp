@@ -51,7 +51,7 @@
 //                       key contains all 17 default-converted physical key-column
 //                       types, then runs it through every relevant schema path.
 //   axis B (encodings): the full RowKeyEncoder surface - full_encode (sort
-//                       view), full_encode_primary_keys (primary view),
+//                       view), encode_primary_key (primary view),
 //                       encode_short_keys (index_length truncation), the null
 //                       value form, and byte-order == logical-order - applied
 //                       through each corresponding production schema path.
@@ -547,31 +547,34 @@ std::vector<SeqCase> seq_cases() {
 
 } // namespace
 
-// A small holder so the convertor (which the accessors point into) and the
-// source block stay alive until after the encode calls.
+// A small holder so the source block stays alive until after the encode calls:
+// the encoder reads the storage bytes it made from that block.
 class RowKeyEncoderTest : public testing::Test {
 protected:
     void build(const TabletSchemaSPtr& schema, size_t num_rows,
                const std::function<void(MutableColumns&)>& fill) {
         _schema = schema;
+        _num_rows = num_rows;
         _block = schema->create_storage_block();
         {
             auto guard = _block.mutate_columns_scoped();
             fill(guard.mutable_columns());
         }
-        _convertor = std::make_unique<OlapBlockDataConvertor>(schema.get());
-        _convertor->set_source_content(&_block, 0, num_rows);
     }
 
-    IOlapColumnDataAccessor* acc(uint32_t cid) {
-        auto [st, accessor] = _convertor->convert_column_data(cid);
-        EXPECT_TRUE(st.ok()) << st;
-        return accessor;
+    // A block holding only `cids`, in that order: what one column group of a
+    // vertical compaction hands the encoder.
+    Block column_group(const std::vector<uint32_t>& cids) const {
+        Block group;
+        for (auto cid : cids) {
+            group.insert(_block.get_by_position(cid));
+        }
+        return group;
     }
 
     TabletSchemaSPtr _schema;
+    size_t _num_rows = 0;
     Block _block;
-    std::unique_ptr<OlapBlockDataConvertor> _convertor;
 };
 
 // The all-key-types data table has all 17 current key-column types, one column
@@ -746,30 +749,10 @@ TEST_F(RowKeyEncoderTest, AllKeyTypesTable) {
                                                schema_case.has_cluster_keys));
             }
         }
-        _convertor = std::make_unique<OlapBlockDataConvertor>(_schema.get());
-        _convertor->set_source_content(&_block, 0, kAllKeyData.size());
+        _num_rows = kAllKeyData.size();
 
-        // 4. Build the data accessors and encode every row into the applicable
-        // full, primary, short-key and primary-index views.
-        std::vector<IOlapColumnDataAccessor*> primary_columns;
-        primary_columns.reserve(kNumKeyColumns);
-        for (size_t key = 0; key < kNumKeyColumns; ++key) {
-            primary_columns.push_back(acc(key));
-        }
-
-        std::vector<IOlapColumnDataAccessor*> sort_columns;
-        sort_columns.reserve(kNumKeyColumns);
-        if (schema_case.has_cluster_keys) {
-            for (const auto uid : schema->cluster_key_uids()) {
-                const int32_t column = schema->field_index(static_cast<int32_t>(uid));
-                ASSERT_GE(column, 0);
-                sort_columns.push_back(acc(static_cast<uint32_t>(column)));
-            }
-        } else {
-            sort_columns = primary_columns;
-        }
-        auto short_key_columns = sort_columns;
-        short_key_columns.resize(schema_case.num_short_key_columns);
+        // 4. Encode every row into the applicable full, primary, short-key and
+        // primary-index views.
         const auto data_column_in_short_key = [&](size_t data_column) {
             if (!schema_case.has_cluster_keys) {
                 return data_column < schema_case.num_short_key_columns;
@@ -782,15 +765,7 @@ TEST_F(RowKeyEncoderTest, AllKeyTypesTable) {
             return false;
         };
 
-        IOlapColumnDataAccessor* sequence_column = nullptr;
-        if (schema_case.has_sequence) {
-            sequence_column = acc(static_cast<uint32_t>(schema->sequence_col_idx()));
-        }
-
         RowKeyEncoder encoder(*_schema, mow);
-        ASSERT_EQ(encoder.num_sort_key_columns(), kNumKeyColumns);
-        ASSERT_EQ(sort_columns.size(), kNumKeyColumns);
-        ASSERT_EQ(short_key_columns.size(), schema_case.num_short_key_columns);
 
         for (size_t key = 0; key < kNumKeyColumns; ++key) {
             for (size_t row = 0; row < kAllKeyData.size(); ++row) {
@@ -822,13 +797,23 @@ TEST_F(RowKeyEncoderTest, AllKeyTypesTable) {
 
         for (size_t row = 0; row < kAllKeyData.size(); ++row) {
             SCOPED_TRACE(row);
-            full_keys.push_back(encoder.full_encode(sort_columns, row));
+            std::string encoded;
+            ASSERT_TRUE(
+                    encoder.encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::Full, &encoded)
+                            .ok());
+            full_keys.push_back(encoded);
             if (schema_case.has_cluster_keys) {
-                primary_keys.push_back(encoder.full_encode_primary_keys(primary_columns, row));
+                ASSERT_TRUE(
+                        encoder.encode_primary_key(_block, row, /*with_seq_col=*/false, &encoded)
+                                .ok());
+                primary_keys.push_back(encoded);
             } else {
                 primary_keys.push_back(full_keys.back());
             }
-            short_keys.push_back(encoder.encode_short_keys(short_key_columns, row));
+            ASSERT_TRUE(encoder.encode_sort_key(_block, row,
+                                                RowKeyEncoder::KeyWidth::ShortKeyPrefix, &encoded)
+                                .ok());
+            short_keys.push_back(encoded);
 
             const size_t primary_source_row =
                     schema_case.has_cluster_keys ? kAllKeyData.size() - 1 - row : row;
@@ -836,7 +821,7 @@ TEST_F(RowKeyEncoderTest, AllKeyTypesTable) {
                 std::string primary_index_key = primary_keys.back();
                 if (schema_case.has_sequence) {
                     const size_t suffix_offset = primary_index_key.size();
-                    encoder.append_seq_suffix(&primary_index_key, sequence_column, row);
+                    ASSERT_TRUE(encoder.encode_seq_value(_block, row, &primary_index_key).ok());
                     EXPECT_EQ(primary_index_key.size(),
                               suffix_offset + 1 + kKeyColumns[kSequenceSourceColumn].length);
                     const uint8_t expected_marker =
@@ -992,23 +977,21 @@ TEST_F(RowKeyEncoderTest, AllKeyTypesTable) {
             fill_int(columns, 4, {13});
         });
 
-        std::vector<IOlapColumnDataAccessor*> primary_columns {acc(0)};
-        std::vector<IOlapColumnDataAccessor*> sort_columns {acc(1), acc(2), acc(3), acc(4)};
-        auto short_key_columns = sort_columns;
-        short_key_columns.resize(schema->num_short_key_columns());
-
         RowKeyEncoder encoder(*schema, /*mow=*/true);
         ASSERT_EQ(schema->num_key_columns(), 1);
         ASSERT_EQ(schema->cluster_key_uids().size(), 4);
         ASSERT_EQ(schema->num_short_key_columns(), 2);
-        ASSERT_EQ(primary_columns.size(), schema->num_key_columns());
-        ASSERT_EQ(sort_columns.size(), schema->cluster_key_uids().size());
-        ASSERT_EQ(short_key_columns.size(), schema->num_short_key_columns());
-        ASSERT_EQ(encoder.num_sort_key_columns(), sort_columns.size());
 
-        const std::string full_key = encoder.full_encode(sort_columns, 0);
-        const std::string primary_key = encoder.full_encode_primary_keys(primary_columns, 0);
-        const std::string short_key = encoder.encode_short_keys(short_key_columns, 0);
+        std::string full_key;
+        ASSERT_TRUE(
+                encoder.encode_sort_key(_block, 0, RowKeyEncoder::KeyWidth::Full, &full_key).ok());
+        std::string primary_key;
+        ASSERT_TRUE(
+                encoder.encode_primary_key(_block, 0, /*with_seq_col=*/false, &primary_key).ok());
+        std::string short_key;
+        ASSERT_TRUE(encoder.encode_sort_key(_block, 0, RowKeyEncoder::KeyWidth::ShortKeyPrefix,
+                                            &short_key)
+                            .ok());
         std::string primary_index_key = primary_key;
         encoder.append_rowid_suffix(&primary_index_key, 0);
 
@@ -1061,12 +1044,12 @@ TEST_F(RowKeyEncoderTest, SeqSuffix) {
             c[2]->insert_default(); // row 1: NULL sequence value
         });
         RowKeyEncoder enc(*_schema, /*mow=*/true);
-        IOlapColumnDataAccessor* seq = acc(2);
+        const auto& seq_column = *_block.get_by_position(2).column;
 
         std::string normal;
-        enc.append_seq_suffix(&normal, seq, 0);
+        ASSERT_TRUE(enc.encode_seq_value(seq_column, 0, &normal).ok());
         std::string null_suffix;
-        enc.append_seq_suffix(&null_suffix, seq, 1);
+        ASSERT_TRUE(enc.encode_seq_value(seq_column, 1, &null_suffix).ok());
         EXPECT_EQ(to_hex(normal), "02" + tc.value_hex);
         EXPECT_EQ(to_hex(null_suffix), "01" + std::string(tc.length * 2, '0'));
         EXPECT_LT(null_suffix, normal);
@@ -1110,17 +1093,27 @@ TEST_F(RowKeyEncoderTest, TimestampNsKeyEncodingAllTableModels) {
         });
 
         RowKeyEncoder encoder(*schema, schema_case.mow);
-        std::vector<IOlapColumnDataAccessor*> key_columns {acc(0)};
         std::string previous_key;
         for (size_t row = 0; row < kValues.size(); ++row) {
-            const std::string full_key = encoder.full_encode(key_columns, row);
-            const std::string short_key = encoder.encode_short_keys(key_columns, row);
+            std::string full_key;
+            ASSERT_TRUE(
+                    encoder.encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::Full, &full_key)
+                            .ok());
+            std::string short_key;
+            ASSERT_TRUE(encoder.encode_sort_key(_block, row,
+                                                RowKeyEncoder::KeyWidth::ShortKeyPrefix, &short_key)
+                                .ok());
             EXPECT_EQ(to_hex(full_key), kExpectedKeys[row]);
             EXPECT_EQ(short_key, full_key);
+            // A non-mow table has no primary key view, so its encoding is empty.
+            std::string primary_key;
+            ASSERT_TRUE(
+                    encoder.encode_primary_key(_block, row, /*with_seq_col=*/false, &primary_key)
+                            .ok());
             if (schema_case.mow) {
-                EXPECT_EQ(encoder.full_encode_primary_keys(key_columns, row), full_key);
+                EXPECT_EQ(primary_key, full_key);
             } else {
-                EXPECT_TRUE(encoder.full_encode_primary_keys({}, row).empty());
+                EXPECT_TRUE(primary_key.empty());
             }
             if (row > 0) {
                 EXPECT_LT(previous_key, full_key);
@@ -1130,9 +1123,9 @@ TEST_F(RowKeyEncoderTest, TimestampNsKeyEncodingAllTableModels) {
     }
 }
 
-// full_encode_primary_keys() is the primary key index's view. With cluster keys the segment sorts
+// encode_primary_key() is the primary key index's view. With cluster keys the segment sorts
 // by those instead, so this is where the two views come apart: the probe side must encode the
-// primary key columns, not whatever full_encode() happens to give.
+// primary key columns, not whatever encode_sort_key() happens to give.
 TEST_F(RowKeyEncoderTest, PrimaryKeyViewDiffersFromSortKeyViewWithClusterKeys) {
     auto schema = different_key_count_schema(); // key uid 0, cluster keys uid 1..4
     build(schema, 2, [&](MutableColumns& c) {
@@ -1146,17 +1139,20 @@ TEST_F(RowKeyEncoderTest, PrimaryKeyViewDiffersFromSortKeyViewWithClusterKeys) {
     ASSERT_EQ(_schema->cluster_key_uids().size(), 4);
 
     RowKeyEncoder encoder(*_schema, /*mow=*/true);
-    std::vector<IOlapColumnDataAccessor*> primary_key_columns {acc(0)};
-    std::vector<IOlapColumnDataAccessor*> sort_key_columns {acc(1), acc(2), acc(3), acc(4)};
     for (size_t row = 0; row < 2; ++row) {
-        const std::string primary_key = encoder.full_encode_primary_keys(primary_key_columns, row);
+        std::string primary_key;
+        ASSERT_TRUE(
+                encoder.encode_primary_key(_block, row, /*with_seq_col=*/false, &primary_key).ok());
         EXPECT_FALSE(primary_key.empty());
-        EXPECT_NE(to_hex(encoder.full_encode(sort_key_columns, row)), to_hex(primary_key));
+        std::string sort_key;
+        ASSERT_TRUE(encoder.encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::Full, &sort_key)
+                            .ok());
+        EXPECT_NE(to_hex(sort_key), to_hex(primary_key));
     }
 }
 
 // Without cluster keys the two views coincide, and the primary-key one still has to be built --
-// that is what lets the probe side call full_encode_primary_keys() for every mow table instead of
+// that is what lets the probe side call encode_primary_key() for every mow table instead of
 // branching on the table's shape.
 TEST_F(RowKeyEncoderTest, PrimaryKeyViewEqualsSortKeyViewWithoutClusterKeys) {
     auto schema = std::make_shared<TabletSchema>();
@@ -1174,12 +1170,113 @@ TEST_F(RowKeyEncoderTest, PrimaryKeyViewEqualsSortKeyViewWithoutClusterKeys) {
     ASSERT_TRUE(_schema->cluster_key_uids().empty());
 
     RowKeyEncoder encoder(*_schema, /*mow=*/true);
-    std::vector<IOlapColumnDataAccessor*> key_columns {acc(0), acc(1)};
     for (size_t row = 0; row < 2; ++row) {
-        const std::string sort_key = encoder.full_encode(key_columns, row);
+        std::string sort_key;
+        ASSERT_TRUE(encoder.encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::Full, &sort_key)
+                            .ok());
         EXPECT_FALSE(sort_key.empty());
-        EXPECT_EQ(to_hex(encoder.full_encode_primary_keys(key_columns, row)), to_hex(sort_key));
+        std::string primary_key;
+        ASSERT_TRUE(
+                encoder.encode_primary_key(_block, row, /*with_seq_col=*/false, &primary_key).ok());
+        EXPECT_EQ(to_hex(primary_key), to_hex(sort_key));
     }
+}
+
+// A vertical compaction writes one column group at a time, so a key column's
+// position in the block it hands over is not its schema column id: here the
+// sequence column is cid 3 but sits at position 2. The block layout is what
+// closes that gap -- the same rows must encode to the same keys whichever
+// shape they arrive in.
+TEST_F(RowKeyEncoderTest, BlockLayoutMapsColumnGroupPositions) {
+    auto schema = std::make_shared<TabletSchema>();
+    schema->append_column(*create_int_key(0));
+    schema->append_column(*create_int_key(1));
+    schema->append_column(
+            *create_int_value(2, FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE));
+    schema->append_column(*make_seq_column(3, FieldType::OLAP_FIELD_TYPE_INT, sizeof(int32_t)));
+    schema->_keys_type = UNIQUE_KEYS;
+    schema->_num_short_key_columns = 1;
+    build(schema, 2, [&](MutableColumns& c) {
+        fill_int(c, 0, {1, 2});
+        fill_int(c, 1, {10, 20});
+        fill_int(c, 2, {100, 200}); // the value column the key group leaves out
+        fill_int(c, 3, {7, 8});
+    });
+    ASSERT_EQ(_schema->sequence_col_idx(), 3);
+
+    const std::vector<uint32_t> group_cids {0, 1, 3};
+    const Block group = column_group(group_cids);
+
+    RowKeyEncoder schema_order(*_schema, /*mow=*/true);
+    RowKeyEncoder group_order(*_schema, /*mow=*/true);
+    ASSERT_TRUE(group_order.set_block_layout(group_cids).ok());
+    EXPECT_TRUE(group_order.layout_has_seq_column());
+
+    for (size_t row = 0; row < 2; ++row) {
+        SCOPED_TRACE(row);
+        std::string expected;
+        std::string actual;
+        ASSERT_TRUE(
+                schema_order.encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::Full, &expected)
+                        .ok());
+        ASSERT_TRUE(group_order.encode_sort_key(group, row, RowKeyEncoder::KeyWidth::Full, &actual)
+                            .ok());
+        EXPECT_EQ(to_hex(actual), to_hex(expected));
+
+        ASSERT_TRUE(schema_order.encode_primary_key(_block, row, /*with_seq_col=*/false, &expected)
+                            .ok());
+        ASSERT_TRUE(
+                group_order.encode_primary_key(group, row, /*with_seq_col=*/false, &actual).ok());
+        EXPECT_EQ(to_hex(actual), to_hex(expected));
+
+        ASSERT_TRUE(schema_order
+                            .encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::ShortKeyPrefix,
+                                             &expected)
+                            .ok());
+        ASSERT_TRUE(group_order
+                            .encode_sort_key(group, row, RowKeyEncoder::KeyWidth::ShortKeyPrefix,
+                                             &actual)
+                            .ok());
+        EXPECT_EQ(to_hex(actual), to_hex(expected));
+
+        // The one that would silently read the value column without a layout.
+        expected.clear();
+        actual.clear();
+        ASSERT_TRUE(schema_order.encode_seq_value(_block, row, &expected).ok());
+        ASSERT_TRUE(group_order.encode_seq_value(group, row, &actual).ok());
+        EXPECT_EQ(to_hex(actual), to_hex(expected));
+    }
+}
+
+// A layout missing a key column is caught when it is set, not row by row: an
+// encoder that let it through would encode whatever column sits in its place
+// and write a corrupt index.
+TEST_F(RowKeyEncoderTest, BlockLayoutRejectsMissingKeyColumn) {
+    auto schema = std::make_shared<TabletSchema>();
+    schema->append_column(*create_int_key(0));
+    schema->append_column(*create_int_key(1));
+    schema->append_column(*make_seq_column(2, FieldType::OLAP_FIELD_TYPE_INT, sizeof(int32_t)));
+    schema->_keys_type = UNIQUE_KEYS;
+    schema->_num_short_key_columns = 1;
+    build(schema, 1, [&](MutableColumns& c) {
+        fill_int(c, 0, {1});
+        fill_int(c, 1, {10});
+        fill_int(c, 2, {7});
+    });
+
+    RowKeyEncoder encoder(*_schema, /*mow=*/true);
+    EXPECT_FALSE(encoder.set_block_layout(std::vector<uint32_t> {0, 2}).ok());
+
+    // A group with every key column but no sequence column is fine; only the
+    // sequence suffix is out of reach.
+    const std::vector<uint32_t> key_only {0, 1};
+    ASSERT_TRUE(encoder.set_block_layout(key_only).ok());
+    EXPECT_FALSE(encoder.layout_has_seq_column());
+    std::string key;
+    ASSERT_TRUE(
+            encoder.encode_sort_key(column_group(key_only), 0, RowKeyEncoder::KeyWidth::Full, &key)
+                    .ok());
+    EXPECT_FALSE(encoder.encode_seq_value(column_group(key_only), 0, &key).ok());
 }
 
 // A non-mow encoder has no primary key index to build, so it builds no primary-key view either.
@@ -1196,9 +1293,12 @@ TEST_F(RowKeyEncoderTest, NonMowBuildsNoPrimaryKeyView) {
     });
 
     RowKeyEncoder encoder(*_schema, /*mow=*/false);
-    std::vector<IOlapColumnDataAccessor*> key_columns {acc(0)};
-    EXPECT_FALSE(encoder.full_encode(key_columns, 0).empty());
-    EXPECT_TRUE(encoder.full_encode_primary_keys({}, 0).empty());
+    std::string sort_key;
+    ASSERT_TRUE(encoder.encode_sort_key(_block, 0, RowKeyEncoder::KeyWidth::Full, &sort_key).ok());
+    EXPECT_FALSE(sort_key.empty());
+    std::string primary_key;
+    ASSERT_TRUE(encoder.encode_primary_key(_block, 0, /*with_seq_col=*/false, &primary_key).ok());
+    EXPECT_TRUE(primary_key.empty());
 }
 
 // A cluster-key segment may contain several rows with the same primary key and
@@ -1241,16 +1341,18 @@ TEST_F(RowKeyEncoderTest, RowidSuffix) {
     });
 
     RowKeyEncoder encoder(*schema, /*mow=*/true);
-    std::vector<IOlapColumnDataAccessor*> sort_columns {acc(1)};
-    std::vector<IOlapColumnDataAccessor*> primary_columns {acc(0)};
-    IOlapColumnDataAccessor* sequence_column = acc(2);
     std::string previous_sort_key;
     std::string previous_primary_index_key;
     for (size_t row = 0; row < kRows.size(); ++row) {
         const auto& data = kRows[row];
-        const std::string sort_key = encoder.full_encode(sort_columns, row);
-        std::string primary_index_key = encoder.full_encode_primary_keys(primary_columns, row);
-        encoder.append_seq_suffix(&primary_index_key, sequence_column, row);
+        std::string sort_key;
+        ASSERT_TRUE(encoder.encode_sort_key(_block, row, RowKeyEncoder::KeyWidth::Full, &sort_key)
+                            .ok());
+        std::string primary_index_key;
+        ASSERT_TRUE(
+                encoder.encode_primary_key(_block, row, /*with_seq_col=*/false, &primary_index_key)
+                        .ok());
+        ASSERT_TRUE(encoder.encode_seq_value(_block, row, &primary_index_key).ok());
         EXPECT_EQ(to_hex(primary_index_key), kPrimaryWithSequenceHex);
         encoder.append_rowid_suffix(&primary_index_key, data.rowid);
         EXPECT_EQ(to_hex(primary_index_key),

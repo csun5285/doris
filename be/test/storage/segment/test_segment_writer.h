@@ -40,11 +40,28 @@ class TestVerticalSegmentWriter : public VerticalSegmentWriter {
 public:
     using VerticalSegmentWriter::VerticalSegmentWriter;
 
+    // RowCursor hands over one already-storage-formatted cell at a time, so this
+    // reaches into the scalar writer's byte entry rather than going through
+    // append(IColumn&). That entry also records the not-null bit for nullable
+    // columns. ScalarColumnWriter makes this class a friend for exactly this.
+    static Status append_one(segment_v2::ColumnWriter* writer, bool is_null, const void* data) {
+        if (is_null) {
+            return writer->append_nulls(1);
+        }
+        auto* scalar_writer = dynamic_cast<segment_v2::ScalarColumnWriter*>(writer);
+        if (scalar_writer == nullptr) {
+            return Status::InternalError("append_row only supports scalar columns, got {}",
+                                         int(writer->get_column()->type()));
+        }
+        const auto* ptr = reinterpret_cast<const uint8_t*>(data);
+        return scalar_writer->_append_data(&ptr, 1);
+    }
+
     Status append_row(const RowCursor& row) {
         for (size_t cid = 0; cid < _column_writers.size(); ++cid) {
             const auto& f = row.field(cid);
             if (f.is_null()) {
-                RETURN_IF_ERROR(_column_writers[cid]->append(true, nullptr));
+                RETURN_IF_ERROR(append_one(_column_writers[cid].get(), true, nullptr));
                 continue;
             }
             auto ft = row.schema()->column(cid)->type();
@@ -57,7 +74,7 @@ public:
             case FieldType::OLAP_FIELD_TYPE_STRING: {
                 const auto& s = f.get<TYPE_STRING>();
                 Slice slice(s.data(), s.size());
-                RETURN_IF_ERROR(_column_writers[cid]->append(false, &slice));
+                RETURN_IF_ERROR(append_one(_column_writers[cid].get(), false, &slice));
                 continue;
             }
             case FieldType::OLAP_FIELD_TYPE_DATE: {
@@ -104,7 +121,7 @@ public:
             default:
                 return Status::InternalError("Unsupported field type in append_row: {}", int(ft));
             }
-            RETURN_IF_ERROR(_column_writers[cid]->append(false, const_cast<void*>(ptr)));
+            RETURN_IF_ERROR(append_one(_column_writers[cid].get(), false, ptr));
         }
         std::string full_encoded_key;
         row.encode_key<true>(&full_encoded_key, _tablet_schema->num_key_columns());
@@ -124,7 +141,7 @@ public:
             // At the beginning of one block, so add a short key index entry
             if ((_num_rows_written % _opts.num_rows_per_block) == 0) {
                 std::string encoded_key;
-                row.encode_key(&encoded_key, _num_short_key_columns);
+                row.encode_key(&encoded_key, _tablet_schema->num_short_key_columns());
                 RETURN_IF_ERROR(_short_key_index_builder->add_item(encoded_key));
             }
             _set_min_max_key(full_encoded_key);

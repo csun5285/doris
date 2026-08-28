@@ -39,37 +39,15 @@ using segment_v2::PrimaryKeyModelRowRetriever;
 // operator and, when needed, to read the old row.
 class HistoricalRowRetrieverTest : public MowTransformTestBase {
 protected:
-    // Keeps the converted key column accessors alive for as long as the retriever needs them.
-    class KeyAccessors {
-    public:
-        // `block` holds the key column, and the sequence column too when `with_seq` is set (the
-        // retriever then probes with a seq suffix).
-        KeyAccessors(const TabletSchemaSPtr& schema, Block* block, size_t num_rows,
-                     bool with_seq = false) {
-            _convertor.add_column_data_convertor(schema->column(0));
-            if (with_seq) {
-                _convertor.add_column_data_convertor(
-                        schema->column(static_cast<uint32_t>(schema->sequence_col_idx())));
-            }
-            _convertor.set_source_content(block, 0, num_rows);
-            auto [st, accessor] = _convertor.convert_column_data(0);
-            EXPECT_TRUE(st.ok()) << st;
-            _accessors.push_back(accessor);
-            if (with_seq) {
-                auto [seq_st, seq] = _convertor.convert_column_data(1);
-                EXPECT_TRUE(seq_st.ok()) << seq_st;
-                _seq_column = seq;
-            }
+    // The layout of the source block the binlog stage hands over: the key column,
+    // and the sequence column too when the retriever should probe with a suffix.
+    static std::vector<uint32_t> source_layout(const TabletSchemaSPtr& schema, bool with_seq) {
+        std::vector<uint32_t> block_cids {0};
+        if (with_seq) {
+            block_cids.push_back(static_cast<uint32_t>(schema->sequence_col_idx()));
         }
-
-        const std::vector<IOlapColumnDataAccessor*>& get() const { return _accessors; }
-        IOlapColumnDataAccessor* seq_column() const { return _seq_column; }
-
-    private:
-        OlapBlockDataConvertor _convertor;
-        std::vector<IOlapColumnDataAccessor*> _accessors;
-        IOlapColumnDataAccessor* _seq_column = nullptr;
-    };
+        return block_cids;
+    }
 
     std::shared_ptr<PartialUpdateInfo> key_only_partial_update(const TabletSchemaSPtr& schema) {
         auto info = std::make_shared<PartialUpdateInfo>();
@@ -128,11 +106,10 @@ TEST_F(HistoricalRowRetrieverTest, UpdateReadsHistoryAndAppendTakesDefault) {
     fill_rowset_ctx(&rowset_ctx, schema, tablet, info, /*need_before=*/false);
 
     Block input = key_block(schema, {1, 99});
-    KeyAccessors keys {schema, &input, 2};
 
     PrimaryKeyModelRowRetriever retriever;
     ASSERT_TRUE(retriever.init(rowset_ctx.make_historical_row_retriever_context()).ok());
-    ASSERT_TRUE(retriever.prepare_lookup_plan_from_source_columns(keys.get(), nullptr, mow).ok());
+    ASSERT_TRUE(retriever.prepare_lookup_plan(input, source_layout(schema, false), mow).ok());
     auto st = retriever.retrieve_historical_row(/*delete_sign_column_data=*/nullptr, 0, 2);
     ASSERT_TRUE(st.ok()) << st;
 
@@ -164,13 +141,11 @@ TEST_F(HistoricalRowRetrieverTest, DeleteReadsHistoryOnlyWhenBeforeImageIsWanted
         fill_rowset_ctx(&rowset_ctx, schema, tablet, info, need_before);
 
         Block input = key_block(schema, {1});
-        KeyAccessors keys {schema, &input, 1};
         std::vector<Int8> delete_signs {1};
 
         PrimaryKeyModelRowRetriever retriever;
         ASSERT_TRUE(retriever.init(rowset_ctx.make_historical_row_retriever_context()).ok());
-        ASSERT_TRUE(
-                retriever.prepare_lookup_plan_from_source_columns(keys.get(), nullptr, mow).ok());
+        ASSERT_TRUE(retriever.prepare_lookup_plan(input, source_layout(schema, false), mow).ok());
         auto st = retriever.retrieve_historical_row(delete_signs.data(), 0, 1);
         ASSERT_TRUE(st.ok()) << st;
 
@@ -203,13 +178,10 @@ TEST_F(HistoricalRowRetrieverTest, RowLosingOnSequenceStillReadsTheStoredRow) {
 
     // incoming sequence 5 < stored 10
     Block input = key_seq_block(schema, /*key=*/1, /*seq=*/5);
-    KeyAccessors keys {schema, &input, 1, /*with_seq=*/true};
 
     PrimaryKeyModelRowRetriever retriever;
     ASSERT_TRUE(retriever.init(rowset_ctx.make_historical_row_retriever_context()).ok());
-    ASSERT_TRUE(
-            retriever.prepare_lookup_plan_from_source_columns(keys.get(), keys.seq_column(), mow)
-                    .ok());
+    ASSERT_TRUE(retriever.prepare_lookup_plan(input, source_layout(schema, true), mow).ok());
     auto st = retriever.retrieve_historical_row(nullptr, 0, 1);
     ASSERT_TRUE(st.ok()) << st;
 
@@ -243,9 +215,7 @@ TEST_F(HistoricalRowRetrieverTest, PerFlushRetrieverKeepsNoStateFromTheLastBlock
 
     Block first = key_block(schema, {1});
     {
-        KeyAccessors keys {schema, &first, 1};
-        ASSERT_TRUE(
-                retriever.prepare_lookup_plan_from_source_columns(keys.get(), nullptr, mow).ok());
+        ASSERT_TRUE(retriever.prepare_lookup_plan(first, source_layout(schema, false), mow).ok());
         ASSERT_TRUE(retriever.retrieve_historical_row(nullptr, 0, 1).ok());
         ASSERT_EQ(retriever.get_operators().size(), 1);
         EXPECT_EQ(retriever.get_operators()[0], ROW_BINLOG_UPDATE);
@@ -267,9 +237,7 @@ TEST_F(HistoricalRowRetrieverTest, PerFlushRetrieverKeepsNoStateFromTheLastBlock
 
     // key 99 is in no rowset, so nothing may be planned for it
     Block second = key_block(schema, {99});
-    KeyAccessors keys {schema, &second, 1};
-    ASSERT_TRUE(
-            next_retriever.prepare_lookup_plan_from_source_columns(keys.get(), nullptr, mow).ok());
+    ASSERT_TRUE(next_retriever.prepare_lookup_plan(second, source_layout(schema, false), mow).ok());
     ASSERT_TRUE(next_retriever.retrieve_historical_row(nullptr, 0, 1).ok());
     ASSERT_EQ(next_retriever.get_operators().size(), 1);
     EXPECT_EQ(next_retriever.get_operators()[0], ROW_BINLOG_APPEND);

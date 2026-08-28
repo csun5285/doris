@@ -466,9 +466,9 @@ TEST_F(KeyProbeTest, ProbePreviousSeqValueReturnsTheOldRowSequence) {
     EXPECT_EQ(mow->delete_bitmap->cardinality(), 0U);
 }
 
-// Row cache invalidation. The cache is keyed by the encoded key *without* the sequence suffix, so
-// encode_mow_key_invalidate_cache must invalidate before it appends the suffix -- and it must still
-// return the key with the suffix.
+// Row cache invalidation. The cache is keyed by the encoded key *without* the sequence suffix --
+// the pk_prefix_len slice of the full key -- so the writers erase that prefix slice after encoding
+// the full suffixed key.
 class RowCacheProbeTest : public KeyProbeTest {
 protected:
     void SetUp() override {
@@ -496,35 +496,29 @@ protected:
         RowCache::instance()->insert({tablet_id, Slice {key}}, Slice {"row"});
     }
 
-    // encode_mow_key_invalidate_cache the way the fill loops call it: the column accessors must
-    // outlive the call, so the convertor stays alive here.
-    std::string encode_and_invalidate(const TabletSchemaSPtr& schema, const RowKeyEncoder& encoder,
+    // Encode then erase the prefix slice, the way the writers' key index
+    // builds do: over an encoder prepared with the row's own block.
+    std::string encode_and_invalidate(const TabletSchemaSPtr& schema, RowKeyEncoder& encoder,
                                       int32_t k, bool row_has_seq, int32_t seq,
                                       DataWriteType write_type) {
-        const auto seq_idx = static_cast<uint32_t>(schema->sequence_col_idx());
-        Block block = row_has_seq ? schema->create_storage_block({0, seq_idx})
-                                  : schema->create_storage_block({0});
+        std::vector<uint32_t> block_cids {0};
+        if (row_has_seq) {
+            block_cids.push_back(static_cast<uint32_t>(schema->sequence_col_idx()));
+        }
+        Block block = schema->create_storage_block(block_cids);
         block.get_by_position(0).column->assert_mutable()->insert_data(
                 reinterpret_cast<const char*>(&k), sizeof(int32_t));
-        OlapBlockDataConvertor convertor;
-        convertor.add_column_data_convertor(schema->column(0));
         if (row_has_seq) {
             block.get_by_position(1).column->assert_mutable()->insert_data(
                     reinterpret_cast<const char*>(&seq), sizeof(int32_t));
-            convertor.add_column_data_convertor(schema->column(seq_idx));
         }
-        convertor.set_source_content(&block, 0, 1);
-        auto [key_st, key_accessor] = convertor.convert_column_data(0);
-        EXPECT_TRUE(key_st.ok()) << key_st;
-        IOlapColumnDataAccessor* seq_accessor = nullptr;
-        if (row_has_seq) {
-            auto [seq_st, accessor] = convertor.convert_column_data(1);
-            EXPECT_TRUE(seq_st.ok()) << seq_st;
-            seq_accessor = accessor;
-        }
-        std::vector<IOlapColumnDataAccessor*> key_columns {key_accessor};
-        return segment_v2::encode_mow_key_invalidate_cache(
-                encoder, key_columns, seq_accessor, 0, row_has_seq, kTabletId, *schema, write_type);
+        std::string key;
+        size_t pk_len = 0;
+        EXPECT_TRUE(encoder.set_block_layout(block_cids).ok());
+        EXPECT_TRUE(encoder.encode_primary_key(block, 0, row_has_seq, &key, &pk_len).ok());
+        segment_v2::MowKeyProbe::maybe_invalidate_row_cache(kTabletId, *schema, write_type,
+                                                            Slice(key.data(), pk_len));
+        return key;
     }
 
     RowCache* _cache = nullptr;

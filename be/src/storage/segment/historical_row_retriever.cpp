@@ -68,7 +68,6 @@ void insert_value_to_nullable_column(IColumn* dst_column, const IColumn& src_col
 
 Status PrimaryKeyModelRowRetriever::init(const HistoricalRowRetrieverContext& context) {
     _context = context;
-    _key_columns.resize(_context.tablet_schema->num_key_columns());
     _key_encoder = std::make_unique<RowKeyEncoder>(*_context.tablet_schema, /*mow=*/true);
     _row_fetcher = std::make_unique<HistoricalRowFetcher>(_context);
     return Status::OK();
@@ -77,6 +76,17 @@ Status PrimaryKeyModelRowRetriever::init(const HistoricalRowRetrieverContext& co
 PrimaryKeyModelRowRetriever::PrimaryKeyModelRowRetriever() = default;
 
 PrimaryKeyModelRowRetriever::~PrimaryKeyModelRowRetriever() = default;
+
+Status PrimaryKeyModelRowRetriever::prepare_lookup_plan(Block block,
+                                                        std::span<const uint32_t> block_cids,
+                                                        std::shared_ptr<MowContext> mow_context) {
+    _lookup_block = std::move(block);
+    if (!block_cids.empty()) {
+        RETURN_IF_ERROR(_key_encoder->set_block_layout(block_cids));
+    }
+    _mow_context = std::move(mow_context);
+    return Status::OK();
+}
 
 Status PrimaryKeyModelRowRetriever::retrieve_historical_row(const Int8* delete_sign_column_data,
                                                             size_t row_pos, size_t num_rows) {
@@ -105,17 +115,23 @@ Status PrimaryKeyModelRowRetriever::retrieve_historical_row(const Int8* delete_s
         // After converting to olap column, [0, num_rows) in the result column is corresponding to
         // [row_pos, row_pos + num_rows) in the original block
         size_t delta_pos = block_pos - row_pos;
-        std::string key = encode_mow_key_invalidate_cache(
-                *_key_encoder, _key_columns, _seq_column, delta_pos, _seq_column != nullptr,
-                _context.tablet->tablet_id(), *tablet_schema, _context.write_type);
+        const bool row_has_seq = _key_encoder->layout_has_seq_column();
+        std::string key;
+        size_t pk_len = 0;
+        RETURN_IF_ERROR(_key_encoder->encode_primary_key(_lookup_block, delta_pos, row_has_seq,
+                                                         &key, &pk_len));
+        // This path writes rows too (the binlog derive flush), so it erases the
+        // row-cache entry just like the segment writer's key index build does.
+        MowKeyProbe::maybe_invalidate_row_cache(_context.tablet->tablet_id(), *tablet_schema,
+                                                _context.write_type, Slice(key.data(), pk_len));
 
         // mark key with delete sign as deleted.
         bool have_delete_sign =
                 (delete_sign_column_data != nullptr && delete_sign_column_data[block_pos] != 0);
 
-        ProbeOutcome outcome = DORIS_TRY(probe.probe(key, /*segment_pos=*/0, _seq_column != nullptr,
-                                                     have_delete_sign, specified_rowsets,
-                                                     segment_caches, discarded_stats));
+        ProbeOutcome outcome =
+                DORIS_TRY(probe.probe(key, /*segment_pos=*/0, row_has_seq, have_delete_sign,
+                                      specified_rowsets, segment_caches, discarded_stats));
         if (outcome.result == KeyProbeResult::NOT_FOUND) {
             // it's an insert row
             _has_default_or_nullable = true;
@@ -194,11 +210,6 @@ Status PrimaryKeyModelRowRetriever::materialize_flexible_partial_update(
     }
     DCHECK_EQ(insert_after_delete_flags.size(), num_rows);
 
-    std::vector<IOlapColumnDataAccessor*> key_columns;
-    RETURN_IF_ERROR(aggregator.convert_pk_columns(block, 0, num_rows, key_columns));
-    IOlapColumnDataAccessor* seq_column = nullptr;
-    RETURN_IF_ERROR(aggregator.convert_seq_column(block, 0, num_rows, seq_column));
-
     auto* skip_bitmaps =
             &get_mutable_skip_bitmap_column(block, tablet_schema->skip_bitmap_col_idx())
                      ->get_data();
@@ -226,10 +237,8 @@ Status PrimaryKeyModelRowRetriever::materialize_flexible_partial_update(
     for (size_t pos = 0; pos < num_rows; ++pos) {
         const bool row_has_seq =
                 schema_has_seq && !skip_bitmaps->at(pos).contains(seq_col_unique_id);
-        std::string key = _key_encoder->full_encode_primary_keys(key_columns, pos);
-        if (row_has_seq) {
-            _key_encoder->append_seq_suffix(&key, seq_column, pos);
-        }
+        std::string key;
+        RETURN_IF_ERROR(_key_encoder->encode_primary_key(*block, pos, row_has_seq, &key));
         const bool have_delete_sign = !skip_bitmaps->at(pos).contains(delete_sign_col_unique_id) &&
                                       delete_signs[pos] != 0;
         ProbeOutcome outcome =

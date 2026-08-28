@@ -31,7 +31,7 @@
 //
 // V3 stores exactly the same bytes as V1/V2 — only the on-disk layout differs. In
 // particular, CHAR values keep their trailing '\0' padding on disk (as written by
-// OlapColumnDataConvertorChar); that padding is stripped on read by
+// CharDataConvertor); that padding is stripped on read by
 // BinaryPlainPageV3PreDecoder<true>, selected for (CHAR, PLAIN_ENCODING_V3), exactly
 // mirroring PLAIN_ENCODING_V2.
 

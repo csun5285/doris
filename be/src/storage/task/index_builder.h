@@ -36,7 +36,6 @@ namespace segment_v2 {
 class IndexColumnWriter;
 class IndexFileWriter;
 } // namespace segment_v2
-class OlapBlockDataConvertor;
 
 class StorageEngine;
 class RowsetWriter;
@@ -121,6 +120,16 @@ private:
                          const std::pair<int64_t, int64_t>& index_writer_sign,
                          const TabletColumn* column, const uint8_t* null_map, const uint8_t** ptr,
                          size_t num_rows);
+    // ARRAY columns: the index writers want the item cells plus the per-row
+    // element counts. We encode the item column and rebuild the offsets here —
+    // add_array_values only ever reads offset differences, so a per-block base
+    // of 0 is enough.
+    Status _add_array(const std::string& column_name,
+                      const std::pair<int64_t, int64_t>& index_writer_sign,
+                      const TabletColumn* column, size_t cid,
+                      const ColumnWithTypeAndName& typed_column, size_t num_rows);
+
+    std::vector<uint64_t> _array_offsets;
 
 private:
     StorageEngine& _engine;
@@ -134,7 +143,9 @@ private:
     std::vector<RowsetSharedPtr> _output_rowsets;
     std::vector<PendingRowsetGuard> _pending_rs_guards;
     std::vector<RowsetReaderSharedPtr> _input_rs_readers;
-    std::unique_ptr<OlapBlockDataConvertor> _olap_data_convertor;
+    // One encoder per indexed column, indexed the same way as the plan's
+    // build_columns / _alter_inverted_indexes. Rebuilt per rowset.
+    std::vector<ColumnEncoding> _encoders;
     // "<segment_id, index_id>" -> IndexColumnWriter
     std::unordered_map<std::pair<int64_t, int64_t>, std::unique_ptr<segment_v2::IndexColumnWriter>>
             _index_column_writers;

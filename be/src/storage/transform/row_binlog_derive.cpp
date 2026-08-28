@@ -18,6 +18,7 @@
 #include "storage/transform/row_binlog_derive.h"
 
 #include <algorithm>
+#include <numeric>
 #include <optional>
 #include <span>
 
@@ -47,13 +48,12 @@ constexpr uint32_t BINLOG_COLNUM = 3;
 
 // Runs the primary-key historical lookup over `block`'s source key (+seq)
 // columns, leaving the planned reads and the op for each row in `retriever` for
-// building AFTER/BEFORE. `seq_pos` is the seq column's position in the input
-// block (-1 if absent). `convertor` must live longer than `retriever`: its
-// accessors back the lookup plan.
+// building AFTER/BEFORE. `block_cids` describes the input block's layout, empty
+// when it is in source schema order.
 Status setup_retriever_and_lookup(TransformExecContext& ctx, const SegmentWriteBinlogOptions& cfg,
                                   const TabletSchemaSPtr& source_schema, const Block* block,
-                                  int32_t seq_pos, const Int8* delete_signs, size_t num_rows,
-                                  OlapBlockDataConvertor& convertor,
+                                  std::span<const uint32_t> block_cids, const Int8* delete_signs,
+                                  size_t num_rows,
                                   std::unique_ptr<PrimaryKeyModelRowRetriever>& retriever) {
     retriever = std::make_unique<PrimaryKeyModelRowRetriever>();
     // Row binlog lives in its own tablet, so ctx.tablet is that binlog tablet
@@ -69,17 +69,7 @@ Status setup_retriever_and_lookup(TransformExecContext& ctx, const SegmentWriteB
             .is_transient_rowset_writer = cfg.source.is_transient_rowset_writer,
             .write_type = cfg.source.source_write_type}));
 
-    // key (+seq) only conversion from the input block for the lookup
-    convertor.resize(source_schema->num_columns());
-    std::vector<IOlapColumnDataAccessor*> key_columns;
-    RETURN_IF_ERROR(convert_key_columns(convertor, *source_schema, *block, num_rows, key_columns));
-    IOlapColumnDataAccessor* seq_column = nullptr;
-    if (seq_pos != -1) {
-        RETURN_IF_ERROR(convert_seq_column(convertor, *source_schema, *block,
-                                           static_cast<size_t>(seq_pos), num_rows, seq_column));
-    }
-    RETURN_IF_ERROR(retriever->prepare_lookup_plan_from_source_columns(key_columns, seq_column,
-                                                                       cfg.source.mow_context));
+    RETURN_IF_ERROR(retriever->prepare_lookup_plan(*block, block_cids, cfg.source.mow_context));
     RETURN_IF_ERROR(retriever->retrieve_historical_row(delete_signs, 0, num_rows));
     return Status::OK();
 }
@@ -378,19 +368,20 @@ Status MowRowBinlogDeriveStage::derive(TransformExecContext& ctx, Block* block,
         }
     }
 
-    // find the delete sign and sequence columns in the input block (positions
-    // move in the narrow partial-update block)
+    // A fixed partial update's block is narrow: it holds the columns the update
+    // sets, in update_cids order, so every position moves. That list is the
+    // block layout the key encoder needs, and where the delete sign sits.
+    std::span<const uint32_t> block_cids;
     int32_t delete_sign_pos = c.source_schema->delete_sign_idx();
-    int32_t seq_pos = c.source_schema->sequence_col_idx();
     if (is_fixed_partial_update) {
+        const auto& update_cids = cfg.source.partial_update_info->update_cids;
+        block_cids = update_cids;
         delete_sign_pos = -1;
-        seq_pos = -1;
         int32_t pos = 0;
-        for (auto& cid : cfg.source.partial_update_info->update_cids) {
+        for (auto& cid : update_cids) {
             if (cid == c.source_schema->delete_sign_idx()) {
                 delete_sign_pos = pos;
-            } else if (cid == c.source_schema->sequence_col_idx()) {
-                seq_pos = pos;
+                break;
             }
             pos++;
         }
@@ -401,12 +392,10 @@ Status MowRowBinlogDeriveStage::derive(TransformExecContext& ctx, Block* block,
     // probe history once: produces the AFTER-fill plan, the BEFORE-read plan,
     // and the exact op for each row (APPEND / UPDATE / DELETE). retrieve_historical_row
     // takes the raw delete-sign pointer (the codebase convention), so bridge here.
-    // declared first so it outlives the retriever: the lookup plan points into it
-    OlapBlockDataConvertor key_convertor;
     std::unique_ptr<PrimaryKeyModelRowRetriever> retriever;
-    RETURN_IF_ERROR(setup_retriever_and_lookup(ctx, cfg, c.source_schema, block, seq_pos,
+    RETURN_IF_ERROR(setup_retriever_and_lookup(ctx, cfg, c.source_schema, block, block_cids,
                                                delete_signs ? delete_signs->data() : nullptr,
-                                               c.num_rows, key_convertor, retriever));
+                                               c.num_rows, retriever));
 
     // Building AFTER: fixed partial update widens the narrow input and rebuilds
     // missing columns from history; upserts are already source-schema shaped.
