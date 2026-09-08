@@ -143,8 +143,8 @@ Status build_segment_zonemap_context(Segment* segment, const ReadSchema& schema,
     return Status::OK();
 }
 
-// The statistics iterator answers pushed-down aggregates from the segment zone maps alone. An
-// invalid zone map has no min/max to answer with, so the caller has to read the data instead.
+// The statistics iterator answers pushed-down aggregates from the segment zone maps alone. A zone
+// map with no usable min/max sends the caller back to reading the data instead.
 Status segment_zone_maps_can_answer_agg(Segment* segment, const ReadSchema& schema,
                                         const StorageReadOptions& read_options, bool* usable) {
     *usable = true;
@@ -170,6 +170,14 @@ Status segment_zone_maps_can_answer_agg(Segment* segment, const ReadSchema& sche
         ZoneMap zone_map;
         RETURN_IF_ERROR(reader->get_segment_zone_map(&zone_map));
         if (zone_map.pass_all) {
+            *usable = false;
+            return Status::OK();
+        }
+        // A cut string bound is not a value the column holds: the min is a prefix of the smallest
+        // value and the max was raised past the largest one. Neither can answer MIN()/MAX().
+        if (zone_map.has_not_null && is_string_type(schema.column(ordinal)->type()) &&
+            (zone_map.min_value.as_string_view().size() >= MAX_ZONE_MAP_INDEX_SIZE ||
+             zone_map.max_value.as_string_view().size() >= MAX_ZONE_MAP_INDEX_SIZE)) {
             *usable = false;
             return Status::OK();
         }

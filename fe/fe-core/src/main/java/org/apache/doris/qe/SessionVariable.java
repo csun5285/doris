@@ -2380,10 +2380,12 @@ public class SessionVariable implements Serializable, Writable {
             + "pushdown minmax on unique table.")
     public boolean enablePushDownMinMaxOnUnique = false;
 
-    // Whether enable push down string type minmax to scan node.
+    // Whether enable push down string type minmax to scan node. A string zone map bound is cut to
+    // 512 bytes, and the storage layer skips the push down for the segments whose bounds were
+    // actually cut, so turn this off only to stop pushing string minmax down at all.
     @VarAttrDef.VarAttr(name = ENABLE_PUSHDOWN_STRING_MINMAX, needForward = true, description = "Set whether to enable "
             + "push down string type minmax.")
-    public boolean enablePushDownStringMinMax = false;
+    public boolean enablePushDownStringMinMax = true;
 
     // Comma-separated list of MOR tables to enable value predicate pushdown.
     @VarAttrDef.VarAttr(name = ENABLE_MOR_VALUE_PREDICATE_PUSHDOWN_TABLES, needForward = true, description = "Comma-sep"

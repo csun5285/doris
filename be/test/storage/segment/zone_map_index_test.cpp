@@ -1533,5 +1533,113 @@ TEST_F(ColumnZoneMapTest, AllNullPageAfterMaxLenStringPage_NoSegmentMaxDoubleInc
     EXPECT_EQ(static_cast<unsigned char>(seg_zm.max().back()), static_cast<unsigned char>('y'));
 }
 
+// Doris stores strings as UTF-8, but a string column can hold any byte. A cut max that ends in
+// 0xff cannot be raised: adding one wraps it to 0x00 and leaves a max below the real value, which
+// then rules out rows that should be kept.
+TEST_F(ColumnZoneMapTest, CutMaxThatIsNotUtf8GivesUpTheRange) {
+    auto data_type = DataTypeFactory::instance().create_data_type(TYPE_STRING, true, 0, 0, -1);
+    TabletColumnPtr tab_col = create_string_key(0);
+
+    struct Raised {
+        std::string max;
+        bool pass_all;
+    };
+    auto raise_max = [&](const std::string& value) {
+        std::unique_ptr<ZoneMapIndexWriter> writer;
+        EXPECT_TRUE(ZoneMapIndexWriter::create(data_type, tab_col.get(), writer).ok());
+        segment_v2::ZoneMap zone_map;
+        zone_map.min_value = Field::create_field<TYPE_STRING>(value);
+        zone_map.max_value = Field::create_field<TYPE_STRING>(value);
+        zone_map.has_not_null = true;
+        writer->modify_index_before_flush(zone_map);
+        return Raised {zone_map.max_value.get<TYPE_STRING>(), zone_map.pass_all};
+    };
+
+    // 511 'a' then 0xff: no byte stands above 0xff, so the range is given up.
+    std::string trailing_ff(MAX_ZONE_MAP_INDEX_SIZE - 1, 'a');
+    trailing_ff.push_back(static_cast<char>(0xff));
+    EXPECT_TRUE(raise_max(trailing_ff).pass_all);
+
+    // Same for a max that is 0xff all the way down.
+    EXPECT_TRUE(raise_max(std::string(MAX_ZONE_MAP_INDEX_SIZE, static_cast<char>(0xff))).pass_all);
+
+    // A max that is UTF-8 keeps its range and gets the plain raise.
+    const std::string plain(MAX_ZONE_MAP_INDEX_SIZE, 'x');
+    const auto raised = raise_max(plain);
+    EXPECT_FALSE(raised.pass_all);
+    EXPECT_EQ(std::string(MAX_ZONE_MAP_INDEX_SIZE - 1, 'x') + "y", raised.max);
+    EXPECT_GT(raised.max, plain) << "max must stay above the value it covers";
+
+    // The 512-byte cut is a plain byte cut, so it can land inside a character and leave a bound
+    // that is no longer UTF-8. Those zones give up their range as well: the check does not tell
+    // a split character apart from a column holding raw bytes.
+    std::string cut_mid_char(MAX_ZONE_MAP_INDEX_SIZE - 2, 'a');
+    cut_mid_char.push_back(static_cast<char>(0xe4)); // first byte of a three-byte character
+    cut_mid_char.push_back(static_cast<char>(0xb8));
+    EXPECT_TRUE(raise_max(cut_mid_char).pass_all);
+
+    // Same when the cut keeps only the first byte of that character.
+    std::string cut_after_lead(MAX_ZONE_MAP_INDEX_SIZE - 1, 'a');
+    cut_after_lead.push_back(static_cast<char>(0xe4));
+    EXPECT_TRUE(raise_max(cut_after_lead).pass_all);
+
+    // A character that ends right on the cut is whole, so that zone keeps its range.
+    std::string cut_on_boundary(MAX_ZONE_MAP_INDEX_SIZE - 3, 'a');
+    cut_on_boundary.push_back(static_cast<char>(0xe4));
+    cut_on_boundary.push_back(static_cast<char>(0xb8));
+    cut_on_boundary.push_back(static_cast<char>(0xad));
+    const auto whole_raised = raise_max(cut_on_boundary);
+    EXPECT_FALSE(whole_raised.pass_all);
+    EXPECT_EQ(static_cast<unsigned char>(whole_raised.max.back()), 0xae);
+    EXPECT_GT(whole_raised.max, cut_on_boundary);
+}
+
+// Segments written before the writer stopped raising a 0xff max still carry a max that wrapped to
+// 0x00 and now sits below the rows it covers. The read side has to spot that and give up the
+// range, or those rows stay invisible until the segment is rewritten.
+TEST_F(ColumnZoneMapTest, FromProtoGivesUpTheRangeForAWrappedCutMax) {
+    auto data_type = DataTypeFactory::instance().create_data_type(TYPE_STRING, true, 0, 0, -1);
+
+    auto reads_back_as_pass_all = [&](const std::string& min, const std::string& max) {
+        ZoneMapPB pb;
+        pb.set_min(min);
+        pb.set_max(max);
+        pb.set_has_null(false);
+        pb.set_has_not_null(true);
+        pb.set_pass_all(false);
+        ZoneMap zone_map;
+        EXPECT_TRUE(ZoneMap::from_proto(pb, data_type, zone_map).ok());
+        return zone_map.pass_all;
+    };
+
+    // What the old writer stored for a page holding repeat('a', 511) || unhex('FF').
+    std::string wrapped(MAX_ZONE_MAP_INDEX_SIZE - 1, 'a');
+    wrapped.push_back('\0');
+    EXPECT_TRUE(reads_back_as_pass_all("aaa", wrapped));
+
+    // A max raised from a plain byte keeps its range.
+    EXPECT_FALSE(
+            reads_back_as_pass_all("aaa", std::string(MAX_ZONE_MAP_INDEX_SIZE - 1, 'x') + "y"));
+
+    // So does one raised from a whole character.
+    std::string whole_raised(MAX_ZONE_MAP_INDEX_SIZE - 3, 'a');
+    whole_raised.push_back(static_cast<char>(0xe4));
+    whole_raised.push_back(static_cast<char>(0xb8));
+    whole_raised.push_back(static_cast<char>(0xae));
+    EXPECT_FALSE(reads_back_as_pass_all("aaa", whole_raised));
+
+    // A max raised from a character the cut split in half is not UTF-8, so that zone gives up its
+    // range on read too, the same way the writer gives it up.
+    std::string cut_raised(MAX_ZONE_MAP_INDEX_SIZE - 2, 'a');
+    cut_raised.push_back(static_cast<char>(0xe4));
+    cut_raised.push_back(static_cast<char>(0xb9));
+    EXPECT_TRUE(reads_back_as_pass_all("aaa", cut_raised));
+
+    // A max shorter than the cut was never raised, so it is exact whatever bytes it holds.
+    std::string short_ff = "abc";
+    short_ff.push_back(static_cast<char>(0xff));
+    EXPECT_FALSE(reads_back_as_pass_all("abc", short_ff));
+}
+
 } // namespace segment_v2
 } // namespace doris
