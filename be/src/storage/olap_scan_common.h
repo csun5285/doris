@@ -104,6 +104,7 @@ public:
         _fixed_values.clear();
         _low_value = TYPE_MAX;
         _high_value = TYPE_MIN;
+        _high_unbounded = false;
         _contain_null = false;
     }
 
@@ -125,6 +126,12 @@ public:
 
     bool is_high_value_maximum() const { return Compare::equal(_high_value, TYPE_MAX); }
 
+    // A string type has no largest value: TYPE_MAX is a one byte 0xff sentinel, while real data
+    // such as 0xff61 sorts after it. So a string range starts with no upper bound at all, and
+    // only a predicate gives it one. Other types keep their real TYPE_MAX, and the constexpr
+    // condition folds this to false for them, which leaves every caller below unchanged.
+    bool is_high_unbounded() const { return _high_unbounded && is_string_type(primitive_type); }
+
     bool is_begin_include() const { return _low_op == FILTER_LARGER_OR_EQUAL; }
 
     bool is_end_include() const { return _high_op == FILTER_LESS_OR_EQUAL; }
@@ -141,6 +148,7 @@ public:
         _fixed_values.clear();
         _low_value = TYPE_MIN;
         _high_value = TYPE_MAX;
+        _high_unbounded = true;
         _low_op = FILTER_LARGER_OR_EQUAL;
         _high_op = FILTER_LESS_OR_EQUAL;
         _contain_null = _is_nullable_col;
@@ -219,6 +227,9 @@ private:
 
     bool _is_nullable_col;
     bool _contain_null;
+    // True while no predicate has given the high end a real value, so _high_value still holds
+    // TYPE_MAX. Only is_high_unbounded() reads it, and only string types act on it.
+    bool _high_unbounded = false;
     int _precision;
     int _scale;
 
@@ -368,6 +379,7 @@ ColumnValueRange<primitive_type>::ColumnValueRange(std::string col_name, const C
           _high_op(FILTER_LESS_OR_EQUAL),
           _is_nullable_col(is_nullable_col),
           _contain_null(is_nullable_col && contain_null),
+          _high_unbounded(Compare::equal(max, TYPE_MAX)),
           _precision(precision),
           _scale(scale) {}
 
@@ -388,6 +400,7 @@ Status ColumnValueRange<primitive_type>::add_fixed_value(const CppType& value) {
 
     _high_value = TYPE_MIN;
     _low_value = TYPE_MAX;
+    _high_unbounded = false;
 
     return Status::OK();
 }
@@ -404,7 +417,7 @@ bool ColumnValueRange<primitive_type>::is_fixed_value_range() const {
 
 template <PrimitiveType primitive_type>
 bool ColumnValueRange<primitive_type>::is_scope_value_range() const {
-    return Compare::greater(_high_value, _low_value);
+    return is_high_unbounded() || Compare::greater(_high_value, _low_value);
 }
 
 template <PrimitiveType primitive_type>
@@ -448,6 +461,9 @@ bool ColumnValueRange<primitive_type>::convert_to_close_range(
         std::vector<OlapTuple>& begin_scan_keys, std::vector<OlapTuple>& end_scan_keys,
         bool& begin_include, bool& end_include) {
     if constexpr (!_is_reject_split_type) {
+        // _is_reject_split_type covers every string type, so the sentinel high end that
+        // is_high_unbounded() tracks cannot reach the steps below.
+        static_assert(!is_string_type(primitive_type));
         begin_include = true;
         end_include = true;
 
@@ -589,6 +605,7 @@ void ColumnValueRange<primitive_type>::convert_to_range_value() {
         _low_value = *_fixed_values.begin();
         _low_op = FILTER_LARGER_OR_EQUAL;
         _high_value = *_fixed_values.rbegin();
+        _high_unbounded = false;
         _high_op = FILTER_LESS_OR_EQUAL;
         _fixed_values.clear();
     }
@@ -639,8 +656,9 @@ Status ColumnValueRange<primitive_type>::add_range(SQLFilterOp op, const CppType
 
         _high_value = TYPE_MIN;
         _low_value = TYPE_MAX;
+        _high_unbounded = false;
     } else {
-        if (Compare::greater(_high_value, _low_value)) {
+        if (is_high_unbounded() || Compare::greater(_high_value, _low_value)) {
             switch (op) {
             case FILTER_LARGER: {
                 if (Compare::greater_equal(value, _low_value)) {
@@ -661,18 +679,20 @@ Status ColumnValueRange<primitive_type>::add_range(SQLFilterOp op, const CppType
             }
 
             case FILTER_LESS: {
-                if (Compare::less_equal(value, _high_value)) {
+                if (is_high_unbounded() || Compare::less_equal(value, _high_value)) {
                     _high_value = value;
                     _high_op = op;
+                    _high_unbounded = false;
                 }
 
                 break;
             }
 
             case FILTER_LESS_OR_EQUAL: {
-                if (Compare::less(value, _high_value)) {
+                if (is_high_unbounded() || Compare::less(value, _high_value)) {
                     _high_value = value;
                     _high_op = op;
+                    _high_unbounded = false;
                 }
 
                 break;
@@ -685,10 +705,11 @@ Status ColumnValueRange<primitive_type>::add_range(SQLFilterOp op, const CppType
         }
 
         if (FILTER_LARGER_OR_EQUAL == _low_op && FILTER_LESS_OR_EQUAL == _high_op &&
-            Compare::equal(_high_value, _low_value)) {
+            !is_high_unbounded() && Compare::equal(_high_value, _low_value)) {
             RETURN_IF_ERROR(add_fixed_value(_high_value));
             _high_value = TYPE_MIN;
             _low_value = TYPE_MAX;
+            _high_unbounded = false;
         }
     }
 
@@ -697,6 +718,12 @@ Status ColumnValueRange<primitive_type>::add_range(SQLFilterOp op, const CppType
 
 template <PrimitiveType primitive_type>
 bool ColumnValueRange<primitive_type>::is_in_range(const CppType& value) {
+    if (is_high_unbounded()) {
+        // No upper bound to check, so only the low end decides.
+        DCHECK(_low_op == FILTER_LARGER || _low_op == FILTER_LARGER_OR_EQUAL);
+        return _low_op == FILTER_LARGER ? Compare::greater(value, _low_value)
+                                        : Compare::greater_equal(value, _low_value);
+    }
     switch (_high_op) {
     case FILTER_LESS: {
         switch (_low_op) {
@@ -784,6 +811,7 @@ void ColumnValueRange<primitive_type>::intersection(ColumnValueRange<primitive_t
             _contain_null = false;
             _high_value = TYPE_MIN;
             _low_value = TYPE_MAX;
+            _high_unbounded = false;
         } else {
             set_empty_value_range();
         }
@@ -794,7 +822,12 @@ void ColumnValueRange<primitive_type>::intersection(ColumnValueRange<primitive_t
                 set_contain_null(true);
             }
         } else {
-            static_cast<void>(add_range(range._high_op, range._high_value));
+            // The other range may carry the string TYPE_MAX sentinel as its high end, which
+            // means "no upper bound". Adding it as a real bound would drop that state and
+            // bring back the sentinel as a bound, so only a real high end is added here.
+            if (!range.is_high_unbounded()) {
+                static_cast<void>(add_range(range._high_op, range._high_value));
+            }
             static_cast<void>(add_range(range._low_op, range._low_value));
         }
     }
@@ -847,7 +880,9 @@ void ColumnValueRange<primitive_type>::intersection(ColumnValueRange<primitive_t
 ///   then extend as a range (same as Example 3), and set *exact_value = false
 ///   (the predicate must be kept for residual filtering).
 ///
-///   If NOT convertible (e.g. BOOLEAN/NULL type): set *should_break = true, stop extending.
+///   If NOT convertible (e.g. BOOLEAN/NULL type): set *should_break = true and
+///   *exact_value = false, stop extending. The column is not in the scan keys, so its
+///   predicate must be kept.
 ///
 /// ======== Example 5: Range splitting (convert_to_avg_range_value) ========
 /// WHERE k1 >= 1 AND k1 <= 100, with max_scan_key_num = 4
@@ -863,7 +898,9 @@ void ColumnValueRange<primitive_type>::intersection(ColumnValueRange<primitive_t
 /// @param exact_value      [out]   Set to true if the column's predicate is fully captured
 ///                                  by scan keys (can be erased from residual filters).
 /// @param eos              [out]   Set to true if the range is provably empty.
-/// @param should_break     [out]   Set to true if extending must stop (un-convertible overflow).
+/// @param should_break     [out]   Set to true if extending must stop, either because the fixed
+///                                  values overflow the budget and cannot become a range, or
+///                                  because the column has no upper bound to write.
 template <PrimitiveType primitive_type>
 Status OlapScanKeys::extend_scan_key(ColumnValueRange<primitive_type>& range,
                                      int32_t max_scan_key_num, bool* exact_value, bool* eos,
@@ -893,10 +930,13 @@ Status OlapScanKeys::extend_scan_key(ColumnValueRange<primitive_type>& range,
     auto scan_keys_size = _begin_scan_keys.empty() ? 1 : _begin_scan_keys.size();
     if (range.is_fixed_value_range()) {
         if (range.get_fixed_value_size() > max_scan_key_num / scan_keys_size) {
+            // Over budget: the scan keys no longer carry every value of this column, so its
+            // predicate has to run on the rows that come back.
+            *exact_value = false;
             if (range.is_range_value_convertible()) {
                 range.convert_to_range_value();
-                *exact_value = false;
             } else {
+                // The column cannot even be added as a range, so stop here.
                 *should_break = true;
                 return Status::OK();
             }
@@ -984,6 +1024,13 @@ Status OlapScanKeys::extend_scan_key(ColumnValueRange<primitive_type>& range,
         // Fixed values are always closed intervals (begin == end, point lookup).
         _begin_include = true;
         _end_include = true;
+    } else if (range.is_high_unbounded()) {
+        // The end key would have to carry the string TYPE_MAX sentinel, and every value that
+        // starts with 0xff and is longer than one byte sorts after it, so those rows would be
+        // seeked past. Leave this column out of the scan keys and let its predicate filter.
+        *exact_value = false;
+        *should_break = true;
+        return Status::OK();
     } else {
         // ---- 5b. Scope range (> / >= / < / <=): append min to begin, max to end. ----
         // After this, no more columns can be appended (_has_range_value = true),
