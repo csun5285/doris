@@ -187,6 +187,11 @@ const IColumn& ColumnDataConvertor::bind(const IColumn& column, size_t row_pos, 
             << ", column.size()=" << column.size();
     scratch.data = nullptr;
     scratch.nullmap = nullptr;
+    // Drop the previous batch's cells but keep their allocation: a zero-copy
+    // batch must not report stale copies, and the next copying batch reuses
+    // the buffer.
+    scratch.bytes.clear();
+    scratch.slices.clear();
     if (is_column_nullable(column)) {
         const auto* nullable_column = assert_cast<const ColumnNullable*>(&column);
         scratch.nullmap = nullable_column->get_null_map_data().data() + row_pos;
