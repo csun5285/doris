@@ -58,8 +58,6 @@ class Block;
 class ColumnArray;
 class ColumnMap;
 class DataTypeMap;
-template <PrimitiveType T>
-class ColumnDecimal;
 
 // One batch of storage-format bytes plus everything they are made of. The
 // caller owns one of these per column it encodes and reuses it across batches;
@@ -146,11 +144,10 @@ protected:
 class ObjectDataConvertor : public ColumnDataConvertor {
 protected:
     // Serialized bytes go into scratch.bytes and scratch.slices points into
-    // them, so both are reset together at the start of every encode().
+    // them: one slice per row, filled in by the subclass.
     static const IColumn& bind_object(const IColumn& column, size_t row_pos, size_t num_rows,
                                       ColumnStorageScratch& scratch) {
         const IColumn& nested = bind(column, row_pos, num_rows, scratch);
-        scratch.bytes.clear();
         scratch.slices.resize(num_rows);
         scratch.data = reinterpret_cast<const uint8_t*>(scratch.slices.data());
         return nested;
@@ -292,22 +289,6 @@ protected:
     using CppType = typename PrimitiveTypeTraits<T>::CppType;
 };
 
-// decimalv3 don't need to do any convert
-template <PrimitiveType T>
-class DecimalV3DataConvertor : public PassthroughDataConvertor<T> {
-public:
-    DecimalV3DataConvertor() = default;
-    ~DecimalV3DataConvertor() override = default;
-
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override {
-        using ColumnType = typename PrimitiveTypeTraits<T>::ColumnType;
-        const IColumn& nested = ColumnDataConvertor::bind(column, row_pos, num_rows, scratch);
-        const auto* column_data = assert_cast<const ColumnType*>(&nested);
-        scratch.data = reinterpret_cast<const uint8_t*>(column_data->get_data().data() + row_pos);
-        return Status::OK();
-    }
-};
 
 // One column's encoder together with the buffers it writes into. Every holder
 // of an encoder needs both, so they travel as a pair.

@@ -120,16 +120,16 @@ ColumnDataConvertorUPtr create_column_data_convertor(const TabletColumn& column)
         return std::make_unique<DecimalV1DataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL32: {
-        return std::make_unique<DecimalV3DataConvertor<TYPE_DECIMAL32>>();
+        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL32>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL64: {
-        return std::make_unique<DecimalV3DataConvertor<TYPE_DECIMAL64>>();
+        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL64>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL128I: {
-        return std::make_unique<DecimalV3DataConvertor<TYPE_DECIMAL128I>>();
+        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL128I>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL256: {
-        return std::make_unique<DecimalV3DataConvertor<TYPE_DECIMAL256>>();
+        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL256>>();
     }
     case FieldType::OLAP_FIELD_TYPE_JSONB: {
         return std::make_unique<VarcharDataConvertor>(true, true);
