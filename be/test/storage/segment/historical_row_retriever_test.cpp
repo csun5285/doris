@@ -109,7 +109,10 @@ TEST_F(HistoricalRowRetrieverTest, UpdateReadsHistoryAndAppendTakesDefault) {
 
     PrimaryKeyModelRowRetriever retriever;
     ASSERT_TRUE(retriever.init(rowset_ctx.make_historical_row_retriever_context()).ok());
-    ASSERT_TRUE(retriever.prepare_lookup_plan(input, source_layout(schema, false), mow).ok());
+    ASSERT_TRUE(retriever
+                        .prepare_lookup_plan(input, source_layout(schema, false),
+                                             /*rows_have_seq=*/false, mow)
+                        .ok());
     auto st = retriever.retrieve_historical_row(/*delete_sign_column_data=*/nullptr, 0, 2);
     ASSERT_TRUE(st.ok()) << st;
 
@@ -145,7 +148,10 @@ TEST_F(HistoricalRowRetrieverTest, DeleteReadsHistoryOnlyWhenBeforeImageIsWanted
 
         PrimaryKeyModelRowRetriever retriever;
         ASSERT_TRUE(retriever.init(rowset_ctx.make_historical_row_retriever_context()).ok());
-        ASSERT_TRUE(retriever.prepare_lookup_plan(input, source_layout(schema, false), mow).ok());
+        ASSERT_TRUE(retriever
+                            .prepare_lookup_plan(input, source_layout(schema, false),
+                                                 /*rows_have_seq=*/false, mow)
+                            .ok());
         auto st = retriever.retrieve_historical_row(delete_signs.data(), 0, 1);
         ASSERT_TRUE(st.ok()) << st;
 
@@ -181,7 +187,10 @@ TEST_F(HistoricalRowRetrieverTest, RowLosingOnSequenceStillReadsTheStoredRow) {
 
     PrimaryKeyModelRowRetriever retriever;
     ASSERT_TRUE(retriever.init(rowset_ctx.make_historical_row_retriever_context()).ok());
-    ASSERT_TRUE(retriever.prepare_lookup_plan(input, source_layout(schema, true), mow).ok());
+    ASSERT_TRUE(retriever
+                        .prepare_lookup_plan(input, source_layout(schema, true),
+                                             /*rows_have_seq=*/true, mow)
+                        .ok());
     auto st = retriever.retrieve_historical_row(nullptr, 0, 1);
     ASSERT_TRUE(st.ok()) << st;
 
@@ -215,7 +224,10 @@ TEST_F(HistoricalRowRetrieverTest, PerFlushRetrieverKeepsNoStateFromTheLastBlock
 
     Block first = key_block(schema, {1});
     {
-        ASSERT_TRUE(retriever.prepare_lookup_plan(first, source_layout(schema, false), mow).ok());
+        ASSERT_TRUE(retriever
+                            .prepare_lookup_plan(first, source_layout(schema, false),
+                                                 /*rows_have_seq=*/false, mow)
+                            .ok());
         ASSERT_TRUE(retriever.retrieve_historical_row(nullptr, 0, 1).ok());
         ASSERT_EQ(retriever.get_operators().size(), 1);
         EXPECT_EQ(retriever.get_operators()[0], ROW_BINLOG_UPDATE);
@@ -237,7 +249,10 @@ TEST_F(HistoricalRowRetrieverTest, PerFlushRetrieverKeepsNoStateFromTheLastBlock
 
     // key 99 is in no rowset, so nothing may be planned for it
     Block second = key_block(schema, {99});
-    ASSERT_TRUE(next_retriever.prepare_lookup_plan(second, source_layout(schema, false), mow).ok());
+    ASSERT_TRUE(next_retriever
+                        .prepare_lookup_plan(second, source_layout(schema, false),
+                                             /*rows_have_seq=*/false, mow)
+                        .ok());
     ASSERT_TRUE(next_retriever.retrieve_historical_row(nullptr, 0, 1).ok());
     ASSERT_EQ(next_retriever.get_operators().size(), 1);
     EXPECT_EQ(next_retriever.get_operators()[0], ROW_BINLOG_APPEND);

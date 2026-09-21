@@ -19,9 +19,11 @@
 
 #include <gen_cpp/olap_file.pb.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 
+#include "common/cast_set.h"
 #include "common/consts.h"
 #include "common/logging.h"
 #include "core/assert_cast.h"
@@ -191,6 +193,12 @@ void PartialUpdateInfo::from_pb(PartialUpdateInfoPB* partial_update_info_pb) {
     for (const auto& value : partial_update_info_pb->default_values()) {
         default_values.push_back(value);
     }
+}
+
+bool PartialUpdateInfo::sets_sequence_col(const TabletSchema& tablet_schema) const {
+    return tablet_schema.has_sequence_col() &&
+           std::find(update_cids.begin(), update_cids.end(),
+                     cast_set<uint32_t>(tablet_schema.sequence_col_idx())) != update_cids.end();
 }
 
 std::string PartialUpdateInfo::summary() const {

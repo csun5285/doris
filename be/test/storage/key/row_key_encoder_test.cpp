@@ -1209,7 +1209,6 @@ TEST_F(RowKeyEncoderTest, BlockLayoutMapsColumnGroupPositions) {
     RowKeyEncoder schema_order(*_schema, /*mow=*/true);
     RowKeyEncoder group_order(*_schema, /*mow=*/true);
     ASSERT_TRUE(group_order.set_block_layout(group_cids).ok());
-    EXPECT_TRUE(group_order.layout_has_seq_column());
 
     for (size_t row = 0; row < 2; ++row) {
         SCOPED_TRACE(row);
@@ -1270,7 +1269,6 @@ TEST_F(RowKeyEncoderTest, BlockLayoutRejectsMissingKeyColumn) {
     // sequence suffix is out of reach.
     const std::vector<uint32_t> key_only {0, 1};
     ASSERT_TRUE(encoder.set_block_layout(key_only).ok());
-    EXPECT_FALSE(encoder.layout_has_seq_column());
     std::string key;
     ASSERT_TRUE(
             encoder.encode_sort_key(column_group(key_only), 0, RowKeyEncoder::KeyWidth::Full, &key)

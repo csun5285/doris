@@ -25,6 +25,7 @@
 #include "common/consts.h"
 #include "common/logging.h"
 #include "core/block/block.h"
+#include "storage/index/primary_key_index.h"
 #include "storage/iterator/olap_data_convertor.h"
 #include "storage/key_coder.h"
 #include "storage/tablet/tablet_schema.h"
@@ -125,8 +126,8 @@ Status RowKeyEncoder::set_block_layout(std::span<const uint32_t> block_cids) {
     return Status::OK();
 }
 
-bool RowKeyEncoder::layout_has_seq_column() const {
-    return _seq.cid != kNoColumn && _seq.position != kNoColumn;
+size_t RowKeyEncoder::seq_suffix_length() const {
+    return _seq.cid == kNoColumn ? 0 : 1 + _seq.length;
 }
 
 Status RowKeyEncoder::_encode_row(KeyColumn& key, const Block& block, size_t row,
@@ -187,7 +188,7 @@ Status RowKeyEncoder::_encode(std::span<KeyColumn> key_columns, size_t num_colum
 }
 
 Status RowKeyEncoder::encode_seq_value(const Block& block, size_t row, std::string* out) {
-    if (!layout_has_seq_column()) {
+    if (_seq.cid == kNoColumn || _seq.position == kNoColumn) {
         return Status::InternalError("the sequence column is not in this block layout");
     }
     return encode_seq_value(*block.get_by_position(_seq.position).column, row, out);
@@ -213,6 +214,8 @@ Status RowKeyEncoder::encode_seq_value(const IColumn& seq_column, size_t row, st
 }
 
 void RowKeyEncoder::append_rowid_suffix(std::string* encoded_keys, uint32_t rowid) const {
+    // The primary key index reads the suffix back by that length.
+    static_assert(1 + sizeof(uint32_t) == PrimaryKeyIndexReader::ROW_ID_LENGTH);
     encoded_keys->push_back(KeyConsts::KEY_NORMAL_MARKER);
     // A rowid is always a uint32, so the coder is known here rather than looked up.
     KeyCoderTraits<FieldType::OLAP_FIELD_TYPE_UNSIGNED_INT>::full_encode_ascending(&rowid,

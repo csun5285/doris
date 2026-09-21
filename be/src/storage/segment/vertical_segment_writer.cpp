@@ -319,19 +319,17 @@ Status VerticalSegmentWriter::_open_group(const std::vector<uint32_t>& col_ids, 
         // where the key encoder finds its key columns.
         RETURN_IF_ERROR(_key_encoder.set_block_layout(_column_ids));
         if (_is_mow()) {
-            size_t seq_col_length = 0;
-            if (_tablet_schema->has_sequence_col()) {
-                seq_col_length =
-                        _tablet_schema->column(_tablet_schema->sequence_col_idx()).length() + 1;
-            }
+            // The index entry is the encoder's primary key, its sequence
+            // suffix, and -- only when the segment is sorted by cluster keys
+            // -- the rowid suffix that keeps equal keys apart.
             size_t rowid_length = 0;
             if (_is_mow_with_cluster_key()) {
                 rowid_length = PrimaryKeyIndexReader::ROW_ID_LENGTH;
                 _short_key_index_builder.reset(
                         new ShortKeyIndexBuilder(_segment_id, _opts.num_rows_per_block));
             }
-            _primary_key_index_builder.reset(
-                    new PrimaryKeyIndexBuilder(_file_writer, seq_col_length, rowid_length));
+            _primary_key_index_builder.reset(new PrimaryKeyIndexBuilder(
+                    _file_writer, _key_encoder.seq_suffix_length(), rowid_length));
             RETURN_IF_ERROR(_primary_key_index_builder->init());
         } else {
             _short_key_index_builder.reset(
@@ -498,38 +496,31 @@ Status VerticalSegmentWriter::_generate_key_index(const Block& block, size_t row
 Status VerticalSegmentWriter::_generate_primary_key_index(const Block& block, size_t row_pos,
                                                           size_t num_rows, bool need_sort) {
     const bool with_seq_col = _tablet_schema->has_sequence_col();
-    if (!need_sort) { // mow table without cluster key
-        std::string last_key;
-        for (size_t pos = 0; pos < num_rows; pos++) {
-            std::string key;
-            size_t pk_len = 0;
-            RETURN_IF_ERROR(_key_encoder.encode_primary_key(block, row_pos + pos, with_seq_col,
-                                                            &key, &pk_len));
-            // The row cache is keyed by the key without the seq suffix -- the
-            // pk_len prefix of the entry.
-            MowKeyProbe::maybe_invalidate_row_cache(_opts.rowset_ctx->tablet_id, *_tablet_schema,
-                                                    _opts.write_type, Slice(key.data(), pk_len));
+    std::string last_key;
+    for (size_t pos = 0; pos < num_rows; pos++) {
+        std::string key;
+        size_t pk_len = 0;
+        RETURN_IF_ERROR(
+                _key_encoder.encode_primary_key(block, row_pos + pos, with_seq_col, &key, &pk_len));
+        // The row cache is keyed by the key without the seq suffix -- the
+        // pk_len prefix of the entry.
+        MowKeyProbe::maybe_invalidate_row_cache(_opts.rowset_ctx->tablet_id, *_tablet_schema,
+                                                _opts.write_type, Slice(key.data(), pk_len));
+        if (!need_sort) {
+            // Sorted by primary key: the rows arrive in index order.
             DCHECK(key.compare(last_key) > 0)
                     << "found duplicate key or key is not sorted! current key: " << key
                     << ", last key: " << last_key;
             RETURN_IF_ERROR(_primary_key_index_builder->add_item(key));
             last_key = std::move(key);
+            continue;
         }
-    } else { // mow table with cluster key
-        // generate primary keys in memory
-        for (uint32_t pos = 0; pos < num_rows; pos++) {
-            std::string key;
-            size_t pk_len = 0;
-            RETURN_IF_ERROR(_key_encoder.encode_primary_key(block, row_pos + pos, with_seq_col,
-                                                            &key, &pk_len));
-            MowKeyProbe::maybe_invalidate_row_cache(_opts.rowset_ctx->tablet_id, *_tablet_schema,
-                                                    _opts.write_type, Slice(key.data(), pk_len));
-            // Several rows may share a primary key and sequence value here, so
-            // the rowid is what keeps their index entries apart.
-            _key_encoder.append_rowid_suffix(&key, pos + _num_rows_written);
-            _primary_keys_size += key.size();
-            _primary_keys.emplace_back(std::move(key));
-        }
+        // Sorted by cluster key: the keys are collected and sorted when the
+        // group is finalized. Several rows may share a primary key and
+        // sequence value here, so the rowid is what keeps their entries apart.
+        _key_encoder.append_rowid_suffix(&key, cast_set<uint32_t>(pos + _num_rows_written));
+        _primary_keys_size += key.size();
+        _primary_keys.emplace_back(std::move(key));
     }
     return Status::OK();
 }

@@ -48,11 +48,12 @@ constexpr uint32_t BINLOG_COLNUM = 3;
 // Runs the primary-key historical lookup over `block`'s source key (+seq)
 // columns, leaving the planned reads and the op for each row in `retriever` for
 // building AFTER/BEFORE. `block_cids` describes the input block's layout, empty
-// when it is in source schema order.
+// when it is in source schema order; `rows_have_seq` whether the rows carry a
+// sequence value.
 Status setup_retriever_and_lookup(TransformExecContext& ctx, const SegmentWriteBinlogOptions& cfg,
                                   const TabletSchemaSPtr& source_schema, const Block* block,
-                                  std::span<const uint32_t> block_cids, const Int8* delete_signs,
-                                  size_t num_rows,
+                                  std::span<const uint32_t> block_cids, bool rows_have_seq,
+                                  const Int8* delete_signs, size_t num_rows,
                                   std::unique_ptr<PrimaryKeyModelRowRetriever>& retriever) {
     retriever = std::make_unique<PrimaryKeyModelRowRetriever>();
     // Row binlog lives in its own tablet, so ctx.tablet is that binlog tablet
@@ -68,7 +69,8 @@ Status setup_retriever_and_lookup(TransformExecContext& ctx, const SegmentWriteB
             .is_transient_rowset_writer = cfg.source.is_transient_rowset_writer,
             .write_type = cfg.source.source_write_type}));
 
-    RETURN_IF_ERROR(retriever->prepare_lookup_plan(*block, block_cids, cfg.source.mow_context));
+    RETURN_IF_ERROR(retriever->prepare_lookup_plan(*block, block_cids, rows_have_seq,
+                                                   cfg.source.mow_context));
     RETURN_IF_ERROR(retriever->retrieve_historical_row(delete_signs, 0, num_rows));
     return Status::OK();
 }
@@ -371,10 +373,14 @@ Status MowRowBinlogDeriveStage::derive(TransformExecContext& ctx, Block* block,
     // sets, in update_cids order, so every position moves. That list is the
     // block layout the key encoder needs, and where the delete sign sits.
     std::span<const uint32_t> block_cids;
+    // A full source block carries the sequence column whenever the schema has
+    // one; a fixed partial update's rows only when the update writes it.
+    bool rows_have_seq = c.source_schema->has_sequence_col();
     int32_t delete_sign_pos = c.source_schema->delete_sign_idx();
     if (is_fixed_partial_update) {
         const auto& update_cids = cfg.source.partial_update_info->update_cids;
         block_cids = update_cids;
+        rows_have_seq = cfg.source.partial_update_info->sets_sequence_col(*c.source_schema);
         delete_sign_pos = -1;
         int32_t pos = 0;
         for (auto& cid : update_cids) {
@@ -392,9 +398,9 @@ Status MowRowBinlogDeriveStage::derive(TransformExecContext& ctx, Block* block,
     // and the exact op for each row (APPEND / UPDATE / DELETE). retrieve_historical_row
     // takes the raw delete-sign pointer (the codebase convention), so bridge here.
     std::unique_ptr<PrimaryKeyModelRowRetriever> retriever;
-    RETURN_IF_ERROR(setup_retriever_and_lookup(ctx, cfg, c.source_schema, block, block_cids,
-                                               delete_signs ? delete_signs->data() : nullptr,
-                                               c.num_rows, retriever));
+    RETURN_IF_ERROR(setup_retriever_and_lookup(
+            ctx, cfg, c.source_schema, block, block_cids, rows_have_seq,
+            delete_signs ? delete_signs->data() : nullptr, c.num_rows, retriever));
 
     // Building AFTER: fixed partial update widens the narrow input and rebuilds
     // missing columns from history; upserts are already source-schema shaped.

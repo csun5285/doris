@@ -75,9 +75,12 @@ public:
     // The source block the lookup encodes its keys out of, held so it outlives
     // the lookup. `block_cids[position]` is the schema column id at that block
     // position; an empty layout is a block in source schema order, which is
-    // everything but a fixed partial update's narrow block.
+    // everything but a fixed partial update's narrow block. `rows_have_seq`
+    // says whether these rows carry a sequence value -- for a full source
+    // block, whether the schema has the column; for a fixed partial update,
+    // whether the update writes it.
     Status prepare_lookup_plan(Block block, std::span<const uint32_t> block_cids,
-                               std::shared_ptr<MowContext> mow_context);
+                               bool rows_have_seq, std::shared_ptr<MowContext> mow_context);
 
     Status retrieve_historical_row(const Int8* delete_sign_column_data, size_t row_pos,
                                    size_t num_rows) override;
@@ -106,6 +109,7 @@ private:
     // The block the lookup encodes its keys out of, held by value so it stays
     // alive for as long as the lookup needs it.
     Block _lookup_block;
+    bool _rows_have_seq = false;
     std::unique_ptr<RowKeyEncoder> _key_encoder;
     std::shared_ptr<MowContext> _mow_context;
 

@@ -167,10 +167,7 @@ Status FixedPartialUpdateFillStage::apply(TransformExecContext& ctx, Block* bloc
     // primary key view hold the same columns here.
     // full_block holds the sequence column whether or not the update sets it,
     // so the encoder cannot tell; the update's own column list can.
-    const bool have_input_seq_column =
-            schema.has_sequence_col() &&
-            std::find(update_cids.begin(), update_cids.end(),
-                      cast_set<uint32_t>(schema.sequence_col_idx())) != update_cids.end();
+    const bool have_input_seq_column = info.sets_sequence_col(schema);
 
     // 3. probe every key against the load's rowset snapshot
     DBUG_EXECUTE_IF("VerticalSegmentWriter._append_block_with_partial_content.sleep",

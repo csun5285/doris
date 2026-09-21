@@ -18,6 +18,8 @@
 #include "storage/segment/historical_row_retriever.h"
 
 // IWYU pragma: no_include <opentelemetry/common/threadlocal.h>
+#include <numeric>
+
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/config.h"
 #include "common/consts.h"
@@ -78,8 +80,10 @@ PrimaryKeyModelRowRetriever::~PrimaryKeyModelRowRetriever() = default;
 
 Status PrimaryKeyModelRowRetriever::prepare_lookup_plan(Block block,
                                                         std::span<const uint32_t> block_cids,
+                                                        bool rows_have_seq,
                                                         std::shared_ptr<MowContext> mow_context) {
     _lookup_block = std::move(block);
+    _rows_have_seq = rows_have_seq;
     if (!block_cids.empty()) {
         RETURN_IF_ERROR(_key_encoder->set_block_layout(block_cids));
     }
@@ -114,7 +118,7 @@ Status PrimaryKeyModelRowRetriever::retrieve_historical_row(const Int8* delete_s
         // After converting to olap column, [0, num_rows) in the result column is corresponding to
         // [row_pos, row_pos + num_rows) in the original block
         size_t delta_pos = block_pos - row_pos;
-        const bool row_has_seq = _key_encoder->layout_has_seq_column();
+        const bool row_has_seq = _rows_have_seq;
         std::string key;
         size_t pk_len = 0;
         RETURN_IF_ERROR(_key_encoder->encode_primary_key(_lookup_block, delta_pos, row_has_seq,
@@ -195,6 +199,10 @@ Status PrimaryKeyModelRowRetriever::materialize_flexible_partial_update(
     MowKeyProbe probe = MowKeyProbe::for_row_binlog(_context.tablet.get(), lookup_schema.get(),
                                                     tablet_schema->has_sequence_col(), _mow_context,
                                                     write_before);
+    // This block is in schema order whatever layout prepare_lookup_plan declared.
+    std::vector<uint32_t> schema_order(tablet_schema->num_columns());
+    std::iota(schema_order.begin(), schema_order.end(), 0);
+    RETURN_IF_ERROR(_key_encoder->set_block_layout(schema_order));
     BlockAggregator aggregator(*tablet_schema, _context.tablet, _mow_context,
                                *_context.partial_update_info, *_key_encoder, probe, *_row_fetcher);
 

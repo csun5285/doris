@@ -99,11 +99,10 @@ public:
     // with cluster keys.
     void append_rowid_suffix(std::string* encoded_keys, uint32_t rowid) const;
 
-    // True when the blocks this encoder is handed carry the sequence column.
-    // A caller that also tracks whether a row really sets a sequence value --
-    // a partial update whose block holds the column but leaves it empty --
-    // needs its own flag on top of this one.
-    bool layout_has_seq_column() const;
+    // How many bytes encode_seq_value() appends: the marker byte plus the
+    // sequence column's length, or 0 when the table has no sequence column.
+    // The primary key index sizes its entries by it.
+    size_t seq_suffix_length() const;
 
 private:
     // A schema column id this encoder does not read, and the position of a
