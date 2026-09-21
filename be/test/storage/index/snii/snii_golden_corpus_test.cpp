@@ -354,7 +354,7 @@ Status write_sample(const std::string& dir, const Sample& sample, const TabletIn
     SniiIndexColumnWriter writer(&index_file_writer, &meta, FieldType::OLAP_FIELD_TYPE_VARCHAR);
     RETURN_IF_ERROR(writer.init());
     if (sample.array) {
-        // Follow ArrayColumnWriter::append_nullable: pass all rows to add_array_values,
+        // Follow feed_array_index(): pass all rows to add_array_values,
         // representing NULL rows as empty arrays, then mark them with add_array_nulls.
         const auto rows = array_corpus();
         std::vector<std::string> storage;

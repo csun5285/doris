@@ -28,6 +28,7 @@
 #include "storage/olap_define.h"
 #include "storage/rowset/pending_rowset_helper.h"
 #include "storage/rowset/rowset_fwd.h"
+#include "storage/segment/array_index_input.h"
 #include "storage/segment/segment.h"
 #include "storage/tablet/tablet_fwd.h"
 
@@ -129,7 +130,7 @@ private:
                       const TabletColumn* column, size_t cid,
                       const ColumnWithTypeAndName& typed_column, size_t num_rows);
 
-    std::vector<uint64_t> _array_offsets;
+    segment_v2::ArrayIndexInput _array_input;
 
 private:
     StorageEngine& _engine;

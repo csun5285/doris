@@ -38,6 +38,7 @@
 #include "storage/index/bloom_filter/bloom_filter.h"
 #include "storage/index/inverted/inverted_index_writer.h"
 #include "storage/iterator/column_storage_scratch.h"
+#include "storage/segment/array_index_input.h"
 #include "storage/segment/common.h"
 #include "storage/segment/options.h"
 #include "storage/segment/variant/nested_group_provider.h"
@@ -462,13 +463,13 @@ public:
                                std::unique_ptr<ColumnWriter> item_writer);
     ~ArrayColumnWriter() override = default;
 
+    // Returns NotSupported when an inverted / ann index is configured on a
+    // non-scalar item writer: those index writers need one contiguous
+    // storage-format cell per element, which only a scalar item writer produces.
     Status init() override;
 
     // Rebase the offsets to disk layout, recurse into _item_writer, feed the
-    // array index writers. Returns NotSupported when an inverted / ann index is
-    // configured on a non-scalar item writer: those index writers need one
-    // contiguous storage-format cell per element, which only a scalar item
-    // writer produces.
+    // array index writers.
     Status append(const IColumn& column, size_t row_pos, size_t num_rows) override;
 
     uint64_t estimate_buffer_size() override;
@@ -531,14 +532,14 @@ private:
     std::unique_ptr<IndexColumnWriter> _inverted_index_writer;
     std::unique_ptr<AnnIndexColumnWriter> _ann_index_writer;
     // The array index writers walk one storage-format cell per element, so this
-    // encodes the items for them. Only built when this column has such an index
-    // and the items are scalar, which is the only case those writers support.
+    // encodes the items for them. Only built when this column has such an index.
     ColumnEncoding _item_index_encoding;
     ColumnWriterOptions _opts;
     // Disk offsets restart at 0 per segment while in-memory offsets are block
     // absolute, so this accumulates across append() calls.
     uint64_t _array_base_offset = 0;
-    std::vector<uint64_t> _array_offsets_buffer;
+    // The current batch as the offset writer and the index writers read it.
+    ArrayIndexInput _staged;
 };
 
 class MapColumnWriter final : public ColumnWriter {

@@ -1101,46 +1101,22 @@ Status IndexBuilder::_add_array(const std::string& column_name,
     auto* index_column_writer = index_column_writer_it->second.get();
 
     const uint8_t* outer_null_map = nullptr;
-    const IColumn* nested = &peel_nullable(*typed_column.column, 0, &outer_null_map);
-    const auto* col_array = check_and_get_column<ColumnArray>(nested);
+    const IColumn& nested = peel_nullable(*typed_column.column, 0, &outer_null_map);
+    const auto* col_array = check_and_get_column<ColumnArray>(&nested);
     if (col_array == nullptr) {
         return Status::InternalError("expected ColumnArray for {}, got {}", column_name,
-                                     nested->get_name());
+                                     nested.get_name());
     }
-
-    const size_t start_offset = col_array->offset_at(0);
-    _array_offsets.clear();
-    _array_offsets.reserve(num_rows + 1);
-    for (size_t i = 0; i <= num_rows; ++i) {
-        _array_offsets.push_back(col_array->offset_at(cast_set<ssize_t, size_t, false>(i)) -
-                                 start_offset);
-    }
-    const size_t element_cnt = _array_offsets.back();
-
-    const void* item_data = nullptr;
-    const uint8_t* item_null_map = nullptr;
-    if (element_cnt > 0) {
-        RETURN_IF_ERROR(
-                _encoders[cid].encode(*col_array->get_data_ptr(), start_offset, element_cnt));
-        item_data = _encoders[cid].scratch.data;
-        item_null_map = _encoders[cid].scratch.nullmap;
-    }
-    const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(_array_offsets.data());
+    RETURN_IF_ERROR(segment_v2::stage_array_index_input(*col_array, 0, num_rows, 0, &_encoders[cid],
+                                                        &_array_input));
 
     try {
-        // With a null map this has to run even for an all-empty batch, so the
-        // writer's per-row counter stays in step with add_array_nulls.
-        if (element_cnt > 0 || outer_null_map != nullptr) {
-            RETURN_IF_ERROR(index_column_writer->add_array_values(
-                    field_type_size(column->get_sub_column(0).type()), item_data, item_null_map,
-                    offsets_ptr, num_rows));
-            DBUG_EXECUTE_IF("IndexBuilder::_add_nullable_add_array_values_error", {
-                _CLTHROWA(CL_ERR_IO, "debug point: _add_nullable_add_array_values_error");
-            })
-        }
-        if (outer_null_map != nullptr) {
-            RETURN_IF_ERROR(index_column_writer->add_array_nulls(outer_null_map, num_rows));
-        }
+        RETURN_IF_ERROR(segment_v2::feed_array_index(
+                index_column_writer, field_type_size(column->get_sub_column(0).type()),
+                _array_input, num_rows, outer_null_map));
+        DBUG_EXECUTE_IF("IndexBuilder::_add_nullable_add_array_values_error", {
+            _CLTHROWA(CL_ERR_IO, "debug point: _add_nullable_add_array_values_error");
+        })
     } catch (const std::exception& e) {
         return Status::Error<ErrorCode::INVERTED_INDEX_CLUCENE_ERROR>("CLuceneError occurred: {}",
                                                                       e.what());

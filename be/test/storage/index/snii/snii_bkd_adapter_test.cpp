@@ -681,7 +681,7 @@ struct ArrayBlock {
     std::vector<uint8_t> row_nulls;     // array-level null map, per row
 };
 
-// `base` reproduces the olap_convertor behaviour the CLucene writer warns
+// `base` reproduces the rebase_offsets() behaviour the CLucene writer warns
 // about: offsets accumulate from a base that is NOT necessarily zero, while the
 // element and null arrays always start at zero. Indexing elements by offsets[i]
 // instead of by a running count silently reads the wrong elements.

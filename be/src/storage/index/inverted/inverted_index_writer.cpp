@@ -415,8 +415,10 @@ Status InvertedIndexColumnWriter<field_type>::add_array_values(size_t field_size
         size_t start_off = 0;
         std::vector<ReaderPtr> keep_readers;
         for (size_t i = 0; i < count; ++i) {
-            // nullmap & value ptr-array may not from offsets[i] because olap_convertor make offsets accumulate from _base_offset which may not is 0, but nullmap & value in this segment is from 0, we only need
-            // every single array row element size to go through the nullmap & value ptr-array, and also can go through the every row in array to keep with _rid++
+            // The offsets are rebased to the segment (rebase_offsets), not to this
+            // batch, while the nullmap and value array start at this batch's first
+            // element, so only the per-row element count is read from them; walking
+            // every row also keeps _rid in step.
             auto array_elem_size = offsets[i + 1] - offsets[i];
             // TODO(Amory).later we use object pool to avoid field creation
             std::unique_ptr<lucene::document::Field> new_field;

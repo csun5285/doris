@@ -255,7 +255,7 @@ public:
         // Note: Here we need a TabletSchema object, in this example we construct a simple schema,
         // Assuming that the 0th column in the schema is our array column (the actual UT has the corresponding TabletColumn)
         TabletSchemaSPtr tablet_schema = create_schema_with_array();
-        ArrayIndexInput array_input;
+        ArrayIndexFixture array_input;
         auto st =
                 array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
         EXPECT_EQ(st, Status::OK());
@@ -336,7 +336,7 @@ public:
         // Note: Here we need a TabletSchema object, in this example we construct a simple schema,
         // Assuming that the 0th column in the schema is our array column (the actual UT has the corresponding TabletColumn)
         TabletSchemaSPtr tablet_schema = create_schema_with_array();
-        ArrayIndexInput array_input;
+        ArrayIndexFixture array_input;
         auto st =
                 array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
         EXPECT_EQ(st, Status::OK());
@@ -440,7 +440,7 @@ public:
         // Construct TabletSchema (containing the array column) - reference the existing helper function
         TabletSchemaSPtr tablet_schema = create_schema_with_array();
         // In this schema, assume the 0th column is the key, and the arr1 column is the non-key column with index 1
-        ArrayIndexInput array_input;
+        ArrayIndexFixture array_input;
 
         auto st =
                 array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
@@ -546,7 +546,7 @@ public:
         // Construct TabletSchema (containing the array column) - reference the existing helper function
         TabletSchemaSPtr tablet_schema = create_schema_with_array();
         // In this schema, assume the 0th column is the key, and the arr1 column is the non-key column with index 1
-        ArrayIndexInput array_input;
+        ArrayIndexFixture array_input;
 
         auto st =
                 array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
@@ -641,7 +641,7 @@ public:
 
             // use TabletSchema containing the array column (arr1 is the non-key column with index 1 in the schema)
             TabletSchemaSPtr tablet_schema = create_schema_with_array();
-            ArrayIndexInput array_input;
+            ArrayIndexFixture array_input;
 
             auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0),
                                         block.rows());
@@ -689,7 +689,7 @@ public:
             block.insert(type_and_name);
 
             TabletSchemaSPtr tablet_schema = create_schema_with_array();
-            ArrayIndexInput array_input;
+            ArrayIndexFixture array_input;
 
             auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0),
                                         block.rows());
@@ -736,7 +736,7 @@ public:
             block.insert(type_and_name);
 
             TabletSchemaSPtr tablet_schema = create_schema_with_array();
-            ArrayIndexInput array_input;
+            ArrayIndexFixture array_input;
 
             auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0),
                                         block.rows());
@@ -841,7 +841,7 @@ public:
         array.add_sub_column(child);
         tablet_schema->append_column(array);
 
-        ArrayIndexInput array_input;
+        ArrayIndexFixture array_input;
         auto st =
                 array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
         EXPECT_EQ(st, Status::OK());
@@ -951,7 +951,7 @@ public:
         block.insert(type_and_name);
 
         TabletSchemaSPtr tablet_schema = create_schema_with_array();
-        ArrayIndexInput array_input;
+        ArrayIndexFixture array_input;
 
         auto st =
                 array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());

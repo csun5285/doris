@@ -1022,27 +1022,29 @@ Status ArrayColumnWriter::init() {
         RETURN_IF_ERROR(_null_writer->init());
     }
     RETURN_IF_ERROR(_item_writer->init());
+    if (!_opts.need_inverted_index && !_opts.need_ann_index) {
+        return Status::OK();
+    }
+    // The array index writers walk one storage-format cell per element, which
+    // only a scalar item writer's column produces.
+    if (dynamic_cast<ScalarColumnWriter*>(_item_writer.get()) == nullptr) {
+        return Status::NotSupported(
+                "an index on array column {} needs scalar items, but its items are {}",
+                get_column()->name(), _item_writer->get_column()->type());
+    }
+    _item_index_encoding.encoder = create_column_data_convertor(*_item_writer->get_column());
     if (_opts.need_inverted_index) {
-        auto* writer = dynamic_cast<ScalarColumnWriter*>(_item_writer.get());
-        if (writer != nullptr) {
-            RETURN_IF_ERROR(IndexColumnWriter::create(get_column(), &_inverted_index_writer,
-                                                      _opts.index_file_writer,
-                                                      _opts.inverted_indexes[0]));
-            // Same unconditional forwarding as the scalar path: after
-            // create()/init(), before any array value is added.
-            _inverted_index_writer->set_direct_load(_opts.is_direct_load);
-        }
+        RETURN_IF_ERROR(IndexColumnWriter::create(get_column(), &_inverted_index_writer,
+                                                  _opts.index_file_writer,
+                                                  _opts.inverted_indexes[0]));
+        // Same unconditional forwarding as the scalar path: after
+        // create()/init(), before any array value is added.
+        _inverted_index_writer->set_direct_load(_opts.is_direct_load);
     }
     if (_opts.need_ann_index) {
-        auto* writer = dynamic_cast<ScalarColumnWriter*>(_item_writer.get());
-        if (writer != nullptr) {
-            _ann_index_writer = std::make_unique<AnnIndexColumnWriter>(_opts.index_file_writer,
-                                                                       _opts.ann_index);
-            RETURN_IF_ERROR(_ann_index_writer->init());
-        }
-    }
-    if (_inverted_index_writer != nullptr || _ann_index_writer != nullptr) {
-        _item_index_encoding.encoder = create_column_data_convertor(*_item_writer->get_column());
+        _ann_index_writer =
+                std::make_unique<AnnIndexColumnWriter>(_opts.index_file_writer, _opts.ann_index);
+        RETURN_IF_ERROR(_ann_index_writer->init());
     }
     return Status::OK();
 }
@@ -1248,12 +1250,8 @@ namespace {
 
 // The schema says nullable but the runtime column is not: write all-zero null
 // bits so the null column stays row-aligned with the data.
-Status append_zero_nulls(ScalarColumnWriter* null_writer, IndexColumnWriter* index_writer,
-                         size_t num_rows) {
+Status append_zero_nulls(ScalarColumnWriter* null_writer, size_t num_rows) {
     std::vector<uint8_t> zeros(num_rows, 0);
-    if (index_writer != nullptr) {
-        RETURN_IF_ERROR(index_writer->add_array_nulls(zeros.data(), num_rows));
-    }
     return null_writer->append_null_signs(zeros.data(), num_rows);
 }
 
@@ -1280,7 +1278,7 @@ Status StructColumnWriter::append(const IColumn& column, size_t row_pos, size_t 
         if (null_map != nullptr) {
             RETURN_IF_ERROR(_null_writer->append_null_signs(null_map, num_rows));
         } else {
-            RETURN_IF_ERROR(append_zero_nulls(_null_writer.get(), nullptr, num_rows));
+            RETURN_IF_ERROR(append_zero_nulls(_null_writer.get(), num_rows));
         }
     }
     return Status::OK();
@@ -1295,69 +1293,38 @@ Status ArrayColumnWriter::append(const IColumn& column, size_t row_pos, size_t n
                                      nested.get_name());
     }
 
-    const size_t start_offset = col_array->offset_at(cast_set<ssize_t, size_t, false>(row_pos));
-    const size_t end_offset =
-            col_array->offset_at(cast_set<ssize_t, size_t, false>(row_pos + num_rows));
-    const size_t elem_size = end_offset - start_offset;
+    // The items are staged for the index writers only when one exists; the item
+    // writer encodes its own copy for the data pages.
+    ColumnEncoding* item_encoding =
+            _item_index_encoding.encoder != nullptr ? &_item_index_encoding : nullptr;
+    RETURN_IF_ERROR(stage_array_index_input(*col_array, row_pos, num_rows, _array_base_offset,
+                                            item_encoding, &_staged));
+    _array_base_offset += _staged.element_cnt;
 
-    // num_rows + 1 offsets: the offset writer reads offsets[num_rows] as the
-    // next page marker. _array_base_offset carries the segment-so-far total.
-    _array_offsets_buffer.clear();
-    _array_offsets_buffer.reserve(num_rows + 1);
-    for (size_t i = 0; i <= num_rows; ++i) {
-        _array_offsets_buffer.push_back(
-                col_array->offset_at(cast_set<ssize_t, size_t, false>(i + row_pos)) - start_offset +
-                _array_base_offset);
-    }
-    _array_base_offset += elem_size;
-
-    if (elem_size > 0) {
-        RETURN_IF_ERROR(_item_writer->append(*col_array->get_data_ptr(), start_offset, elem_size));
-    }
-
-    // The index writers walk one storage-format cell per element, which only a
-    // scalar item writer's column produces, so both feeds check for it. The
-    // items are encoded here for the index; the item writer encodes its own
-    // copy for the data pages.
-    const bool item_is_scalar = dynamic_cast<ScalarColumnWriter*>(_item_writer.get()) != nullptr;
-    const void* item_data = nullptr;
-    const uint8_t* item_null = nullptr;
-    if (_item_index_encoding.encoder != nullptr && item_is_scalar && elem_size > 0) {
+    if (_staged.element_cnt > 0) {
+        const size_t first_item = col_array->offset_at(cast_set<ssize_t, size_t, false>(row_pos));
         RETURN_IF_ERROR(
-                _item_index_encoding.encode(*col_array->get_data_ptr(), start_offset, elem_size));
-        item_data = _item_index_encoding.scratch.data;
-        item_null = _item_index_encoding.scratch.nullmap;
-    }
-    const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(_array_offsets_buffer.data());
-
-    if (_opts.need_inverted_index && item_is_scalar) {
-        RETURN_IF_ERROR(_inverted_index_writer->add_array_values(
-                field_type_size(_item_writer->get_column()->type()), item_data, item_null,
-                offsets_ptr, num_rows));
-    }
-    if (_opts.need_ann_index) {
-        if (!item_is_scalar) {
-            return Status::NotSupported(
-                    "Ann index can only be build on array with scalar type. but got {} as nested",
-                    _item_writer->get_column()->type());
-        }
-        RETURN_IF_ERROR(_ann_index_writer->add_array_values(
-                field_type_size(_item_writer->get_column()->type()), item_data, item_null,
-                offsets_ptr, num_rows));
+                _item_writer->append(*col_array->get_data_ptr(), first_item, _staged.element_cnt));
     }
 
-    RETURN_IF_ERROR(_offset_writer->append_offsets(_array_offsets_buffer.data(), num_rows));
+    const size_t item_cell_size = field_type_size(_item_writer->get_column()->type());
+    if (_inverted_index_writer != nullptr) {
+        RETURN_IF_ERROR(feed_array_index(_inverted_index_writer.get(), item_cell_size, _staged,
+                                         num_rows, null_map));
+    }
+    if (_ann_index_writer != nullptr) {
+        // The ANN writer takes no null map: it rejects one outright.
+        RETURN_IF_ERROR(feed_array_index(_ann_index_writer.get(), item_cell_size, _staged, num_rows,
+                                         nullptr));
+    }
+
+    RETURN_IF_ERROR(_offset_writer->append_offsets(_staged.offsets.data(), num_rows));
 
     if (is_nullable()) {
         if (null_map != nullptr) {
-            if (_opts.need_inverted_index) {
-                RETURN_IF_ERROR(_inverted_index_writer->add_array_nulls(null_map, num_rows));
-            }
             RETURN_IF_ERROR(_null_writer->append_null_signs(null_map, num_rows));
         } else {
-            RETURN_IF_ERROR(append_zero_nulls(
-                    _null_writer.get(),
-                    _opts.need_inverted_index ? _inverted_index_writer.get() : nullptr, num_rows));
+            RETURN_IF_ERROR(append_zero_nulls(_null_writer.get(), num_rows));
         }
     }
     return Status::OK();
@@ -1372,24 +1339,14 @@ Status MapColumnWriter::append(const IColumn& column, size_t row_pos, size_t num
                                      nested.get_name());
     }
 
-    const size_t start_offset = col_map->offset_at(cast_set<ssize_t, size_t, false>(row_pos));
-    const size_t end_offset =
-            col_map->offset_at(cast_set<ssize_t, size_t, false>(row_pos + num_rows));
-    const size_t elem_size = end_offset - start_offset;
-
-    _map_offsets_buffer.clear();
-    _map_offsets_buffer.reserve(num_rows + 1);
-    for (size_t i = 0; i <= num_rows; ++i) {
-        _map_offsets_buffer.push_back(
-                col_map->offset_at(cast_set<ssize_t, size_t, false>(i + row_pos)) - start_offset +
-                _map_base_offset);
-    }
+    const size_t elem_size = rebase_offsets(col_map->get_offsets(), row_pos, num_rows,
+                                            _map_base_offset, &_map_offsets_buffer);
     _map_base_offset += elem_size;
 
     if (elem_size > 0) {
-        RETURN_IF_ERROR(_kv_writers[0]->append(*col_map->get_keys_ptr(), start_offset, elem_size));
-        RETURN_IF_ERROR(
-                _kv_writers[1]->append(*col_map->get_values_ptr(), start_offset, elem_size));
+        const size_t first_item = col_map->offset_at(cast_set<ssize_t, size_t, false>(row_pos));
+        RETURN_IF_ERROR(_kv_writers[0]->append(*col_map->get_keys_ptr(), first_item, elem_size));
+        RETURN_IF_ERROR(_kv_writers[1]->append(*col_map->get_values_ptr(), first_item, elem_size));
     }
 
     // Order matters: the offset writer reads the kv writers' get_next_rowid()
@@ -1400,7 +1357,7 @@ Status MapColumnWriter::append(const IColumn& column, size_t row_pos, size_t num
         if (null_map != nullptr) {
             RETURN_IF_ERROR(_null_writer->append_null_signs(null_map, num_rows));
         } else {
-            RETURN_IF_ERROR(append_zero_nulls(_null_writer.get(), nullptr, num_rows));
+            RETURN_IF_ERROR(append_zero_nulls(_null_writer.get(), num_rows));
         }
     }
     return Status::OK();

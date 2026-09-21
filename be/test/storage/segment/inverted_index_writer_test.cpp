@@ -1324,7 +1324,7 @@ TEST_F(InvertedIndexWriterTest, ArrayValuesWithNulls) {
     block.insert(type_and_name);
 
     // Convert through the storage encoder (reference inverted_index_array_test.cpp)
-    ArrayIndexInput array_input;
+    ArrayIndexFixture array_input;
     auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
     EXPECT_EQ(st, Status::OK());
 
@@ -1453,7 +1453,7 @@ TEST_F(InvertedIndexWriterTest, NumericArrayWithErrorConditions) {
     block.insert(type_and_name);
 
     // Convert through the storage encoder (reference inverted_index_array_test.cpp)
-    ArrayIndexInput array_input;
+    ArrayIndexFixture array_input;
     auto st = array_input.build(tablet_schema->column(0), block.get_by_position(0), block.rows());
     EXPECT_EQ(st, Status::OK());
 
