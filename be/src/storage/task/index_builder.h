@@ -108,7 +108,7 @@ private:
                                            const segment_v2::SegmentSharedPtr& seg_ptr);
     // Feeds one converted block into the SNII build writers. group_writer_signs
     // parallels plan.build_columns: entry g holds the writer signs fed from
-    // convertor ordinal g.
+    // block position g, encoded through _encoders[g].
     Status _write_snii_index_data(
             const TabletSchemaSPtr& tablet_schema, Block* block, const SniiIndexRewritePlan& plan,
             const std::vector<std::vector<std::pair<int64_t, int64_t>>>& group_writer_signs);

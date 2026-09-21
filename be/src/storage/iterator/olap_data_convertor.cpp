@@ -22,6 +22,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <utility>
 
 #include "common/compiler_util.h" // IWYU pragma: keep
 #include "common/config.h"
@@ -49,6 +50,7 @@
 #include "exprs/aggregate/aggregate_function.h"
 #include "storage/olap_common.h"
 #include "storage/tablet/tablet_schema.h"
+#include "storage/types.h"
 #include "util/jsonb_document.h"
 #include "util/slice.h"
 
@@ -104,6 +106,9 @@ T* cells_for(ColumnStorageScratch& scratch, size_t num_rows) {
 }
 
 class BitmapDataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = Slice;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -136,6 +141,9 @@ protected:
 };
 
 class QuantileStateDataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = Slice;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -166,6 +174,9 @@ protected:
 };
 
 class HllDataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = Slice;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -196,6 +207,8 @@ protected:
 
 class CharDataConvertor final : public ColumnDataConvertor {
 public:
+    using Cell = Slice;
+
     explicit CharDataConvertor(size_t length) : _length(length) { DCHECK(length > 0); }
 
 protected:
@@ -252,6 +265,8 @@ private:
 
 class VarcharDataConvertor final : public ColumnDataConvertor {
 public:
+    using Cell = Slice;
+
     VarcharDataConvertor(bool check_length, bool is_jsonb = false)
             : _check_length(check_length), _is_jsonb(is_jsonb) {}
 
@@ -297,6 +312,9 @@ private:
 };
 
 class AggStateDataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = Slice;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -318,6 +336,9 @@ protected:
 };
 
 class DateV1DataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = uint24_t;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -334,6 +355,9 @@ protected:
 };
 
 class DateTimeV1DataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = uint64_t;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -351,6 +375,9 @@ protected:
 };
 
 class DecimalV1DataConvertor final : public ColumnDataConvertor {
+public:
+    using Cell = decimal12_t;
+
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
                          ColumnStorageScratch& scratch) const override {
@@ -374,6 +401,9 @@ template <PrimitiveType T>
 class PassthroughDataConvertor final : public ColumnDataConvertor {
     using CppType = typename PrimitiveTypeTraits<T>::CppType;
     using ColumnType = typename PrimitiveTypeTraits<T>::ColumnType;
+
+public:
+    using Cell = CppType;
 
 protected:
     Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
@@ -407,6 +437,16 @@ protected:
     }
 };
 
+// Every encoder is built here, where the FieldType it serves is known, so the
+// cell it produces is checked against the stride field_type_size() gives that
+// FieldType: the page builders and index writers step by the latter.
+template <FieldType FT, typename Encoder, typename... Args>
+ColumnDataConvertorUPtr make_encoder(Args&&... args) {
+    static_assert(sizeof(typename Encoder::Cell) == sizeof(typename CppTypeTraits<FT>::CppType),
+                  "the encoder's cell must be the storage cell of its FieldType");
+    return std::make_unique<Encoder>(std::forward<Args>(args)...);
+}
+
 } // namespace
 
 ColumnDataConvertorUPtr create_agg_state_data_convertor(const TabletColumn& column) {
@@ -417,12 +457,12 @@ ColumnDataConvertorUPtr create_agg_state_data_convertor(const TabletColumn& colu
     // Terialized type of most functions is string, and some of them are fixed object.
     // Finally, the serialized type of some special functions is bitmap/array/map...
     if (type == PrimitiveType::TYPE_STRING) {
-        return std::make_unique<VarcharDataConvertor>(false);
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_AGG_STATE, VarcharDataConvertor>(false);
     } else if (type == PrimitiveType::TYPE_BITMAP) {
-        return std::make_unique<BitmapDataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_AGG_STATE, BitmapDataConvertor>();
     } else if (type == PrimitiveType::TYPE_FIXED_LENGTH_OBJECT) {
         // INVALID_TYPE means function's serialized type is fixed object
-        return std::make_unique<AggStateDataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_AGG_STATE, AggStateDataConvertor>();
     } else {
         throw Exception(ErrorCode::INTERNAL_ERROR,
                         "OLAP_FIELD_TYPE_AGG_STATE meet unsupported type: {}",
@@ -433,100 +473,117 @@ ColumnDataConvertorUPtr create_agg_state_data_convertor(const TabletColumn& colu
 ColumnDataConvertorUPtr create_column_data_convertor(const TabletColumn& column) {
     switch (column.type()) {
     case FieldType::OLAP_FIELD_TYPE_BITMAP: {
-        return std::make_unique<BitmapDataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_BITMAP, BitmapDataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_QUANTILE_STATE: {
-        return std::make_unique<QuantileStateDataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_QUANTILE_STATE,
+                            QuantileStateDataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_AGG_STATE: {
         return create_agg_state_data_convertor(column);
     }
     case FieldType::OLAP_FIELD_TYPE_HLL: {
-        return std::make_unique<HllDataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_HLL, HllDataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_CHAR: {
-        return std::make_unique<CharDataConvertor>(column.length());
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_CHAR, CharDataConvertor>(column.length());
     }
     case FieldType::OLAP_FIELD_TYPE_VARCHAR: {
-        return std::make_unique<VarcharDataConvertor>(false);
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_VARCHAR, VarcharDataConvertor>(false);
     }
     case FieldType::OLAP_FIELD_TYPE_STRING: {
-        return std::make_unique<VarcharDataConvertor>(true);
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_STRING, VarcharDataConvertor>(true);
     }
     case FieldType::OLAP_FIELD_TYPE_DATE: {
-        return std::make_unique<DateV1DataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DATE, DateV1DataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_DATETIME: {
-        return std::make_unique<DateTimeV1DataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DATETIME, DateTimeV1DataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_DATEV2: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DATEV2>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DATEV2,
+                            PassthroughDataConvertor<TYPE_DATEV2>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DATETIMEV2: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DATETIMEV2>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DATETIMEV2,
+                            PassthroughDataConvertor<TYPE_DATETIMEV2>>();
     }
     case FieldType::OLAP_FIELD_TYPE_TIMESTAMP_NS: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_TIMESTAMP_NS>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_TIMESTAMP_NS,
+                            PassthroughDataConvertor<TYPE_TIMESTAMP_NS>>();
     }
     case FieldType::OLAP_FIELD_TYPE_TIMESTAMPTZ: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_TIMESTAMPTZ>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_TIMESTAMPTZ,
+                            PassthroughDataConvertor<TYPE_TIMESTAMPTZ>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL: {
-        return std::make_unique<DecimalV1DataConvertor>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DECIMAL, DecimalV1DataConvertor>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL32: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL32>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DECIMAL32,
+                            PassthroughDataConvertor<TYPE_DECIMAL32>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL64: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL64>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DECIMAL64,
+                            PassthroughDataConvertor<TYPE_DECIMAL64>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL128I: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL128I>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DECIMAL128I,
+                            PassthroughDataConvertor<TYPE_DECIMAL128I>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DECIMAL256: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DECIMAL256>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DECIMAL256,
+                            PassthroughDataConvertor<TYPE_DECIMAL256>>();
     }
     case FieldType::OLAP_FIELD_TYPE_JSONB: {
-        return std::make_unique<VarcharDataConvertor>(true, true);
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_JSONB, VarcharDataConvertor>(true, true);
     }
     case FieldType::OLAP_FIELD_TYPE_BOOL: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_BOOLEAN>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_BOOL,
+                            PassthroughDataConvertor<TYPE_BOOLEAN>>();
     }
     case FieldType::OLAP_FIELD_TYPE_TINYINT: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_TINYINT>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_TINYINT,
+                            PassthroughDataConvertor<TYPE_TINYINT>>();
     }
     case FieldType::OLAP_FIELD_TYPE_SMALLINT: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_SMALLINT>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_SMALLINT,
+                            PassthroughDataConvertor<TYPE_SMALLINT>>();
     }
     case FieldType::OLAP_FIELD_TYPE_INT: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_INT>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_INT, PassthroughDataConvertor<TYPE_INT>>();
     }
     case FieldType::OLAP_FIELD_TYPE_BIGINT: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_BIGINT>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_BIGINT,
+                            PassthroughDataConvertor<TYPE_BIGINT>>();
     }
     case FieldType::OLAP_FIELD_TYPE_UNSIGNED_BIGINT: {
         // used by internal length/offset columns (e.g. ColumnOffset64).
-        return std::make_unique<PassthroughDataConvertor<TYPE_UINT64>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_UNSIGNED_BIGINT,
+                            PassthroughDataConvertor<TYPE_UINT64>>();
     }
     case FieldType::OLAP_FIELD_TYPE_LARGEINT: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_LARGEINT>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_LARGEINT,
+                            PassthroughDataConvertor<TYPE_LARGEINT>>();
     }
     case FieldType::OLAP_FIELD_TYPE_IPV4: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_IPV4>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_IPV4, PassthroughDataConvertor<TYPE_IPV4>>();
     }
     case FieldType::OLAP_FIELD_TYPE_IPV6: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_IPV6>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_IPV6, PassthroughDataConvertor<TYPE_IPV6>>();
     }
     case FieldType::OLAP_FIELD_TYPE_FLOAT: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_FLOAT>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_FLOAT,
+                            PassthroughDataConvertor<TYPE_FLOAT>>();
     }
     case FieldType::OLAP_FIELD_TYPE_DOUBLE: {
-        return std::make_unique<PassthroughDataConvertor<TYPE_DOUBLE>>();
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_DOUBLE,
+                            PassthroughDataConvertor<TYPE_DOUBLE>>();
     }
     case FieldType::OLAP_FIELD_TYPE_VARIANT: {
         // A variant column's storage-facing form is its root JSONB, a string
         // column. Subcolumns get encoders from their own TabletColumn.
-        return std::make_unique<VarcharDataConvertor>(true);
+        return make_encoder<FieldType::OLAP_FIELD_TYPE_VARIANT, VarcharDataConvertor>(true);
     }
     default: {
         throw Exception(ErrorCode::INTERNAL_ERROR, "Invalid type in olap data convertor: {}",

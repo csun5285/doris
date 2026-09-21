@@ -220,12 +220,6 @@ Status create_column_writer(uint32_t cid, const TabletColumn& column,
     return Status::OK();
 }
 
-Status convert_and_write_column(const TabletColumn& column, DataTypePtr data_type,
-                                ColumnWriter* writer, const ColumnPtr& src_column, size_t num_rows,
-                                int column_id) {
-    return writer->append(*src_column, 0, num_rows);
-}
-
 namespace {
 
 Status append_sparse_array_column(const TabletColumn& tablet_column, ColumnWriter* writer,
@@ -233,9 +227,9 @@ Status append_sparse_array_column(const TabletColumn& tablet_column, ColumnWrite
                                   const ColumnPtr& values_column, std::span<const uint32_t> rowids,
                                   size_t total_rows) {
     // Example: values=[a,b], rowids=[1,4], total_rows=6 becomes
-    // [NULL,a,NULL,NULL,b,NULL]. ARRAY convertor output contains offsets/pointers rather than a
-    // fixed cell stride, so materialize only this path while it is being written. Scalar paths
-    // never allocate the full N-row representation.
+    // [NULL,a,NULL,NULL,b,NULL]. An ARRAY column is offsets plus items, not cells of one stride,
+    // so materialize only this path while it is being written. Scalar paths never allocate the
+    // full N-row representation.
     MutableColumnPtr full_column = values_column->clone_empty();
     full_column->reserve(total_rows);
     size_t next_row = 0;
@@ -305,9 +299,7 @@ Status append_sparse_converted_column(const TabletColumn& tablet_column, ColumnW
         DORIS_CHECK_LT(rowids.back(), total_rows);
     }
 
-    // Column ids and convertor slots advance together across physical paths. Reserve exactly one
-    // slot at the common entry point, including empty segments and paths whose forced cast removed
-    // every value; otherwise the next path is registered at this index but queried by the next id.
+    // An empty segment has nothing to write.
     if (total_rows == 0) {
         return Status::OK();
     }

@@ -67,10 +67,6 @@ Status create_column_writer(uint32_t cid, const TabletColumn& column,
                             ColumnWriterOptions* opt, int64_t none_null_value_size,
                             bool need_record_none_null_value_size);
 
-Status convert_and_write_column(const TabletColumn& column, DataTypePtr data_type,
-                                ColumnWriter* writer, const ColumnPtr& src_column, size_t num_rows,
-                                int column_id);
-
 // Converts only present values. Missing logical rows are appended as NULL; ARRAY uses a one-path
 // full-column fallback because its converted representation is not fixed-width/strided.
 Status append_sparse_converted_column(const TabletColumn& tablet_column, ColumnWriter* writer,

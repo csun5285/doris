@@ -438,7 +438,6 @@ ScalarColumnWriter::ScalarColumnWriter(const ColumnWriterOptions& opts, TabletCo
     DCHECK(opts.meta->has_encoding());
     DCHECK(opts.meta->has_compression());
     DCHECK(opts.meta->has_is_nullable());
-    DCHECK(file_writer != nullptr);
     _inverted_index_builders.resize(_opts.inverted_indexes.size());
     _encoding.encoder = create_column_data_convertor(*get_column());
 }
@@ -551,6 +550,7 @@ Status ScalarColumnWriter::init() {
 }
 
 Status ScalarColumnWriter::append_nulls(size_t num_rows) {
+    DCHECK(is_nullable());
     _null_bitmap_builder->add_run(true, num_rows);
     _next_rowid += num_rows;
     if (_opts.need_zone_map) {
@@ -712,6 +712,9 @@ Status ScalarColumnWriter::finish() {
 }
 
 Status ScalarColumnWriter::write_data() {
+    // append() never touches the file; only writing out does, so a unit test
+    // can drive the append path with no file at all.
+    DCHECK(_file_writer != nullptr);
     auto offset = _file_writer->bytes_appended();
     auto collect_uncompressed_bytes = [](const PageFooterPB& footer) {
         return footer.uncompressed_size() + footer.ByteSizeLong() +
@@ -856,7 +859,8 @@ Status ScalarColumnWriter::finish_current_page() {
 //         -> ColumnDataConvertor turns the slice into storage-format bytes
 //         -> the page builder
 //
-// This is the only way data reaches a column writer.
+// The composite writers' own null bits and offsets enter already encoded,
+// through append_null_signs / append_offsets below.
 ////////////////////////////////////////////////////////////////////////////////
 
 Status ScalarColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
@@ -875,6 +879,7 @@ Status ScalarColumnWriter::append(const IColumn& column, size_t row_pos, size_t 
 Status ScalarColumnWriter::append_null_signs(const uint8_t* null_signs, size_t num_rows) {
     // The signs are the data of this column, one byte per row, so they go in as
     // plain data. This writer's own column is never nullable.
+    DCHECK(!is_nullable());
     const uint8_t* ptr = null_signs;
     return _append_data(&ptr, num_rows);
 }
@@ -899,8 +904,10 @@ Status OffsetColumnWriter::init() {
     return Status::OK();
 }
 
-Status OffsetColumnWriter::append_offsets(const uint64_t* offsets, size_t num_rows) {
-    const auto* ptr = reinterpret_cast<const uint8_t*>(offsets);
+Status OffsetColumnWriter::append_offsets(std::span<const uint64_t> offsets, size_t num_rows) {
+    // _append_data reads offsets[num_rows] as the page's next array item ordinal.
+    DCHECK_EQ(offsets.size(), num_rows + 1);
+    const auto* ptr = reinterpret_cast<const uint8_t*>(offsets.data());
     return _append_data(&ptr, num_rows);
 }
 
@@ -1318,7 +1325,7 @@ Status ArrayColumnWriter::append(const IColumn& column, size_t row_pos, size_t n
                                          nullptr));
     }
 
-    RETURN_IF_ERROR(_offset_writer->append_offsets(_staged.offsets.data(), num_rows));
+    RETURN_IF_ERROR(_offset_writer->append_offsets(_staged.offsets, num_rows));
 
     if (is_nullable()) {
         if (null_map != nullptr) {
@@ -1351,7 +1358,7 @@ Status MapColumnWriter::append(const IColumn& column, size_t row_pos, size_t num
 
     // Order matters: the offset writer reads the kv writers' get_next_rowid()
     // when it finishes a page, so the kv writes have to land first.
-    RETURN_IF_ERROR(_offsets_writer->append_offsets(_map_offsets_buffer.data(), num_rows));
+    RETURN_IF_ERROR(_offsets_writer->append_offsets(_map_offsets_buffer, num_rows));
 
     if (is_nullable()) {
         if (null_map != nullptr) {

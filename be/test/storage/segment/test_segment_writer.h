@@ -42,7 +42,9 @@ public:
 
     // RowCursor hands over one already-storage-formatted cell at a time, so this
     // reaches into the scalar writer's byte entry rather than going through
-    // append(IColumn&). That entry also records the not-null bit for nullable
+    // append(IColumn&): the cell skips the encoder, so a CHAR value is written
+    // unpadded and a NaN uncanonicalized -- what these tests want, not what
+    // production writes. The entry also records the not-null bit for nullable
     // columns. ScalarColumnWriter makes this class a friend for exactly this.
     static Status append_one(segment_v2::ColumnWriter* writer, bool is_null, const void* data) {
         if (is_null) {

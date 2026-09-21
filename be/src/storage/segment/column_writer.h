@@ -157,9 +157,11 @@ public:
 
     virtual Status init() = 0;
 
-    // The only way in. Write rows [row_pos, row_pos + num_rows) straight from
-    // the compute-layer column. Scalar writers encode through their
-    // ColumnEncoding; composite writers recurse into their sub-writers.
+    // Write rows [row_pos, row_pos + num_rows) straight from the compute-layer
+    // column. Scalar writers encode through their ColumnEncoding; composite
+    // writers recurse into their sub-writers, and feed the null bits and offsets
+    // they encode themselves through ScalarColumnWriter::append_null_signs and
+    // OffsetColumnWriter::append_offsets.
     virtual Status append(const IColumn& column, size_t row_pos, size_t num_rows) = 0;
 
     // Write num_rows NULL rows without any data. The variant writers use this to
@@ -279,9 +281,11 @@ protected:
 private:
     // OffsetColumnWriter reaches into the page builder to close a full page.
     friend class OffsetColumnWriter;
-    // Test-only, feeds RowCursor cells one at a time. See
+    // Test-only: TestVerticalSegmentWriter feeds RowCursor cells, already in
+    // storage format, straight into _append_data -- so without the encoder's
+    // CHAR padding and NaN canonicalization. See
     // be/test/storage/segment/test_segment_writer.h.
-    friend class TestSegmentWriter;
+    friend class TestVerticalSegmentWriter;
 
     Status _internal_append_data_in_current_page(const uint8_t* ptr, size_t* num_written);
 
@@ -370,9 +374,9 @@ public:
 
     Status init() override;
 
-    // Write num_rows offsets. Callers pass num_rows + 1 entries: the extra tail
-    // offset goes into the page footer as the next array item ordinal.
-    Status append_offsets(const uint64_t* offsets, size_t num_rows);
+    // Write num_rows offsets. `offsets` holds num_rows + 1 entries: the extra
+    // tail offset goes into the page footer as the next array item ordinal.
+    Status append_offsets(std::span<const uint64_t> offsets, size_t num_rows);
 
 private:
     Status _append_data(const uint8_t** ptr, size_t num_rows) override;
