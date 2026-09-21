@@ -49,7 +49,6 @@
 #include "storage/index/inverted/inverted_index_fs_directory.h"
 #include "storage/index/inverted/inverted_index_writer.h"
 #include "storage/index/zone_map/zone_map_index.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/segment/array_index_input_helper.h"
 #include "storage/tablet/tablet_schema.h"
 #include "storage/tablet/tablet_schema_helper.h"

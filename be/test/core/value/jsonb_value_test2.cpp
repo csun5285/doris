@@ -28,6 +28,7 @@
 #include "core/string_ref.h"
 #include "gtest/gtest_pred_impl.h"
 #include "storage/iterator/olap_data_convertor.h"
+#include "storage/tablet/tablet_schema.h"
 
 namespace doris {
 
@@ -78,7 +79,7 @@ TEST(JsonbValueConvertorTest, JsonbValueValid) {
     Block block;
     block.insert(argument);
 
-    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    // 3. encode the column into segment file data
     ColumnEncoding encoder;
     TabletColumn jsonb_column = TabletColumn();
     jsonb_column.set_type(FieldType::OLAP_FIELD_TYPE_JSONB);
@@ -120,7 +121,7 @@ TEST(JsonbValueConvertorTest, JsonbValueValid) {
     block.clear();
     block.insert(argument1);
 
-    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    // 3. encode the column into segment file data
     encoder.encoder = create_column_data_convertor(jsonb_column);
     auto status1 = encoder.encode(*block.get_by_position(0).column, 0, 5);
     ASSERT_TRUE(status1.ok()) << status1.to_string();
@@ -177,7 +178,7 @@ TEST(JsonbValueConvertorTest, JsonbValueInvalid) {
     Block block;
     block.insert(argument);
 
-    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    // 3. encode the column into segment file data
     ColumnEncoding encoder;
     TabletColumn jsonb_column = TabletColumn();
     jsonb_column.set_type(FieldType::OLAP_FIELD_TYPE_JSONB);
@@ -225,7 +226,7 @@ TEST(JsonbValueConvertorTest, JsonbValueInvalid) {
     block.clear();
     block.insert(argument1);
 
-    // 3. use VarcharDataConvertor::encode to convert column data to segment file data
+    // 3. encode the column into segment file data
     encoder.encoder = create_column_data_convertor(jsonb_column);
     // This second encode's result is deliberately not what the assertions below
     // check — they check the first encode. That was true before the encoder

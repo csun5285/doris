@@ -27,6 +27,7 @@
 #include "storage/index/index_writer.h" // IndexColumnWriter, complete type for member calls
 #include "storage/index/inverted/inverted_index_desc.h"
 #include "storage/index/inverted/inverted_index_fs_directory.h"
+#include "storage/iterator/olap_data_convertor.h"
 #include "storage/olap_define.h"
 #include "storage/rowset/beta_rowset.h"
 #include "storage/rowset/rowset_writer_context.h"
@@ -1100,11 +1101,7 @@ Status IndexBuilder::_add_array(const std::string& column_name,
     auto* index_column_writer = index_column_writer_it->second.get();
 
     const uint8_t* outer_null_map = nullptr;
-    const IColumn* nested = typed_column.column.get();
-    if (const auto* nullable = check_and_get_column<ColumnNullable>(nested)) {
-        outer_null_map = nullable->get_null_map_data().data();
-        nested = &nullable->get_nested_column();
-    }
+    const IColumn* nested = &peel_nullable(*typed_column.column, 0, &outer_null_map);
     const auto* col_array = check_and_get_column<ColumnArray>(nested);
     if (col_array == nullptr) {
         return Status::InternalError("expected ColumnArray for {}, got {}", column_name,

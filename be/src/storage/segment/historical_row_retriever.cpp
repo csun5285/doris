@@ -33,7 +33,6 @@
 #include "runtime/exec_env.h"
 #include "storage/binlog.h"
 #include "storage/data_dir.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/key/row_key_encoder.h"
 #include "storage/mow/historical_row_fetcher.h"
 #include "storage/mow/key_probe.h"

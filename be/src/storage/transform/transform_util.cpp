@@ -19,7 +19,6 @@
 
 #include "common/cast_set.h"
 #include "core/block/block.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/tablet/tablet_schema.h"
 
 namespace doris::segment_v2 {

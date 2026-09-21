@@ -36,7 +36,6 @@
 #include "core/data_type/data_type_nullable.h"
 #include "exec/common/variant_util.h"
 #include "storage/index/indexed_column_writer.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/rowset/rowset_writer_context.h"
 #include "storage/segment/encoding_info.h"
 #include "storage/segment/variant/v2/variant_shredder.h"

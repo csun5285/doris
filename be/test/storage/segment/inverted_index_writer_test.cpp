@@ -34,6 +34,7 @@
 
 #include "common/config.h"
 #include "core/block/block.h"
+#include "core/data_type/data_type_array.h"
 #include "core/data_type/data_type_factory.hpp"
 #include "core/data_type/data_type_number.h"
 #include "core/field.h"
@@ -52,7 +53,6 @@
 #include "storage/index/snii/query/term_query.h"
 #include "storage/index/snii/snii_index_writer.h"
 #include "storage/index/snii/stats/snii_stats_provider.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/segment/array_index_input_helper.h"
 #include "storage/tablet/tablet_schema.h"
 #include "storage/types.h"

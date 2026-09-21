@@ -22,7 +22,7 @@
 #include "storage/index/index_file_writer.h"
 #include "storage/index/inverted/inverted_index_desc.h"
 #include "storage/index/snii/reader/snii_segment_reader.h"
-#include "storage/iterator/olap_data_convertor.h"
+#include "storage/iterator/column_storage_scratch.h"
 #include "storage/merger.h"
 #include "storage/olap_common.h"
 #include "storage/olap_define.h"

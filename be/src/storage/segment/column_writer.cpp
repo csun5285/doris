@@ -39,6 +39,7 @@
 #include "storage/index/inverted/inverted_index_writer.h"
 #include "storage/index/ordinal_page_index.h"
 #include "storage/index/zone_map/zone_map_index.h"
+#include "storage/iterator/olap_data_convertor.h"
 #include "storage/olap_common.h"
 #include "storage/segment/encoding_info.h"
 #include "storage/segment/options.h"
@@ -439,7 +440,7 @@ ScalarColumnWriter::ScalarColumnWriter(const ColumnWriterOptions& opts, TabletCo
     DCHECK(opts.meta->has_is_nullable());
     DCHECK(file_writer != nullptr);
     _inverted_index_builders.resize(_opts.inverted_indexes.size());
-    _encoder = create_column_data_convertor(*get_column());
+    _encoding.encoder = create_column_data_convertor(*get_column());
 }
 
 ScalarColumnWriter::~ScalarColumnWriter() {
@@ -861,11 +862,12 @@ Status ScalarColumnWriter::finish_current_page() {
 Status ScalarColumnWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
     DCHECK(num_rows > 0);
     DCHECK_LE(row_pos + num_rows, column.size());
-    RETURN_IF_ERROR(_encoder->encode(column, row_pos, num_rows, _scratch));
-    DCHECK(_scratch.data != nullptr);
-    const auto* ptr = _scratch.data;
-    if (_scratch.nullmap != nullptr) {
-        return _append_nullable(_scratch.nullmap, &ptr, num_rows);
+    RETURN_IF_ERROR(_encoding.encode(column, row_pos, num_rows));
+    const ColumnStorageScratch& scratch = _encoding.scratch;
+    DCHECK(scratch.data != nullptr);
+    const auto* ptr = scratch.data;
+    if (scratch.nullmap != nullptr) {
+        return _append_nullable(scratch.nullmap, &ptr, num_rows);
     }
     return _append_data(&ptr, num_rows);
 }
@@ -1040,7 +1042,7 @@ Status ArrayColumnWriter::init() {
         }
     }
     if (_inverted_index_writer != nullptr || _ann_index_writer != nullptr) {
-        _item_index_encoder = create_column_data_convertor(*_item_writer->get_column());
+        _item_index_encoding.encoder = create_column_data_convertor(*_item_writer->get_column());
     }
     return Status::OK();
 }
@@ -1244,17 +1246,6 @@ Status VariantColumnWriter::write_bloom_filter_index() {
 
 namespace {
 
-// Splits off the null map (already offset to row_pos) and returns the column
-// underneath. Mirrors what ColumnDataConvertor::bind does for scalar columns.
-const IColumn& peel_nullable(const IColumn& column, size_t row_pos, const uint8_t** null_map) {
-    *null_map = nullptr;
-    if (const auto* nullable = check_and_get_column<ColumnNullable>(&column)) {
-        *null_map = nullable->get_null_map_data().data() + row_pos;
-        return nullable->get_nested_column();
-    }
-    return column;
-}
-
 // The schema says nullable but the runtime column is not: write all-zero null
 // bits so the null column stays row-aligned with the data.
 Status append_zero_nulls(ScalarColumnWriter* null_writer, IndexColumnWriter* index_writer,
@@ -1331,11 +1322,11 @@ Status ArrayColumnWriter::append(const IColumn& column, size_t row_pos, size_t n
     const bool item_is_scalar = dynamic_cast<ScalarColumnWriter*>(_item_writer.get()) != nullptr;
     const void* item_data = nullptr;
     const uint8_t* item_null = nullptr;
-    if (_item_index_encoder != nullptr && item_is_scalar && elem_size > 0) {
-        RETURN_IF_ERROR(_item_index_encoder->encode(*col_array->get_data_ptr(), start_offset,
-                                                    elem_size, _item_index_scratch));
-        item_data = _item_index_scratch.data;
-        item_null = _item_index_scratch.nullmap;
+    if (_item_index_encoding.encoder != nullptr && item_is_scalar && elem_size > 0) {
+        RETURN_IF_ERROR(
+                _item_index_encoding.encode(*col_array->get_data_ptr(), start_offset, elem_size));
+        item_data = _item_index_encoding.scratch.data;
+        item_null = _item_index_encoding.scratch.nullmap;
     }
     const auto* offsets_ptr = reinterpret_cast<const uint8_t*>(_array_offsets_buffer.data());
 

@@ -30,7 +30,6 @@
 #include "core/value/bitmap_value.h"
 #include "core/value/timestamp_ns_value.h"
 #include "exec/common/int_exp.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/key/row_key_encoder.h"
 #include "storage/mow/historical_row_fetcher.h"
 #include "storage/mow/key_probe.h"

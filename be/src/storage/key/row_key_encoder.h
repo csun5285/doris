@@ -25,7 +25,7 @@
 #include <vector>
 
 #include "common/status.h"
-#include "storage/iterator/olap_data_convertor.h"
+#include "storage/iterator/column_storage_scratch.h"
 
 namespace doris {
 

@@ -48,11 +48,7 @@ struct ArrayIndexInput {
         outer_nullmap = nullptr;
         item_encoder.encoder = create_column_data_convertor(array_column.get_sub_column(0));
 
-        const IColumn* nested = typed_column.column.get();
-        if (const auto* nullable = check_and_get_column<ColumnNullable>(nested)) {
-            outer_nullmap = nullable->get_null_map_data().data();
-            nested = &nullable->get_nested_column();
-        }
+        const IColumn* nested = &peel_nullable(*typed_column.column, 0, &outer_nullmap);
         const auto* col_array = check_and_get_column<ColumnArray>(nested);
         if (col_array == nullptr) {
             return Status::InternalError("expected ColumnArray, got {}", nested->get_name());

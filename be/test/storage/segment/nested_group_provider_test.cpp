@@ -29,7 +29,6 @@
 #include <roaring/roaring.hh>
 
 #include "core/column/variant_v2/column_variant_v2.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/segment/column_writer.h"
 #include "storage/segment/variant/variant_column_reader.h"
 #include "storage/segment/variant/variant_statistics.h"

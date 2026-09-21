@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/block/column_with_type_and_name.h"
 #include "core/column/column_array.h"
 #include "core/data_type/data_type_nullable.h"
 #include "core/data_type/data_type_number.h"
@@ -93,19 +94,15 @@ FieldType field_type() {
     }
 }
 
-// One column's encoder plus the buffers it writes into, held together the way
-// a column writer holds them.
+// The pair a column writer holds, typed for one numeric source.
 template <PrimitiveType T>
-struct TestEncoder {
-    ColumnDataConvertorUPtr encoder;
-    ColumnStorageScratch scratch;
-
-    explicit TestEncoder(bool nullable)
-            : encoder(create_column_data_convertor(
-                      create_tablet_column(field_type<T>(), nullable))) {}
+struct TestEncoder : ColumnEncoding {
+    explicit TestEncoder(bool nullable) {
+        encoder = create_column_data_convertor(create_tablet_column(field_type<T>(), nullable));
+    }
 
     Status encode(const NumericSource<T>& source, size_t row_pos, size_t num_rows) {
-        return encoder->encode(*source.typed_column.column, row_pos, num_rows, scratch);
+        return ColumnEncoding::encode(*source.typed_column.column, row_pos, num_rows);
     }
 
     const CppType<T>* data() const { return reinterpret_cast<const CppType<T>*>(scratch.data); }

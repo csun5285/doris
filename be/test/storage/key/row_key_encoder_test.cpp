@@ -38,7 +38,6 @@
 #include "core/extended_types.h"
 #include "core/string_ref.h"
 #include "core/value/vdatetime_value.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/olap_common.h"
 #include "storage/tablet/tablet_schema.h" // IWYU pragma: keep
 #include "storage/tablet/tablet_schema_helper.h"

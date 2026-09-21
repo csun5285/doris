@@ -26,6 +26,8 @@
 #include "core/string_ref.h"
 #include "gtest/gtest_pred_impl.h"
 #include "storage/iterator/olap_data_convertor.h"
+#include "storage/olap_common.h"
+#include "storage/tablet/tablet_schema.h"
 #include "util/slice.h"
 
 namespace doris {
@@ -34,9 +36,18 @@ namespace {
 
 const std::string kStr = "Allemande"; // NOLINT(runtime/string)
 
-// The storage cells CharDataConvertor produced, read back off the scratch.
+// The storage cells the CHAR encoder produced, read back off the scratch.
 const Slice* cells_of(const ColumnStorageScratch& scratch) {
     return reinterpret_cast<const Slice*>(scratch.data);
+}
+
+ColumnEncoding char_encoding(size_t length) {
+    TabletColumn column(FieldAggregationMethod::OLAP_FIELD_AGGREGATION_NONE,
+                        FieldType::OLAP_FIELD_TYPE_CHAR, false);
+    column.set_length(static_cast<int32_t>(length));
+    ColumnEncoding encoding;
+    encoding.encoder = create_column_data_convertor(column);
+    return encoding;
 }
 
 } // namespace
@@ -51,16 +62,15 @@ TEST(CharTypePaddingTest, AlreadyPaddedRowsAreNotCopied) {
         input->insert_data(kStr.data(), kStr.length());
     }
 
-    CharDataConvertor convertor(kStr.length());
-    ColumnStorageScratch scratch;
-    ASSERT_TRUE(convertor.encode(*input, 0, kRows, scratch).ok());
+    ColumnEncoding encoding = char_encoding(kStr.length());
+    ASSERT_TRUE(encoding.encode(*input, 0, kRows).ok());
 
-    const Slice* cells = cells_of(scratch);
+    const Slice* cells = cells_of(encoding.scratch);
     for (size_t i = 0; i < kRows; i++) {
         EXPECT_EQ(cells[i].size, kStr.length());
         EXPECT_EQ(cells[i].data, input->get_data_at(i).data) << "row " << i << " was copied";
     }
-    EXPECT_TRUE(scratch.bytes.empty());
+    EXPECT_TRUE(encoding.scratch.bytes.empty());
 }
 
 // Short rows are padded out to the declared width with zeroes, which is the
@@ -72,11 +82,10 @@ TEST(CharTypePaddingTest, ShortRowsArePaddedWithZeroes) {
         input->insert_data(kStr.data(), kStr.length() - i);
     }
 
-    CharDataConvertor convertor(kStr.length());
-    ColumnStorageScratch scratch;
-    ASSERT_TRUE(convertor.encode(*input, 0, rows, scratch).ok());
+    ColumnEncoding encoding = char_encoding(kStr.length());
+    ASSERT_TRUE(encoding.encode(*input, 0, rows).ok());
 
-    const Slice* cells = cells_of(scratch);
+    const Slice* cells = cells_of(encoding.scratch);
     for (size_t i = 0; i < rows; i++) {
         ASSERT_EQ(cells[i].size, kStr.length()) << "row " << i;
         const std::string cell(cells[i].data, cells[i].size);

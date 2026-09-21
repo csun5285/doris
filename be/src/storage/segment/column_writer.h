@@ -37,7 +37,7 @@
 #include "storage/index/ann/ann_index_writer.h"
 #include "storage/index/bloom_filter/bloom_filter.h"
 #include "storage/index/inverted/inverted_index_writer.h"
-#include "storage/iterator/olap_data_convertor.h"
+#include "storage/iterator/column_storage_scratch.h"
 #include "storage/segment/common.h"
 #include "storage/segment/options.h"
 #include "storage/segment/variant/nested_group_provider.h"
@@ -157,8 +157,8 @@ public:
     virtual Status init() = 0;
 
     // The only way in. Write rows [row_pos, row_pos + num_rows) straight from
-    // the compute-layer column. Scalar writers own a ColumnDataConvertor and
-    // go through it; composite writers recurse into their sub-writers.
+    // the compute-layer column. Scalar writers encode through their
+    // ColumnEncoding; composite writers recurse into their sub-writers.
     virtual Status append(const IColumn& column, size_t row_pos, size_t num_rows) = 0;
 
     // Write num_rows NULL rows without any data. The variant writers use this to
@@ -354,8 +354,7 @@ private:
     // The compute -> storage conversion for this column: an immutable encoder
     // built once from the schema, and the buffers it writes into, reused across
     // appends.
-    ColumnDataConvertorUPtr _encoder;
-    ColumnStorageScratch _scratch;
+    ColumnEncoding _encoding;
 };
 
 // offsetColumnWriter is used column which has offset column, like array, map.
@@ -534,8 +533,7 @@ private:
     // The array index writers walk one storage-format cell per element, so this
     // encodes the items for them. Only built when this column has such an index
     // and the items are scalar, which is the only case those writers support.
-    ColumnDataConvertorUPtr _item_index_encoder;
-    ColumnStorageScratch _item_index_scratch;
+    ColumnEncoding _item_index_encoding;
     ColumnWriterOptions _opts;
     // Disk offsets restart at 0 per segment while in-memory offsets are block
     // absolute, so this accumulates across append() calls.

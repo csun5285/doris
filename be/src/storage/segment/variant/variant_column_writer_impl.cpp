@@ -818,12 +818,8 @@ Status VariantDocCompactWriter::write_bloom_filter_index() {
 }
 Status VariantDocCompactWriter::append(const IColumn& column, size_t row_pos, size_t num_rows) {
     const uint8_t* null_map = nullptr;
-    const IColumn* nested = &column;
-    if (const auto* nullable = check_and_get_column<ColumnNullable>(&column)) {
-        null_map = nullable->get_null_map_data().data() + row_pos;
-        nested = &nullable->get_nested_column();
-    }
-    return _append(*nested, row_pos, num_rows, null_map);
+    const IColumn& nested = peel_nullable(column, row_pos, &null_map);
+    return _append(nested, row_pos, num_rows, null_map);
 }
 
 Status VariantDocCompactWriter::_write_materialized_subcolumns(

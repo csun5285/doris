@@ -29,7 +29,6 @@
 #include "core/column/column_nullable.h"
 #include "core/column/column_vector.h"
 #include "storage/binlog.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/key/row_key_encoder.h"
 #include "storage/mow/historical_row_fetcher.h"
 #include "storage/partial_update_info.h"

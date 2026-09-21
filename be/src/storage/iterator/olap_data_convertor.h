@@ -17,95 +17,21 @@
 
 #pragma once
 
-#include <assert.h>
-#include <glog/logging.h>
-#include <stdint.h>
-#include <string.h>
-
-#include <algorithm>
-#include <cmath>
-#include <limits>
-#include <memory>
-#include <ostream>
-#include <utility>
-#include <vector>
+#include <cstddef>
 
 #include "common/status.h"
-#include "core/assert_cast.h"
-#include "core/block/column_with_type_and_name.h"
-#include "core/column/column.h"
-#include "core/column/column_nullable.h"
-#include "core/column/column_string.h"
-#include "core/column/column_vector.h"
-#include "core/data_type/data_type.h"
-#include "core/data_type/data_type_array.h"
-#include "core/data_type/data_type_factory.hpp"
-#include "core/data_type/data_type_map.h"
-#include "core/data_type/data_type_variant.h"
-#include "core/decimal12.h"
-#include "core/pod_array_fwd.h"
-#include "core/string_ref.h"
-#include "core/types.h"
-#include "core/uint24.h"
-#include "util/slice.h"
+#include "storage/iterator/column_storage_scratch.h"
 
 namespace doris {
 
-class TabletSchema;
+class IColumn;
 class TabletColumn;
-
-class Block;
-class ColumnArray;
-class ColumnMap;
-class DataTypeMap;
-
-// One batch of storage-format bytes plus everything they are made of. The
-// caller owns one of these per column it encodes and reuses it across batches;
-// that is what lets the encoders themselves stay immutable. Only the encoders
-// write the members.
-//
-// The result borrows from the source column -- `nullmap` always, and `data` too
-// for the types that need no conversion -- so it is readable only while the
-// caller still holds the column it encoded, and only until the next encode into
-// this scratch.
-struct ColumnStorageScratch {
-    // num_rows storage-format cells laid out back to back. One cell is
-    // `CppTypeTraits<the column's FieldType>::CppType` -- uint24_t for a v1
-    // DATE, decimal12_t for a DECIMALV2, Slice for anything string-shaped --
-    // and the stride is field_type_size() of that same FieldType. It stays a
-    // byte pointer because the FieldType is only known at runtime; the page
-    // builders and KeyCoders reinterpret it back on their side. Every encode
-    // that returns OK sets it.
-    const uint8_t* data = nullptr;
-    // One byte per row, already offset to the first encoded row. Null means the
-    // source column is not nullable, so this batch has no null bits at all.
-    const UInt8* nullmap = nullptr;
-
-    // One {pointer, length} cell per row, for the string-shaped and object types.
-    PaddedPODArray<Slice> slices;
-    // The bytes `data` or `slices` point into: the repacked fixed-width values,
-    // CHAR's padded cells, or the serialized object bytes. One encoder only
-    // ever puts one of those here.
-    PaddedPODArray<uint8_t> bytes;
-
-    // Whether the row at `offset` within the encoded batch is null.
-    bool is_null_at(size_t offset) const { return nullmap != nullptr && nullmap[offset] != 0; }
-
-    // `bytes` read back as T cells; PaddedPODArray over-aligns its buffer.
-    template <typename T>
-    T* cells(size_t num_rows) {
-        bytes.resize(num_rows * sizeof(T));
-        return reinterpret_cast<T*>(bytes.data());
-    }
-};
-
-class ColumnDataConvertor;
-using ColumnDataConvertorUPtr = std::unique_ptr<ColumnDataConvertor>;
-using ColumnDataConvertorSPtr = std::shared_ptr<ColumnDataConvertor>;
 
 // Build the encoder for one column. Every holder that needs storage-format
 // bytes owns its own encoder: the column writer, IndexBuilder, and the block
-// transform stages that encode keys before any writer exists.
+// transform stages that encode keys before any writer exists. The encoders
+// themselves are private to the factory: a caller picks one by TabletColumn,
+// never by name.
 ColumnDataConvertorUPtr create_column_data_convertor(const TabletColumn& column);
 ColumnDataConvertorUPtr create_agg_state_data_convertor(const TabletColumn& column);
 
@@ -116,10 +42,10 @@ ColumnDataConvertorUPtr create_agg_state_data_convertor(const TabletColumn& colu
 // source column -- and the ones that differ are what the subclasses are for.
 //
 // Immutable: everything an encode() needs arrives as an argument, and
-// everything it produces goes into the caller's scratch and the returned view,
-// so one encoder can serve any number of columns of its type at once.
+// everything it produces goes into the caller's scratch, so one encoder can
+// serve any number of columns of its type at once.
 //
-// The view stays valid until the next encode() into the same scratch.
+// The result stays valid until the next encode() into the same scratch.
 class ColumnDataConvertor {
 public:
     ColumnDataConvertor() = default;
@@ -129,178 +55,18 @@ public:
     ColumnDataConvertor(ColumnDataConvertor&&) = delete;
     ColumnDataConvertor& operator=(ColumnDataConvertor&&) = delete;
 
-    // Encode rows [row_pos, row_pos + num_rows) into storage format.
-    virtual Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                          ColumnStorageScratch& scratch) const = 0;
+    // Encode rows [row_pos, row_pos + num_rows) into storage format: empties
+    // the scratch, peels a Nullable column into scratch.nullmap and the column
+    // underneath, then hands that column to encode_nested().
+    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
+                  ColumnStorageScratch& scratch) const;
 
 protected:
-    // Every encode() starts here: clear the last result, and split a Nullable
-    // column into the null bits (offset to row_pos, left in the scratch) and
-    // the nested column, which is returned for the caller to encode.
-    static const IColumn& bind(const IColumn& column, size_t row_pos, size_t num_rows,
-                               ColumnStorageScratch& scratch);
-};
-
-class ObjectDataConvertor : public ColumnDataConvertor {
-protected:
-    // Serialized bytes go into scratch.bytes and scratch.slices points into
-    // them: one slice per row, filled in by the subclass.
-    static const IColumn& bind_object(const IColumn& column, size_t row_pos, size_t num_rows,
-                                      ColumnStorageScratch& scratch) {
-        const IColumn& nested = bind(column, row_pos, num_rows, scratch);
-        scratch.slices.resize(num_rows);
-        scratch.data = reinterpret_cast<const uint8_t*>(scratch.slices.data());
-        return nested;
-    }
-};
-
-class HllDataConvertor final : public ObjectDataConvertor {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-class BitmapDataConvertor final : public ObjectDataConvertor {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-class QuantileStateDataConvertor final : public ObjectDataConvertor {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-class CharDataConvertor : public ColumnDataConvertor {
-public:
-    CharDataConvertor(size_t length);
-    ~CharDataConvertor() override = default;
-
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-
-private:
-    static bool should_padding(const ColumnString* column, size_t padding_length) {
-        // Check sum of data length, including terminating zero.
-        return column->size() * padding_length != column->get_chars().size();
-    }
-
-    const size_t _length;
-};
-
-class VarcharDataConvertor : public ColumnDataConvertor {
-public:
-    VarcharDataConvertor(bool check_length, bool is_jsonb = false);
-    ~VarcharDataConvertor() override = default;
-
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-
-private:
-    // `null_map` is already offset to the encoded slice, as bind() produces it.
-    Status encode_string(const UInt8* null_map, const ColumnString* column_string, size_t row_pos,
-                         size_t num_rows, ColumnStorageScratch& scratch) const;
-
-    const bool _check_length;
-    // Make sure that the json binary data written in is the correct jsonb value.
-    const bool _is_jsonb = false;
-};
-
-class AggStateDataConvertor : public ColumnDataConvertor {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-// Base for the V1 layouts that repack every row into a narrower on-disk cell.
-template <typename T>
-class RepackDataConvertor : public ColumnDataConvertor {
-protected:
-    static const IColumn& bind_repack(const IColumn& column, size_t row_pos, size_t num_rows,
-                                      ColumnStorageScratch& scratch, T** cells) {
-        const IColumn& nested = bind(column, row_pos, num_rows, scratch);
-        *cells = scratch.template cells<T>(num_rows);
-        scratch.data = reinterpret_cast<const uint8_t*>(*cells);
-        return nested;
-    }
-};
-
-class DateV1DataConvertor : public RepackDataConvertor<uint24_t> {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-class DateTimeV1DataConvertor : public RepackDataConvertor<uint64_t> {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-class DecimalV1DataConvertor : public RepackDataConvertor<decimal12_t> {
-public:
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override;
-};
-
-// class PassthroughDataConvertor for simple types, which don't need to do any convert, like int, float, double, etc...
-template <PrimitiveType T>
-class PassthroughDataConvertor : public ColumnDataConvertor {
-public:
-    PassthroughDataConvertor() = default;
-    ~PassthroughDataConvertor() override = default;
-
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows,
-                  ColumnStorageScratch& scratch) const override {
-        using ColumnType = typename PrimitiveTypeTraits<T>::ColumnType;
-
-        const IColumn& nested = bind(column, row_pos, num_rows, scratch);
-        const auto* column_data = assert_cast<const ColumnType*>(&nested);
-
-        const CppType* values = column_data->get_data().data() + row_pos;
-        // DATA and ROW_BINLOG flush tasks may encode the same source Block concurrently,
-        // so this encoder must never mutate the source column or its nullable nested column.
-        // Most simple types can expose the requested source slice directly with zero copy.
-        // FLOAT/DOUBLE are special because storage requires a canonical NaN representation:
-        // scan only the requested slice and keep the zero-copy path when it contains no NaN;
-        // otherwise, normalize a copy in the caller's scratch.
-        if constexpr (T == TYPE_FLOAT || T == TYPE_DOUBLE) {
-            const CppType* values_end = values + num_rows;
-            const CppType* first_nan = std::find_if(
-                    values, values_end, [](CppType value) { return std::isnan(value); });
-            if (UNLIKELY(first_nan != values_end)) {
-                CppType* cells = scratch.template cells<CppType>(num_rows);
-                std::copy(values, values_end, cells);
-                for (CppType* cell = cells + (first_nan - values); cell != cells + num_rows;
-                     ++cell) {
-                    if (std::isnan(*cell)) {
-                        *cell = std::numeric_limits<CppType>::quiet_NaN();
-                    }
-                }
-                values = cells;
-            }
-        }
-        scratch.data = reinterpret_cast<const uint8_t*>(values);
-        return Status::OK();
-    }
-
-protected:
-    using CppType = typename PrimitiveTypeTraits<T>::CppType;
-};
-
-
-// One column's encoder together with the buffers it writes into. Every holder
-// of an encoder needs both, so they travel as a pair.
-struct ColumnEncoding {
-    ColumnDataConvertorUPtr encoder;
-    ColumnStorageScratch scratch;
-
-    Status encode(const IColumn& column, size_t row_pos, size_t num_rows) {
-        DCHECK(encoder != nullptr);
-        RETURN_IF_ERROR_OR_CATCH_EXCEPTION(encoder->encode(column, row_pos, num_rows, scratch));
-        return Status::OK();
-    }
+    // `nested` is the column with its Nullable wrapper peeled off. Its null
+    // bits, offset to row_pos, are already in scratch.nullmap (null when the
+    // column is not nullable); the rest of the scratch is empty.
+    virtual Status encode_nested(const IColumn& nested, size_t row_pos, size_t num_rows,
+                                 ColumnStorageScratch& scratch) const = 0;
 };
 
 } // namespace doris

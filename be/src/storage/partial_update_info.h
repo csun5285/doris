@@ -28,8 +28,8 @@
 
 #include "common/status.h"
 #include "core/column/column.h"
+#include "core/column/column_complex.h"
 #include "core/data_type/primitive_type.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/rowset/rowset_fwd.h"
 #include "storage/tablet/tablet_fwd.h"
 

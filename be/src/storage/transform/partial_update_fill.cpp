@@ -24,7 +24,6 @@
 #include "common/config.h"
 #include "core/block/block.h"
 #include "core/value/bitmap_value.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/key/row_key_encoder.h"
 #include "storage/mow/historical_row_fetcher.h"
 #include "storage/mow/key_probe.h"

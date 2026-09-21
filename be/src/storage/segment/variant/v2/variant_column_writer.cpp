@@ -27,7 +27,6 @@
 #include "core/column/column_string.h"
 #include "core/column/variant_v2/column_variant_v2.h"
 #include "exprs/function/parse/variant_jsonb_parse.h"
-#include "storage/iterator/olap_data_convertor.h"
 #include "storage/rowset/rowset_writer_context.h"
 #include "storage/segment/variant/v2/variant_shredder.h"
 #include "storage/segment/variant/variant_column_writer_impl.h"
