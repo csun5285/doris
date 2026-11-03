@@ -45,6 +45,7 @@
 #include "storage/cache/page_cache.h"
 #include "storage/olap_common.h"
 #include "storage/schema.h"
+#include "storage/segment/common.h"
 #include "storage/segment/page_handle.h"
 #include "storage/tablet/tablet_schema.h"
 #include "util/once.h"
@@ -56,6 +57,7 @@ class ShortKeyIndexDecoder;
 class ReadSchema;
 class StorageReadOptions;
 class PrimaryKeyIndexReader;
+class RowCursor;
 class RowwiseIterator;
 struct RowLocation;
 
@@ -171,6 +173,12 @@ public:
         DCHECK(_load_index_once.has_called() && _load_index_once.stored_result().ok());
         return _sk_index_decoder.get();
     }
+
+    // The rows [first, second) of the short key blocks that hold the first row whose key is
+    // not less than `key` (`is_include`) or greater than `key` (`!is_include`), found from the
+    // short key index alone. `upper_bound` caps `second`. Requires load_index().
+    std::pair<rowid_t, rowid_t> short_key_block_window(const RowCursor& key, bool is_include,
+                                                       rowid_t upper_bound) const;
 
     const PrimaryKeyIndexReader* get_primary_key_index() const {
         DCHECK(_load_index_once.has_called() && _load_index_once.stored_result().ok());

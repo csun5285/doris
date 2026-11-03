@@ -107,6 +107,7 @@
 #include "storage/segment/segment.h"
 #include "storage/segment/segment_prefetcher.h"
 #include "storage/segment/segment_read_ahead.h"
+#include "storage/segment/shared_segment_index_result.h"
 #include "storage/segment/variant/variant_column_reader.h"
 #include "storage/segment/virtual_column_iterator.h"
 #include "storage/tablet/tablet_schema.h"
@@ -845,24 +846,33 @@ Status SegmentIterator::_get_row_ranges_by_keys() {
         return Status::OK();
     }
 
+    auto compute_key_ranges = [this](RowRanges* result_ranges) -> Status {
+        for (auto& key_range : _opts.key_ranges) {
+            rowid_t lower_rowid = 0;
+            rowid_t upper_rowid = num_rows();
+            RETURN_IF_ERROR(_prepare_seek(key_range));
+            if (key_range.upper_key != nullptr) {
+                // If client want to read upper_bound, the include_upper is true. So we
+                // should get the first ordinal at which key is larger than upper_bound.
+                // So we call _lookup_ordinal with include_upper's negate
+                RETURN_IF_ERROR(_lookup_ordinal(*key_range.upper_key, !key_range.include_upper,
+                                                num_rows(), &upper_rowid));
+            }
+            if (upper_rowid > 0 && key_range.lower_key != nullptr) {
+                RETURN_IF_ERROR(_lookup_ordinal(*key_range.lower_key, key_range.include_lower,
+                                                upper_rowid, &lower_rowid));
+            }
+            auto row_range = RowRanges::create_single(lower_rowid, upper_rowid);
+            RowRanges::ranges_union(*result_ranges, row_range, result_ranges);
+        }
+        return Status::OK();
+    };
     RowRanges result_ranges;
-    for (auto& key_range : _opts.key_ranges) {
-        rowid_t lower_rowid = 0;
-        rowid_t upper_rowid = num_rows();
-        RETURN_IF_ERROR(_prepare_seek(key_range));
-        if (key_range.upper_key != nullptr) {
-            // If client want to read upper_bound, the include_upper is true. So we
-            // should get the first ordinal at which key is larger than upper_bound.
-            // So we call _lookup_ordinal with include_upper's negate
-            RETURN_IF_ERROR(_lookup_ordinal(*key_range.upper_key, !key_range.include_upper,
-                                            num_rows(), &upper_rowid));
-        }
-        if (upper_rowid > 0 && key_range.lower_key != nullptr) {
-            RETURN_IF_ERROR(_lookup_ordinal(*key_range.lower_key, key_range.include_lower,
-                                            upper_rowid, &lower_rowid));
-        }
-        auto row_range = RowRanges::create_single(lower_rowid, upper_rowid);
-        RowRanges::ranges_union(result_ranges, row_range, &result_ranges);
+    if (_opts.shared_index_result) {
+        RETURN_IF_ERROR(_opts.shared_index_result->key_ranges.get_or_compute(compute_key_ranges,
+                                                                             &result_ranges));
+    } else {
+        RETURN_IF_ERROR(compute_key_ranges(&result_ranges));
     }
     size_t pre_size = _row_bitmap.cardinality();
     _row_bitmap &= RowRanges::ranges_to_roaring(result_ranges);
@@ -978,8 +988,17 @@ Status SegmentIterator::_apply_scan_restrictions() {
         (!_opts.topn_filter_source_node_ids.empty() || !_opts.col_id_to_predicates.empty() ||
          _opts.delete_condition_predicates->num_of_column_predicate() > 0 ||
          !_common_expr_ctxs_push_down.empty())) {
-        RowRanges condition_row_ranges = RowRanges::create_single(_segment->num_rows());
-        RETURN_IF_ERROR(_get_row_ranges_from_conditions(&condition_row_ranges));
+        auto compute_condition_ranges = [this](RowRanges* row_ranges) -> Status {
+            *row_ranges = RowRanges::create_single(_segment->num_rows());
+            return _get_row_ranges_from_conditions(row_ranges);
+        };
+        RowRanges condition_row_ranges;
+        if (_opts.shared_index_result) {
+            RETURN_IF_ERROR(_opts.shared_index_result->condition_ranges.get_or_compute(
+                    compute_condition_ranges, &condition_row_ranges));
+        } else {
+            RETURN_IF_ERROR(compute_condition_ranges(&condition_row_ranges));
+        }
         size_t pre_size = _row_bitmap.cardinality();
         _row_bitmap &= RowRanges::ranges_to_roaring(condition_row_ranges);
         _opts.stats->rows_conditions_filtered += (pre_size - _row_bitmap.cardinality());
@@ -2217,60 +2236,40 @@ Status SegmentIterator::_lookup_ordinal(const RowCursor& key, bool is_include, r
 // If we can not find a valid key in this segment, we will set rowid to upper_bound
 // Otherwise return error.
 // 1. get [start, end) ordinal through short key index
-// 2. binary search to find exact ordinal that match the input condition
-// Make is_include template to reduce branch
+// 2. read the key columns of [start, end) and binary search them in memory
 Status SegmentIterator::_lookup_ordinal_from_sk_index(const RowCursor& key, bool is_include,
                                                       rowid_t upper_bound, rowid_t* rowid) {
-    const ShortKeyIndexDecoder* sk_index_decoder = _segment->get_short_key_index();
-    DCHECK(sk_index_decoder != nullptr);
-
-    std::string index_key;
-    key.encode_key_with_padding(&index_key, _segment->_tablet_schema->num_short_key_columns(),
-                                is_include);
-
+    auto [start, end] = _segment->short_key_block_window(key, is_include, upper_bound);
     const size_t num_key_cols = key.schema()->num_read_columns();
+    // The target row is after a row whose key compares to `key` as `cmp`.
+    auto target_is_after = [is_include](int cmp) { return cmp > 0 || (cmp == 0 && !is_include); };
 
-    ssize_t start_block_id = 0;
-    auto start_iter = sk_index_decoder->lower_bound(index_key);
-    if (start_iter.valid()) {
-        // Because previous block may contain this key, so we should set rowid to
-        // last block's first row.
-        start_block_id = start_iter.ordinal();
-        if (start_block_id > 0) {
-            start_block_id--;
-        }
-    } else {
-        // When we don't find a valid index item, which means all short key is
-        // smaller than input key, this means that this key may exist in the last
-        // row block. so we set the rowid to first row of last row block.
-        start_block_id = sk_index_decoder->num_items() - 1;
-    }
-    rowid_t start = cast_set<rowid_t>(start_block_id) * sk_index_decoder->num_rows_per_block();
-
-    rowid_t end = upper_bound;
-    auto end_iter = sk_index_decoder->upper_bound(index_key);
-    if (end_iter.valid()) {
-        end = cast_set<rowid_t>(end_iter.ordinal()) * sk_index_decoder->num_rows_per_block();
-    }
-
-    // binary search to find the exact key
-    while (start < end) {
-        rowid_t mid = (start + end) / 2;
-        RETURN_IF_ERROR(_seek_and_peek(mid));
-        int cmp = _compare_short_key_with_seek_block(key, num_key_cols);
-        if (cmp > 0) {
+    // The window spans more than two blocks only when many rows share one short key, e.g. a
+    // low-cardinality key prefix. Narrow it by peeking single rows before reading it whole.
+    const rowid_t max_rows_to_read = 2 * _segment->get_short_key_index()->num_rows_per_block();
+    while (start < end && end - start > max_rows_to_read) {
+        rowid_t mid = start + (end - start) / 2;
+        RETURN_IF_ERROR(_seek_and_peek(mid, 1));
+        if (target_is_after(_compare_short_key_with_seek_block(key, num_key_cols, 0))) {
             start = mid + 1;
-        } else if (cmp == 0) {
-            if (is_include) {
-                // lower bound
-                end = mid;
-            } else {
-                // upper bound
-                start = mid + 1;
-            }
         } else {
             end = mid;
         }
+    }
+
+    if (start < end) {
+        RETURN_IF_ERROR(_seek_and_peek(start, end - start));
+        rowid_t low = 0;
+        rowid_t high = end - start;
+        while (low < high) {
+            rowid_t mid = low + (high - low) / 2;
+            if (target_is_after(_compare_short_key_with_seek_block(key, num_key_cols, mid))) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        start += low;
     }
 
     *rowid = start;
@@ -2347,8 +2346,8 @@ Status SegmentIterator::_lookup_ordinal_from_pk_index(const RowCursor& key, bool
     return Status::OK();
 }
 
-// seek to the row and load that row to _seek_block
-Status SegmentIterator::_seek_and_peek(rowid_t rowid) {
+// seek to the row and load `num_rows` rows from it to _seek_block
+Status SegmentIterator::_seek_and_peek(rowid_t rowid, size_t num_rows) {
     {
         _opts.stats->block_init_seek_num += 1;
         SCOPED_RAW_TIMER(&_opts.stats->block_init_seek_ns);
@@ -2361,10 +2360,11 @@ Status SegmentIterator::_seek_and_peek(rowid_t rowid) {
     // it is easier to use row based memory layout for clear memory
     for (size_t i = 0; i < _seek_schema->num_read_columns(); ++i) {
         _seek_block[i]->clear();
-        size_t num_rows = 1;
-        RETURN_IF_ERROR(_seek_column_iterators[i]->next_batch(&num_rows, _seek_block[i]));
-        if (num_rows != 1) {
-            return Status::Error<ErrorCode::INTERNAL_ERROR>("nrows(1) != rows_read({})", num_rows);
+        size_t rows_read = num_rows;
+        RETURN_IF_ERROR(_seek_column_iterators[i]->next_batch(&rows_read, _seek_block[i]));
+        if (rows_read != num_rows) {
+            return Status::Error<ErrorCode::INTERNAL_ERROR>("nrows({}) != rows_read({})", num_rows,
+                                                            rows_read);
         }
     }
     return Status::OK();

@@ -140,6 +140,7 @@ private:
 
     std::pair<int64_t, int64_t> _segment_offsets;
     std::vector<RowRanges> _segment_row_ranges;
+    std::vector<std::shared_ptr<segment_v2::SharedSegmentIndexResult>> _segment_index_results;
 
     RowsetReaderContext* _read_context = nullptr;
     BetaRowsetSharedPtr _rowset;

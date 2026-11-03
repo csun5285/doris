@@ -43,6 +43,10 @@ class ColumnPredicate;
 
 struct IteratorRowRef;
 
+namespace segment_v2 {
+struct SharedSegmentIndexResult;
+} // namespace segment_v2
+
 class StorageReadOptions {
 public:
     // Every storage read needs a statistics sink. Deleting the default constructor keeps copied
@@ -157,6 +161,8 @@ public:
     // slots that cast may be eliminated in storage layer
     std::map<std::string, DataTypePtr> target_cast_type_for_variants;
     RowRanges row_ranges;
+    // Set when other readers read other parts of the same segment; they share its index results.
+    std::shared_ptr<segment_v2::SharedSegmentIndexResult> shared_index_result;
 
     // Per-segment row budget pushed down from the scanner (topn or general
     // limit). SegmentIterator applies it after predicate/common-expr filtering;

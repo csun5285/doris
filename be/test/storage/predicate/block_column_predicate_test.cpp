@@ -1392,6 +1392,92 @@ TEST_F(BlockColumnPredicateTest, test_timestamp_ns_zonemap_predicates) {
             zone_map_info, Field::create_field<TYPE_TIMESTAMP_NS>(maximum), true);
 }
 
+static segment_v2::ZoneMap int_zone_map(int32_t min_value, int32_t max_value) {
+    return segment_v2::ZoneMap {.min_value = Field::create_field<TYPE_INT>(min_value),
+                                .max_value = Field::create_field<TYPE_INT>(max_value),
+                                .has_null = false,
+                                .has_not_null = true};
+}
+
+static std::shared_ptr<HybridSet<PrimitiveType::TYPE_INT>> int_set_of_10_20_30() {
+    auto int_set = std::make_shared<HybridSet<PrimitiveType::TYPE_INT>>(false);
+    for (int32_t value : {30, 10, 20}) {
+        int_set->insert(&value);
+    }
+    return int_set;
+}
+
+TEST_F(BlockColumnPredicateTest, IN_LIST_ZONE_MAP_MATCHES_BY_VALUE) {
+    std::shared_ptr<ColumnPredicate> in_pred(
+            new InListPredicateBase<TYPE_INT, PredicateType::IN_LIST, FIXED_CONTAINER_MAX_SIZE + 1>(
+                    0, "", int_set_of_10_20_30(), false));
+    SingleColumnBlockPredicate in_block_pred(in_pred);
+    // Within [10, 30] but holding none of the values.
+    EXPECT_FALSE(in_block_pred.evaluate_and(int_zone_map(11, 19)));
+    EXPECT_FALSE(in_block_pred.evaluate_and(int_zone_map(21, 29)));
+    // Holding a value, at a bound or inside.
+    EXPECT_TRUE(in_block_pred.evaluate_and(int_zone_map(5, 10)));
+    EXPECT_TRUE(in_block_pred.evaluate_and(int_zone_map(15, 25)));
+    EXPECT_TRUE(in_block_pred.evaluate_and(int_zone_map(20, 20)));
+    EXPECT_TRUE(in_block_pred.evaluate_and(int_zone_map(30, 40)));
+    // Outside [10, 30].
+    EXPECT_FALSE(in_block_pred.evaluate_and(int_zone_map(0, 9)));
+    EXPECT_FALSE(in_block_pred.evaluate_and(int_zone_map(31, 40)));
+
+    // A clone for another column id matches the same pages.
+    SingleColumnBlockPredicate cloned_block_pred(in_pred->clone(1));
+    EXPECT_FALSE(cloned_block_pred.evaluate_and(int_zone_map(11, 19)));
+    EXPECT_TRUE(cloned_block_pred.evaluate_and(int_zone_map(15, 25)));
+}
+
+TEST_F(BlockColumnPredicateTest, NOT_IN_LIST_ZONE_MAP_KEEPS_EVERY_PAGE) {
+    std::shared_ptr<ColumnPredicate> not_in_pred(
+            new InListPredicateBase<TYPE_INT, PredicateType::NOT_IN_LIST,
+                                    FIXED_CONTAINER_MAX_SIZE + 1>(0, "", int_set_of_10_20_30(),
+                                                                  false));
+    SingleColumnBlockPredicate not_in_block_pred(not_in_pred);
+    EXPECT_TRUE(not_in_block_pred.evaluate_and(int_zone_map(11, 19)));
+}
+
+TEST_F(BlockColumnPredicateTest, IN_LIST_STRING_ZONE_MAP_MATCHES_BY_VALUE) {
+    auto string_zone_map = [](std::string min_value, std::string max_value) {
+        return segment_v2::ZoneMap {
+                .min_value = Field::create_field<TYPE_STRING>(std::move(min_value)),
+                .max_value = Field::create_field<TYPE_STRING>(std::move(max_value)),
+                .has_null = false,
+                .has_not_null = true};
+    };
+    auto string_set = std::make_shared<StringSet<>>(false);
+    for (std::string value : {std::string("melon"), std::string("apple")}) {
+        string_set->insert(value.data(), value.size());
+    }
+    std::shared_ptr<ColumnPredicate> string_pred(
+            new InListPredicateBase<TYPE_STRING, PredicateType::IN_LIST,
+                                    FIXED_CONTAINER_MAX_SIZE + 1>(0, "", string_set, false));
+    SingleColumnBlockPredicate string_block_pred(string_pred);
+    EXPECT_FALSE(string_block_pred.evaluate_and(string_zone_map("banana", "kiwi")));
+    EXPECT_TRUE(string_block_pred.evaluate_and(string_zone_map("apple", "apple")));
+    EXPECT_TRUE(string_block_pred.evaluate_and(string_zone_map("kiwi", "pear")));
+    EXPECT_FALSE(string_block_pred.evaluate_and(string_zone_map("peach", "pear")));
+}
+
+// Floating point values keep the check against the smallest and largest value.
+TEST_F(BlockColumnPredicateTest, IN_LIST_DOUBLE_ZONE_MAP_MATCHES_BY_BOUNDS) {
+    auto double_set = std::make_shared<HybridSet<PrimitiveType::TYPE_DOUBLE>>(false);
+    for (double value : {1.0, 3.0}) {
+        double_set->insert(&value);
+    }
+    std::shared_ptr<ColumnPredicate> double_pred(
+            new InListPredicateBase<TYPE_DOUBLE, PredicateType::IN_LIST,
+                                    FIXED_CONTAINER_MAX_SIZE + 1>(0, "", double_set, false));
+    SingleColumnBlockPredicate double_block_pred(double_pred);
+    EXPECT_TRUE(double_block_pred.evaluate_and(
+            segment_v2::ZoneMap {.min_value = Field::create_field<TYPE_DOUBLE>(1.5),
+                                 .max_value = Field::create_field<TYPE_DOUBLE>(2.5),
+                                 .has_null = false,
+                                 .has_not_null = true}));
+}
+
 template <PrimitiveType T, PredicateType PT>
 void single_column_predicate_test_func(const segment_v2::BloomFilter* bf, Field&& check_value,
                                        bool expect_match) {

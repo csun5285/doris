@@ -17,8 +17,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <roaring/roaring.hh>
+#include <vector>
 
 #include "common/compiler_util.h"
 #include "common/exception.h"
@@ -104,6 +106,7 @@ public:
             // specialization; _values->find() dispatches to it via virtual call.
             _values = hybrid_set;
         }
+        std::vector<T> sorted_values;
         HybridSetBase::IteratorBase* iter = _values->begin();
         while (iter->has_next()) {
             if constexpr (is_string_type(Type)) {
@@ -111,16 +114,28 @@ public:
                 const auto* ref = (const StringRef*)(iter->get_value());
                 T str(ref->data, ref->size);
                 _update_min_max(str);
+                if constexpr (MATCH_ZONE_MAP_BY_VALUE) {
+                    sorted_values.push_back(std::move(str));
+                }
             } else {
                 const T* value = (const T*)(iter->get_value());
                 _update_min_max(*value);
+                if constexpr (MATCH_ZONE_MAP_BY_VALUE) {
+                    sorted_values.push_back(*value);
+                }
             }
             iter->next();
+        }
+        if constexpr (MATCH_ZONE_MAP_BY_VALUE) {
+            std::sort(sorted_values.begin(), sorted_values.end(),
+                      [](const T& lhs, const T& rhs) { return Compare::less(lhs, rhs); });
+            _sorted_values = std::make_shared<const std::vector<T>>(std::move(sorted_values));
         }
     }
     InListPredicateBase(const InListPredicateBase<Type, PT, N>& other, uint32_t col_id)
             : ColumnPredicate(other, col_id) {
         _values = other._values;
+        _sorted_values = other._sorted_values;
         _min_value = other._min_value;
         _max_value = other._max_value;
         DCHECK(_segment_id_to_value_in_dict_flags.empty());
@@ -238,7 +253,17 @@ public:
         if (!zone_map.has_not_null) {
             return false;
         }
-        if constexpr (PT == PredicateType::IN_LIST) {
+        if constexpr (MATCH_ZONE_MAP_BY_VALUE) {
+            // The zone map matches only when one of the values lies in [min, max]. Checking the
+            // smallest and largest value alone keeps every page of a sorted column when the
+            // values are spread out, e.g. a runtime filter on a date key holding every Monday.
+            const auto& zone_map_min = zone_map.min_value.template get<Type>();
+            const auto& zone_map_max = zone_map.max_value.template get<Type>();
+            auto it = std::lower_bound(
+                    _sorted_values->begin(), _sorted_values->end(), zone_map_min,
+                    [](const T& lhs, const T& rhs) { return Compare::less(lhs, rhs); });
+            return it != _sorted_values->end() && Compare::less_equal(*it, zone_map_max);
+        } else if constexpr (PT == PredicateType::IN_LIST) {
             return Compare::less_equal(zone_map.min_value.template get<Type>(), _max_value) &&
                    Compare::greater_equal(zone_map.max_value.template get<Type>(), _min_value);
         } else {
@@ -437,6 +462,10 @@ public:
     }
 
 private:
+    // Floating point values are excluded: Compare::less does not order NaN, which std::sort needs.
+    static constexpr bool MATCH_ZONE_MAP_BY_VALUE =
+            PT == PredicateType::IN_LIST && !std::is_floating_point_v<T>;
+
     uint16_t _evaluate_inner(const IColumn& column, uint16_t* sel, uint16_t size) const override {
         int16_t new_size = 0;
 
@@ -620,6 +649,8 @@ private:
     }
 
     std::shared_ptr<HybridSetBase> _values;
+    // The values in ascending order, built only when MATCH_ZONE_MAP_BY_VALUE. Shared by clones.
+    std::shared_ptr<const std::vector<T>> _sorted_values;
     mutable std::map<std::pair<RowsetId, uint32_t>, std::vector<UInt8>>
             _segment_id_to_value_in_dict_flags;
     T _min_value;

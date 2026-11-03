@@ -146,7 +146,7 @@ private:
     // lookup the ordinal of given key from primary key index
     [[nodiscard]] Status _lookup_ordinal_from_pk_index(const RowCursor& key, bool is_include,
                                                        rowid_t* rowid);
-    [[nodiscard]] Status _seek_and_peek(rowid_t rowid);
+    [[nodiscard]] Status _seek_and_peek(rowid_t rowid, size_t num_rows);
 
     // calculate row ranges that satisfy requested column conditions using various column index
     [[nodiscard]] Status _get_row_ranges_by_column_conditions();
@@ -287,9 +287,9 @@ private:
 
     // Both the key cursor and _seek_block lay out the leading tablet key
     // columns densely, so position i addresses the same column in both.
-    int _compare_short_key_with_seek_block(const RowCursor& key, size_t num_key_cols) {
+    int _compare_short_key_with_seek_block(const RowCursor& key, size_t num_key_cols, size_t row) {
         for (uint32_t i = 0; i < num_key_cols; ++i) {
-            auto ord = key.field(i) <=> (*_seek_block[i])[0];
+            auto ord = key.field(i) <=> (*_seek_block[i])[row];
             if (ord != std::strong_ordering::equal) {
                 return ord == std::strong_ordering::less ? -1 : 1;
             }

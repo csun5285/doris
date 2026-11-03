@@ -299,6 +299,8 @@ Status BetaRowsetReader::get_segment_iterators(RowsetReaderContext* read_context
             DCHECK_EQ(seg_end - seg_start, _segment_row_ranges.size());
             auto local_options = _read_options;
             local_options.row_ranges = _segment_row_ranges[i - seg_start];
+            DORIS_CHECK_EQ(_segment_index_results.size(), _segment_row_ranges.size());
+            local_options.shared_index_result = _segment_index_results[i - seg_start];
             if (local_options.condition_cache_digest) {
                 local_options.condition_cache_digest =
                         local_options.row_ranges.get_digest(local_options.condition_cache_digest);
@@ -321,6 +323,7 @@ Status BetaRowsetReader::init(RowsetReaderContext* read_context, const RowSetSpl
     _read_context->rowset_id = _rowset->rowset_id();
     _segment_offsets = rs_splits.segment_offsets;
     _segment_row_ranges = rs_splits.segment_row_ranges;
+    _segment_index_results = rs_splits.segment_index_results;
     return Status::OK();
 }
 

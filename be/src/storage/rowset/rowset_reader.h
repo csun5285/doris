@@ -42,6 +42,9 @@ struct RowSetSplits {
 
     // RowRanges of each segment.
     std::vector<RowRanges> segment_row_ranges;
+    // Index results of each segment in segment_row_ranges, shared with the other splits that
+    // read other parts of the same segment.
+    std::vector<std::shared_ptr<segment_v2::SharedSegmentIndexResult>> segment_index_results;
 
     RowSetSplits(RowsetReaderSharedPtr rs_reader_)
             : rs_reader(rs_reader_), segment_offsets({0, 0}) {}

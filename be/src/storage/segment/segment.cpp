@@ -776,6 +776,39 @@ Status Segment::load_index(OlapReaderStatistics* stats, const io::IOContext* sou
     });
 }
 
+std::pair<rowid_t, rowid_t> Segment::short_key_block_window(const RowCursor& key, bool is_include,
+                                                            rowid_t upper_bound) const {
+    const ShortKeyIndexDecoder* sk_index_decoder = get_short_key_index();
+    DORIS_CHECK(sk_index_decoder != nullptr);
+
+    std::string index_key;
+    key.encode_key_with_padding(&index_key, _tablet_schema->num_short_key_columns(), is_include);
+
+    ssize_t start_block_id = 0;
+    auto start_iter = sk_index_decoder->lower_bound(index_key);
+    if (start_iter.valid()) {
+        // Because previous block may contain this key, so we should set rowid to
+        // last block's first row.
+        start_block_id = start_iter.ordinal();
+        if (start_block_id > 0) {
+            start_block_id--;
+        }
+    } else {
+        // When we don't find a valid index item, which means all short key is
+        // smaller than input key, this means that this key may exist in the last
+        // row block. so we set the rowid to first row of last row block.
+        start_block_id = sk_index_decoder->num_items() - 1;
+    }
+    rowid_t start = cast_set<rowid_t>(start_block_id) * sk_index_decoder->num_rows_per_block();
+
+    rowid_t end = upper_bound;
+    auto end_iter = sk_index_decoder->upper_bound(index_key);
+    if (end_iter.valid()) {
+        end = cast_set<rowid_t>(end_iter.ordinal()) * sk_index_decoder->num_rows_per_block();
+    }
+    return {start, end};
+}
+
 Status Segment::healthy_status() {
     try {
         if (_load_index_once.has_called()) {

@@ -17,21 +17,30 @@
 
 #include "exec/scan/parallel_scanner_builder.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <list>
+#include <optional>
 
 #include "cloud/cloud_storage_engine.h"
 #include "cloud/cloud_tablet_hotspot.h"
 #include "cloud/config.h"
+#include "common/cast_set.h"
 #include "common/status.h"
 #include "exec/operator/olap_scan_operator.h"
 #include "exec/scan/olap_scanner.h"
 #include "exprs/function/search/search_predicate_collector.h"
 #include "io/io_common.h"
+#include "runtime/exec_env.h"
 #include "runtime/query_context.h"
 #include "storage/index/inverted/reader/collection_statistics.h"
+#include "storage/row_cursor.h"
 #include "storage/rowset/beta_rowset.h"
+#include "storage/segment/segment.h"
 #include "storage/segment/segment_loader.h"
+#include "storage/segment/shared_segment_index_result.h"
 #include "storage/tablet/base_tablet.h"
+#include "util/threadpool.h"
 
 namespace doris {
 
@@ -64,6 +73,92 @@ io::IOContext create_preload_io_context(RuntimeState* state, OlapReaderStatistic
     return io_ctx;
 }
 
+// The bounds of one key range, as SegmentIterator receives them through TabletReader.
+struct ScanKeyBounds {
+    std::optional<RowCursor> lower;
+    bool lower_include;
+    std::optional<RowCursor> upper;
+    bool upper_include;
+};
+
+// Narrows one segment to the rows its tablet's key ranges may hit.
+struct SegmentPruneTask {
+    BetaRowsetSharedPtr rowset;
+    size_t segment_idx;
+    const std::vector<ScanKeyBounds>* key_bounds;
+    RowRanges* ranges;
+    OlapReaderStatistics stats;
+    Status status;
+};
+
+// A scan with a LIMIT and no ORDER BY reads only the first segments it opens, so the caller does
+// not look up the index of every segment first for it. A z-order or cluster-key table is not
+// sorted by the short key, and a full scan has no key range to narrow by.
+bool can_prune_by_short_key(const TabletSchema& tablet_schema,
+                            const std::vector<OlapScanRange*>& key_ranges) {
+    return tablet_schema.sort_type() != SortType::ZORDER &&
+           tablet_schema.cluster_key_uids().empty() &&
+           std::ranges::any_of(key_ranges, [](const OlapScanRange* key_range) {
+               return key_range->has_lower_bound;
+           });
+}
+
+Status build_key_bounds(const TabletSchemaSPtr& tablet_schema,
+                        const std::vector<OlapScanRange*>& key_ranges,
+                        std::vector<ScanKeyBounds>* key_bounds) {
+    for (const auto* key_range : key_ranges) {
+        if (!key_range->has_lower_bound) {
+            continue;
+        }
+        auto& bounds = key_bounds->emplace_back(ScanKeyBounds {
+                .lower = std::nullopt,
+                .lower_include = key_range->begin_include,
+                .upper = std::nullopt,
+                .upper_include = key_range->end_include,
+        });
+        RETURN_IF_ERROR(bounds.lower.emplace().init(tablet_schema, key_range->begin_scan_range));
+        RETURN_IF_ERROR(bounds.upper.emplace().init(tablet_schema, key_range->end_scan_range));
+    }
+    return Status::OK();
+}
+
+// The same search as SegmentIterator::_get_row_ranges_by_keys, stopped at the short key blocks:
+// SegmentIterator still finds the exact rows inside the ranges this leaves.
+Status prune_segment_by_short_key(RuntimeState* state, bool enable_segment_cache,
+                                  SegmentPruneTask* task) {
+    auto io_ctx = create_preload_io_context(state, &task->stats);
+    SegmentCacheHandle segment_cache_handle;
+    RETURN_IF_ERROR(SegmentLoader::instance()->load_segment(
+            task->rowset, task->rowset->segment(task->segment_idx).ref(), &segment_cache_handle,
+            enable_segment_cache, false, &task->stats, &io_ctx));
+    const auto& segment = segment_cache_handle.get_segments()[0];
+    RETURN_IF_ERROR(segment->load_index(&task->stats, &io_ctx));
+    // A merge-on-write segment looks up keys in its primary key index instead.
+    if (task->rowset->tablet_schema()->keys_type() == UNIQUE_KEYS &&
+        segment->get_primary_key_index() != nullptr) {
+        return Status::OK();
+    }
+    const auto num_rows = segment->num_rows();
+    RowRanges key_ranges;
+    for (const auto& bounds : *task->key_bounds) {
+        rowid_t upper_rowid =
+                segment->short_key_block_window(*bounds.upper, !bounds.upper_include, num_rows)
+                        .second;
+        rowid_t lower_rowid = 0;
+        if (upper_rowid > 0) {
+            lower_rowid = segment->short_key_block_window(*bounds.lower, bounds.lower_include,
+                                                          upper_rowid)
+                                  .first;
+        }
+        if (lower_rowid < upper_rowid) {
+            RowRanges::ranges_union(key_ranges, RowRanges::create_single(lower_rowid, upper_rowid),
+                                    &key_ranges);
+        }
+    }
+    *task->ranges = std::move(key_ranges);
+    return Status::OK();
+}
+
 } // namespace
 
 Status ParallelScannerBuilder::build_scanners(std::list<ScannerSPtr>& scanners) {
@@ -87,7 +182,8 @@ Status ParallelScannerBuilder::_build_scanners_by_rowid(std::list<ScannerSPtr>& 
         if (key_ranges.empty()) {
             continue;
         }
-        auto&& [tablet, version] = _tablets[tablet_idx];
+        const auto& tablet = _tablets[tablet_idx].tablet;
+        const auto version = _tablets[tablet_idx].version;
         const auto& scan_range = *_scan_ranges[tablet_idx];
         DCHECK(_all_read_sources.contains(tablet->tablet_id()));
         auto& entire_read_source = _all_read_sources[tablet->tablet_id()];
@@ -103,92 +199,100 @@ Status ParallelScannerBuilder::_build_scanners_by_rowid(std::list<ScannerSPtr>& 
         // to build several parallel scanners, based on segment rows number. All the partitial read sources
         // share the same delete predicates from their corresponding entire read source.
         TabletReadSource partitial_read_source;
+        const auto rows_per_scanner = cast_set<int64_t>(_rows_per_scanner);
         int64_t rows_collected = 0;
+        auto build_scanner = [&]() {
+            scanners.emplace_back(
+                    _build_scanner(tablet, version, key_ranges, scan_range,
+                                   {.rs_splits = std::move(partitial_read_source.rs_splits),
+                                    .delete_predicates = entire_read_source.delete_predicates,
+                                    .delete_bitmap = entire_read_source.delete_bitmap},
+                                   take_initial_file_cache_stats(&_tablet_preload_file_cache_stats,
+                                                                 tablet->tablet_id()),
+                                   tablet_collection_statistics));
+            partitial_read_source = {};
+            rows_collected = 0;
+        };
         for (auto& rs_split : entire_read_source.rs_splits) {
             auto reader = rs_split.rs_reader;
             auto rowset = reader->rowset();
-            const auto rowset_id = rowset->rowset_id();
+            auto& segments_ranges = _all_segments_ranges[rowset->rowset_id()];
 
-            const auto& segments_rows = _all_segments_rows[rowset_id];
-
-            if (rowset->num_rows() == 0) {
-                continue;
-            }
-
+            // The split being built reads the contiguous segments [segment_start, segment_end)
+            // of the rowset; it is empty until a segment with rows to read starts it.
+            std::optional<RowSetSplits> split;
             int64_t segment_start = 0;
-            auto split = RowSetSplits(reader->clone());
+            auto finish_split = [&](int64_t segment_end) {
+                if (!split.has_value()) {
+                    return;
+                }
+                split->segment_offsets = {segment_start, segment_end};
+                DCHECK_EQ(split->segment_offsets.second - split->segment_offsets.first,
+                          split->segment_row_ranges.size());
+                DCHECK_EQ(split->segment_row_ranges.size(), split->segment_index_results.size());
+                partitial_read_source.rs_splits.emplace_back(std::move(*split));
+                split.reset();
+            };
 
-            for (size_t i = 0; i != segments_rows.size(); ++i) {
-                const size_t rows_of_segment = segments_rows[i];
+            for (size_t i = 0; i != segments_ranges.size(); ++i) {
+                auto& segment_ranges = segments_ranges[i];
+                // Empty row ranges read the whole segment, so a segment without rows to read
+                // ends the split instead.
+                if (segment_ranges.is_empty()) {
+                    finish_split(i);
+                    continue;
+                }
+                if (!split.has_value()) {
+                    split.emplace(reader->clone());
+                    segment_start = i;
+                }
+                // Every split that reads a part of this segment shares its index results.
+                auto index_result = std::make_shared<segment_v2::SharedSegmentIndexResult>();
+                int64_t remaining_rows = segment_ranges.count();
                 RowRanges row_ranges;
-                int64_t offset_in_segment = 0;
+                for (size_t range_idx = 0; range_idx < segment_ranges.range_size(); ++range_idx) {
+                    int64_t offset = segment_ranges.get_range_from(range_idx);
+                    const int64_t range_to = segment_ranges.get_range_to(range_idx);
+                    while (offset < range_to) {
+                        int64_t rows_need = rows_per_scanner - rows_collected;
+                        // 0.9: try to avoid splitting the segments into excessively small parts.
+                        if (rows_need >= remaining_rows * 9 / 10) {
+                            rows_need = remaining_rows;
+                        }
+                        const int64_t rows_taken = std::min<int64_t>(rows_need, range_to - offset);
+                        // RowRange stands for range: [From, To), From is inclusive, To is exclusive.
+                        row_ranges.add({offset, offset + rows_taken});
+                        rows_collected += rows_taken;
+                        remaining_rows -= rows_taken;
+                        offset += rows_taken;
 
-                // try to split large segments into RowRanges
-                while (offset_in_segment < rows_of_segment) {
-                    const int64_t remaining_rows = rows_of_segment - offset_in_segment;
-                    auto rows_need = _rows_per_scanner - rows_collected;
-
-                    // 0.9: try to avoid splitting the segments into excessively small parts.
-                    if (rows_need >= remaining_rows * 9 / 10) {
-                        rows_need = remaining_rows;
-                    }
-                    DCHECK_LE(rows_need, remaining_rows);
-
-                    // RowRange stands for range: [From, To), From is inclusive, To is exclusive.
-                    row_ranges.add({offset_in_segment,
-                                    offset_in_segment + static_cast<int64_t>(rows_need)});
-                    rows_collected += rows_need;
-                    offset_in_segment += rows_need;
-
-                    // If collected enough rows, build a new scanner
-                    if (rows_collected >= _rows_per_scanner) {
-                        split.segment_offsets.first = segment_start,
-                        split.segment_offsets.second = i + 1;
-                        split.segment_row_ranges.emplace_back(std::move(row_ranges));
-
-                        DCHECK_EQ(split.segment_offsets.second - split.segment_offsets.first,
-                                  split.segment_row_ranges.size());
-
-                        partitial_read_source.rs_splits.emplace_back(std::move(split));
-
-                        scanners.emplace_back(_build_scanner(
-                                tablet, version, key_ranges, scan_range,
-                                {.rs_splits = std::move(partitial_read_source.rs_splits),
-                                 .delete_predicates = entire_read_source.delete_predicates,
-                                 .delete_bitmap = entire_read_source.delete_bitmap},
-                                take_initial_file_cache_stats(&_tablet_preload_file_cache_stats,
-                                                              tablet->tablet_id()),
-                                tablet_collection_statistics));
-
-                        partitial_read_source = {};
-                        split = RowSetSplits(reader->clone());
-                        row_ranges = RowRanges();
-
-                        segment_start = offset_in_segment < rows_of_segment ? i : i + 1;
-                        rows_collected = 0;
+                        // If collected enough rows, build a new scanner
+                        if (rows_collected >= rows_per_scanner) {
+                            split->segment_row_ranges.emplace_back(std::move(row_ranges));
+                            split->segment_index_results.emplace_back(index_result);
+                            row_ranges = RowRanges();
+                            finish_split(i + 1);
+                            build_scanner();
+                            if (remaining_rows > 0) {
+                                split.emplace(reader->clone());
+                                segment_start = i;
+                            }
+                        }
                     }
                 }
+                DCHECK_EQ(remaining_rows, 0);
 
                 // The non-empty `row_ranges` means there are some rows left in this segment not added into `split`.
                 if (!row_ranges.is_empty()) {
                     DCHECK_GT(rows_collected, 0);
-                    DCHECK_EQ(row_ranges.to(), rows_of_segment);
-                    split.segment_row_ranges.emplace_back(std::move(row_ranges));
+                    split->segment_row_ranges.emplace_back(std::move(row_ranges));
+                    split->segment_index_results.emplace_back(index_result);
                 }
             }
-
-            DCHECK_LE(rows_collected, _rows_per_scanner);
-            if (rows_collected > 0) {
-                split.segment_offsets.first = segment_start;
-                split.segment_offsets.second = segments_rows.size();
-                DCHECK_GT(split.segment_offsets.second, split.segment_offsets.first);
-                DCHECK_EQ(split.segment_row_ranges.size(),
-                          split.segment_offsets.second - split.segment_offsets.first);
-                partitial_read_source.rs_splits.emplace_back(std::move(split));
-            }
+            finish_split(segments_ranges.size());
         } // end `for (auto& rowset : rowsets)`
 
-        DCHECK_LE(rows_collected, _rows_per_scanner);
+        DCHECK_LE(rows_collected, rows_per_scanner);
         if (rows_collected > 0) {
             DCHECK_GT(partitial_read_source.rs_splits.size(), 0);
 #ifndef NDEBUG
@@ -199,14 +303,7 @@ Status ParallelScannerBuilder::_build_scanners_by_rowid(std::list<ScannerSPtr>& 
                           split.segment_offsets.second - split.segment_offsets.first);
             }
 #endif
-            scanners.emplace_back(
-                    _build_scanner(tablet, version, key_ranges, scan_range,
-                                   {.rs_splits = std::move(partitial_read_source.rs_splits),
-                                    .delete_predicates = entire_read_source.delete_predicates,
-                                    .delete_bitmap = entire_read_source.delete_bitmap},
-                                   take_initial_file_cache_stats(&_tablet_preload_file_cache_stats,
-                                                                 tablet->tablet_id()),
-                                   tablet_collection_statistics));
+            build_scanner();
         }
     }
 
@@ -249,7 +346,12 @@ Status ParallelScannerBuilder::_build_scanners_by_per_segment(std::list<ScannerS
             }
 
             // Build scanners for [i, i+1) segment range, without row-range slicing.
+            auto& segments_ranges = _all_segments_ranges[rowset_id];
             for (int64_t i = 0; i < rowset->num_segments(); ++i) {
+                // The key ranges hit no row of this segment.
+                if (segments_ranges[i].is_empty()) {
+                    continue;
+                }
                 RowSetSplits split(reader->clone());
                 split.segment_offsets.first = i;
                 split.segment_offsets.second = i + 1;
@@ -306,13 +408,83 @@ Status ParallelScannerBuilder::_load() {
             for (int64_t i = 0; i != segment_count; i++) {
                 _all_segments_rows[rowset_id].emplace_back(segment_rows[i]);
             }
-            _total_rows += rowset->num_rows();
+        }
+    }
+
+    RETURN_IF_ERROR(_init_segments_ranges());
+    for (auto& [rowset_id, segments_ranges] : _all_segments_ranges) {
+        for (auto& ranges : segments_ranges) {
+            _total_rows += ranges.count();
         }
     }
 
     _rows_per_scanner = _total_rows / _max_scanners_count;
     _rows_per_scanner = std::max<size_t>(_rows_per_scanner, _min_rows_per_scanner);
 
+    return Status::OK();
+}
+
+Status ParallelScannerBuilder::_init_segments_ranges() {
+    // Tasks point into these, so neither changes size once the tasks are created.
+    std::list<std::vector<ScanKeyBounds>> tablets_key_bounds;
+    std::list<SegmentPruneTask> tasks;
+
+    for (size_t idx = 0; idx < _tablets.size(); ++idx) {
+        const auto& key_ranges = *_tablet_key_ranges[idx];
+        if (key_ranges.empty()) {
+            continue;
+        }
+        const auto& tablet = _tablets[idx].tablet;
+        const std::vector<ScanKeyBounds>* key_bounds = nullptr;
+        if (_limit < 0 && can_prune_by_short_key(*tablet->tablet_schema(), key_ranges)) {
+            auto& bounds = tablets_key_bounds.emplace_back();
+            RETURN_IF_ERROR(build_key_bounds(tablet->tablet_schema(), key_ranges, &bounds));
+            key_bounds = &bounds;
+        }
+        for (const auto& rs_split : _all_read_sources[tablet->tablet_id()].rs_splits) {
+            auto rowset = std::dynamic_pointer_cast<BetaRowset>(rs_split.rs_reader->rowset());
+            const auto& segments_rows = _all_segments_rows[rowset->rowset_id()];
+            auto& segments_ranges = _all_segments_ranges[rowset->rowset_id()];
+            segments_ranges.resize(segments_rows.size());
+            for (size_t i = 0; i < segments_rows.size(); ++i) {
+                segments_ranges[i] = RowRanges::create_single(segments_rows[i]);
+                if (key_bounds != nullptr && segments_rows[i] > 0) {
+                    tasks.push_back(SegmentPruneTask {.rowset = rowset,
+                                                      .segment_idx = i,
+                                                      .key_bounds = key_bounds,
+                                                      .ranges = &segments_ranges[i],
+                                                      .stats = {},
+                                                      .status = Status::OK()});
+                }
+            }
+        }
+    }
+    if (tasks.empty()) {
+        return Status::OK();
+    }
+
+    bool enable_segment_cache = _state->query_options().__isset.enable_segment_cache
+                                        ? _state->query_options().enable_segment_cache
+                                        : true;
+    auto token = ExecEnv::GetInstance()->segment_prefetch_thread_pool()->new_token(
+            ThreadPool::ExecutionMode::CONCURRENT, cast_set<int>(_max_scanners_count));
+    Status submit_status;
+    for (auto& task : tasks) {
+        submit_status = token->submit_func([this, enable_segment_cache, &task] {
+            task.status = prune_segment_by_short_key(_state, enable_segment_cache, &task);
+        });
+        if (!submit_status.ok()) {
+            break;
+        }
+    }
+    // The submitted tasks reference `tasks`, so wait for them before any return.
+    token->wait();
+    RETURN_IF_ERROR(submit_status);
+    for (auto& task : tasks) {
+        RETURN_IF_ERROR(task.status);
+        _tablet_preload_file_cache_stats[task.rowset->rowset_meta()->tablet_id()].merge_from(
+                task.stats.file_cache_stats);
+    }
     return Status::OK();
 }
 

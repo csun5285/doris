@@ -82,6 +82,11 @@ public:
 private:
     Status _load();
 
+    // Fills _all_segments_ranges: the rows of each segment that the scan's key ranges may hit,
+    // found from the short key index alone, so that scanners split only those rows and a segment
+    // the key ranges miss gets no scanner. A segment that is not narrowed keeps all its rows.
+    Status _init_segments_ranges();
+
     Status _build_scanners_by_rowid(std::list<ScannerSPtr>& scanners);
 
     // Build scanners so that each segment is handled by its own scanner.
@@ -109,6 +114,7 @@ private:
     size_t _rows_per_scanner {_min_rows_per_scanner};
 
     std::map<RowsetId, std::vector<size_t>> _all_segments_rows;
+    std::map<RowsetId, std::vector<RowRanges>> _all_segments_ranges;
     std::unordered_map<int64_t, io::FileCacheStatistics> _tablet_preload_file_cache_stats;
 
     // Force building one scanner per segment when true.
