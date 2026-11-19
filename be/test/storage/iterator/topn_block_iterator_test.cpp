@@ -275,8 +275,10 @@ TEST(TopNBlockIteratorTest, RemovesTheDroppedRowsOnceTheyOutnumberTheKeptOnes) {
 // a virtual column: it gets a column of the virtual column's type first.
 TEST(TopNBlockIteratorTest, ReadsVirtualColumnsThroughAMerge) {
     auto schema = make_schema(/*virtual_column=*/true);
+    // The merge times its reads into `stats` until the read ends.
+    OlapReaderStatistics stats;
     std::vector<TopNBlockIterator::RowsetOpener> openers;
-    openers.push_back([schema](RowwiseIteratorUPtr* rows) {
+    openers.push_back([schema, &stats](RowwiseIteratorUPtr* rows) {
         std::vector<RowwiseIteratorUPtr> segments;
         segments.push_back(
                 std::make_unique<RowsetUtIterator>(*schema, Batches {{{1, 10, 100}, {3, 30, 300}}},
@@ -286,7 +288,6 @@ TEST(TopNBlockIteratorTest, ReadsVirtualColumnsThroughAMerge) {
                                                    Status::EndOfFile("no more batches"), nullptr));
         *rows = std::make_unique<VHeapMergeIterator>(std::move(segments), schema,
                                                      std::vector<uint32_t> {0}, false);
-        OlapReaderStatistics stats;
         StorageReadOptions opts(stats);
         opts.block_row_max = 4064;
         return (*rows)->init(opts);
