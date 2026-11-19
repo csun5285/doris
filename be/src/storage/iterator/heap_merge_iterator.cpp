@@ -18,6 +18,7 @@
 #include "storage/iterator/heap_merge_iterator.h"
 
 #include <algorithm>
+#include <numeric>
 #include <utility>
 
 #include "common/cast_set.h"
@@ -32,11 +33,29 @@
 #include "storage/tablet/tablet_schema.h"
 
 namespace doris {
-using namespace ErrorCode;
+
+namespace {
+
+std::vector<uint32_t> leading_columns(size_t count) {
+    std::vector<uint32_t> columns(count);
+    std::iota(columns.begin(), columns.end(), 0);
+    return columns;
+}
+
+} // namespace
 
 VHeapMergeIterator::VHeapMergeIterator(std::vector<RowwiseIteratorUPtr> children,
                                        ReadSchemaSPtr read_schema)
-        : _read_schema(std::move(read_schema)), _num_key_columns(_read_schema->num_key_columns()) {
+        : VHeapMergeIterator(std::move(children), read_schema,
+                             leading_columns(read_schema->num_key_columns()), false) {}
+
+VHeapMergeIterator::VHeapMergeIterator(std::vector<RowwiseIteratorUPtr> children,
+                                       ReadSchemaSPtr read_schema,
+                                       std::vector<uint32_t> sort_columns, bool descending)
+        : _read_schema(std::move(read_schema)),
+          _sort_columns(std::move(sort_columns)),
+          _descending(descending) {
+    DORIS_CHECK(!_sort_columns.empty());
     _children.reserve(children.size());
     for (auto& child : children) {
         _children.emplace_back();
@@ -82,7 +101,7 @@ Status VHeapMergeIterator::_read_next_block(Child& child, bool* eof) {
     do {
         child.block.clear_column_data();
         Status st = child.iter->next_batch(&child.block);
-        if (st.is<END_OF_FILE>()) {
+        if (st.is<ErrorCode::END_OF_FILE>()) {
             DCHECK_EQ(child.block.rows(), 0);
             *eof = true;
             return Status::OK();
@@ -101,15 +120,15 @@ Status VHeapMergeIterator::_read_next_block(Child& child, bool* eof) {
 bool VHeapMergeIterator::_less_than_current_row(uint32_t child, size_t row, uint32_t other) const {
     const Block& block = _children[child].block;
     const Child& other_child = _children[other];
-    for (size_t ordinal = 0; ordinal < _num_key_columns; ++ordinal) {
-        // NULLs first (-1).
+    for (uint32_t ordinal : _sort_columns) {
+        // NULLs are the smallest (-1): first when ascending, last when descending.
         const int r = block.get_by_position(ordinal).column->compare_at(
                 row, other_child.pos, *other_child.block.get_by_position(ordinal).column, -1);
         if (r != 0) {
-            return r < 0;
+            return _descending ? r > 0 : r < 0;
         }
     }
-    // The same key: the newer child first.
+    // Equal on every sort column: the newer child first.
     return child > other;
 }
 

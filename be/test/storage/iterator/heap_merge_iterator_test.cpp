@@ -143,6 +143,33 @@ std::vector<std::vector<Row>> merge(const ReadSchemaSPtr& schema,
     return blocks;
 }
 
+// Merge `children` by `sort_columns`, descending when `descending`, and return every row.
+std::vector<Row> merge_by(const ReadSchemaSPtr& schema,
+                          const std::vector<std::vector<Batch>>& children,
+                          std::vector<uint32_t> sort_columns, bool descending) {
+    std::vector<RowwiseIteratorUPtr> inputs;
+    for (const auto& batches : children) {
+        inputs.push_back(std::make_unique<BatchesUtIterator>(*schema, batches));
+    }
+    VHeapMergeIterator iter(std::move(inputs), schema, std::move(sort_columns), descending);
+    OlapReaderStatistics stats;
+    StorageReadOptions opts(stats);
+    opts.block_row_max = 4064;
+    Status st = iter.init(opts);
+    EXPECT_TRUE(st.ok()) << st;
+    std::vector<Row> rows;
+    while (st.ok()) {
+        Block block = schema->create_read_block();
+        st = iter.next_batch(&block);
+        for (size_t r = 0; st.ok() && r < block.rows(); ++r) {
+            rows.push_back({block.get_by_position(0).column->get_int(r),
+                            block.get_by_position(1).column->get_int(r)});
+        }
+    }
+    EXPECT_TRUE(st.is<ErrorCode::END_OF_FILE>()) << st;
+    return rows;
+}
+
 std::vector<Row> flatten(const std::vector<std::vector<Row>>& blocks) {
     std::vector<Row> rows;
     for (const auto& block : blocks) {
@@ -379,6 +406,24 @@ TEST(HeapMergeIteratorTest, StopsOnceTheQueryIsCancelled) {
         st = iter.next_batch(&next);
     }
     EXPECT_TRUE(st.is<ErrorCode::CANCELLED>()) << st;
+}
+
+// The merge can go by other columns than the key, and descending: here by v, the second column.
+// Rows equal on v come newer child first.
+TEST(HeapMergeIteratorTest, MergesByTheGivenColumnsAscendingOrDescending) {
+    auto schema = make_schema();
+    const std::vector<std::vector<Batch>> descending = {
+            {{{1, 30}, {2, 20}}, {{3, 10}}},
+            {{{4, 25}, {5, 20}}},
+    };
+    EXPECT_EQ(merge_by(schema, descending, {1}, /*descending=*/true),
+              (std::vector<Row> {{1, 30}, {4, 25}, {5, 20}, {2, 20}, {3, 10}}));
+    const std::vector<std::vector<Batch>> ascending = {
+            {{{3, 10}, {2, 20}}},
+            {{{5, 20}, {4, 25}}},
+    };
+    EXPECT_EQ(merge_by(schema, ascending, {1}, /*descending=*/false),
+              (std::vector<Row> {{3, 10}, {5, 20}, {2, 20}, {4, 25}}));
 }
 
 } // namespace doris

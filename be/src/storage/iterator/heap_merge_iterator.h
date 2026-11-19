@@ -32,13 +32,17 @@ namespace doris {
 class RuntimeProfile;
 class RuntimeState;
 
-// Merges key-ordered children into one key-ordered stream; rows of the same key come newer child
-// first. An output Block may end inside the rows of a key, and a child's Block that sorts wholly
-// before the other children is passed on whole instead of copied. It does not init() the
-// children.
+// Merges sorted children into one sorted stream, by the key columns or by given columns, ascending
+// or descending; rows that compare equal come newer child first. An output Block may end inside
+// the rows of a key, and a child's Block that sorts wholly before the other children is passed on
+// whole instead of copied. It does not init() the children.
 class VHeapMergeIterator final : public RowwiseIterator {
 public:
+    // Merges by the key columns, which lead the read schema, ascending.
     VHeapMergeIterator(std::vector<RowwiseIteratorUPtr> children, ReadSchemaSPtr read_schema);
+    // Merges by `sort_columns`, positions in the read Blocks, descending when `descending`.
+    VHeapMergeIterator(std::vector<RowwiseIteratorUPtr> children, ReadSchemaSPtr read_schema,
+                       std::vector<uint32_t> sort_columns, bool descending);
 
     ~VHeapMergeIterator() override = default;
 
@@ -71,8 +75,8 @@ private:
     Status _push_back_to_heap(uint32_t child);
 
     // Whether row `row` of child `child` sorts before the current row of child `other`; both are
-    // indexes into `_children`. Rows with the same key go in child order, the newer child (the
-    // higher index) first.
+    // indexes into `_children`. Rows equal on the sort columns go in child order, the newer child
+    // (the higher index) first.
     bool _less_than_current_row(uint32_t child, size_t row, uint32_t other) const;
     // How many rows of child `child`, which is out of the heap, from its current row on sort
     // before the current row of the next child, `limit` at most. The heap must not be empty.
@@ -97,8 +101,9 @@ private:
 
     std::vector<Child> _children;
     const ReadSchemaSPtr _read_schema;
-    // The key columns lead the read schema.
-    const size_t _num_key_columns;
+    // The columns the rows are compared by, in order.
+    const std::vector<uint32_t> _sort_columns;
+    const bool _descending;
 
     // From init():
     size_t _block_row_max = 0;
